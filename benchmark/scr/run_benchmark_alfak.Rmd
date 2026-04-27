@@ -1,0 +1,473 @@
+---
+title: "ALFA-K Benchmark"
+subtitle: "Single-round benchmark for nn_prior comparison"
+output:
+  html_document:
+    self_contained: true
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: true
+    theme: flatly
+params:
+  patient_subset: !r character(0)
+  minobs_values: [5, 10, 20]
+  pm_values: [5e-05]
+  parameter_labels: ["nn_prior_empirical_censored", "nn_prior_empirical_censored_weighted", "nn_prior_empirical_two_shell", "nn_prior_none", "nn_prior_empirical", "nn_prior_cohort_transition"]
+  n_cores: 9
+  nboot: 45
+  n0: 100000
+  nb: 10000000
+  benchmark_seed: 31415926
+  correct_efflux: true
+  nn_prior_grid_n: 81
+  nn_prior_fit_subset: "hybrid"
+  nn_prior_zero_exposure_quantile: 0.10
+  nn_prior_zero_weight_scale: 0.50
+  nn_prior_zero_weight_cap_ratio: !r NULL
+  nn_prior_zero_birth_fallback_weight: !r NULL
+  nn_prior_zero_birth_child_floor: 0.25
+  nn_prior_zero_birth_child_shape: 1
+  nn_prior_zero_birth_replicate_floor: 0.50
+  nn_prior_zero_birth_replicate_shape: 1
+  nn_prior_two_step_support: "rescue"
+  nn_prior_two_step_support_min: 0.15
+  nn_prior_two_step_cap_floor: 0.30
+  cohort_transition_version: "contextual"
+  include_posterior_comparison: true
+  top_shift_n: 15
+  run_nn_identifiability: true
+  run_nn_stability: true
+  run_nn_holdout: false
+  nn_holdout_repeats: 5
+  nn_holdout_fraction: 0.25
+  nn_holdout_min_count: 2
+  nn_holdout_seed: 271828
+  run_nn_simulation: false
+  nn_simulation_n: 50
+  nn_simulation_seed: 161803
+  nn_simulation_scenarios: ["sparse_zero_heavy", "moderate_observed", "two_step_supported"]
+  force_refit: false
+  rebuild_inputs: false
+  run_benchmark: true
+  render_figures: true
+  focus_pids: ["P2", "P8", "P19"]
+  focus_pid: ""
+  focus_minobs: 20
+  focus_pm: 5e-05
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = FALSE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 10,
+  fig.height = 6,
+  dpi = 150
+)
+
+resolve_repo_dir_light <- function() {
+  candidates <- unique(c(
+    tryCatch(dirname(knitr::current_input(dir = TRUE)), error = function(e) NA_character_),
+    getwd()
+  ))
+
+  for (cand in candidates) {
+    if (is.na(cand) || !nzchar(cand)) {
+      next
+    }
+    cand_norm <- normalizePath(cand, winslash = "/", mustWork = FALSE)
+    if (file.exists(file.path(cand_norm, "DESCRIPTION")) &&
+        dir.exists(file.path(cand_norm, "benchmark"))) {
+      return(cand_norm)
+    }
+    parent2 <- normalizePath(file.path(cand_norm, "..", ".."), winslash = "/", mustWork = FALSE)
+    if (file.exists(file.path(parent2, "DESCRIPTION")) &&
+        dir.exists(file.path(parent2, "benchmark"))) {
+      return(parent2)
+    }
+  }
+
+  stop("Could not locate the alfakR repository root from the current knitting context.")
+}
+
+repo_dir <- resolve_repo_dir_light()
+sys.source(file.path(repo_dir, "benchmark", "scr", "run_benchmark_pipeline.R"), envir = knitr::knit_global())
+benchmark_run <- run_benchmark_pipeline_entry(params = params, repo_dir = repo_dir)
+
+ctx <- benchmark_run$ctx
+focus_results <- benchmark_run$focus_results
+```
+
+```{r html-table-style, results='asis'}
+if (knitr::is_html_output()) {
+  cat(
+    "<style>\n",
+    "table.three-line-table {\n",
+    "  width: auto;\n",
+    "  margin-left: 0;\n",
+    "  border-collapse: collapse;\n",
+    "  border-top: 2px solid #222 !important;\n",
+    "  border-bottom: 2px solid #222 !important;\n",
+    "}\n",
+    "table.three-line-table thead th {\n",
+    "  border-bottom: 1px solid #222 !important;\n",
+    "}\n",
+    "table.three-line-table th,\n",
+    "table.three-line-table td {\n",
+    "  border-left: none !important;\n",
+    "  border-right: none !important;\n",
+    "  padding: 0.35em 0.65em;\n",
+    "  background: transparent !important;\n",
+    "}\n",
+    ".report-image-grid {\n",
+    "  display: grid;\n",
+    "  gap: 1rem;\n",
+    "  margin: 0.5rem 0 1rem 0;\n",
+    "}\n",
+    ".report-image-grid-item {\n",
+    "  border: 1px solid #e5e7eb;\n",
+    "  padding: 0.75rem;\n",
+    "  background: #fff;\n",
+    "}\n",
+    ".report-image-grid-title {\n",
+    "  font-weight: 600;\n",
+    "  margin-bottom: 0.5rem;\n",
+    "  text-align: center;\n",
+    "}\n",
+    ".report-image-grid-missing {\n",
+    "  min-height: 120px;\n",
+    "  display: flex;\n",
+    "  align-items: center;\n",
+    "  justify-content: center;\n",
+    "  color: #6b7280;\n",
+    "  background: #f9fafb;\n",
+    "}\n",
+    "</style>\n",
+    sep = ""
+  )
+}
+```
+
+## Selection Summary
+
+```{r retained-sample-tables, results='asis'}
+all_sample_fit_index_tbl <- benchmark_run$parameter_results_all_tbl
+if (nrow(all_sample_fit_index_tbl)) {
+  for (parameter_label_name in ctx$parameter_levels_use) {
+    sub_tbl <- all_sample_fit_index_tbl %>%
+      dplyr::filter(parameter_label == parameter_label_name) %>%
+      dplyr::mutate(
+        patient_id = as.character(patient_id),
+        patient_sort_num = suppressWarnings(as.integer(gsub("^\\D+", "", patient_id)))
+      ) %>%
+      dplyr::arrange(
+        dplyr::if_else(is.na(patient_sort_num), Inf, patient_sort_num),
+        patient_id,
+        minobs,
+        pm
+      ) %>%
+      dplyr::transmute(
+        patient_id,
+        minobs,
+        pm = format(pm, scientific = TRUE, trim = TRUE),
+        nn_prior,
+        status,
+        cached,
+        xval_r2,
+        xval_cor,
+        xval_rmse,
+        xval_mae,
+        n_xval,
+        warning_count,
+        elapsed_sec,
+        error_message
+      )
+    emit_report_table(
+      sub_tbl,
+      caption = paste("Per-method full fit index (all samples and all minobs):", parameter_label_name)
+    )
+  }
+} else {
+  emit_report_table(empty_note_tbl("No fit results are available yet."), caption = "Per-method full fit index")
+}
+
+retained_patient_tbl <- benchmark_run$retained_patient_tbl
+if (nrow(retained_patient_tbl)) {
+  emit_report_table(retained_patient_tbl, caption = "Common samples retained by all selected methods; only these are shown in Samplewise Results")
+} else {
+  emit_report_table(empty_note_tbl("No common retained samples are available yet."), caption = "Common samples retained by all selected methods")
+}
+```
+
+## NN Identifiability
+
+```{r nn-identifiability, results='asis'}
+nn_identifiability_summary_tbl <- benchmark_run$nn_identifiability_summary_tbl
+if (nrow(nn_identifiability_summary_tbl)) {
+  emit_report_table(
+    nn_identifiability_summary_tbl %>%
+      dplyr::mutate(pm = format(pm, scientific = TRUE, trim = TRUE)) %>%
+      dplyr::select(
+        parameter_label,
+        patient_id,
+        minobs,
+        pm,
+        nn_identifiability_class,
+        observed_anchor_rate,
+        median_n_observed_children,
+        median_zero_weight_ratio,
+        median_zero_effective_mass,
+        prior_source_observed_replicate_frac,
+        prior_source_sample_pooled_frac,
+        prior_source_none_frac,
+        median_n_zero_children_with_two_step_support,
+        median_map_delta_lower_boundary_rate
+      ),
+    caption = "NN identifiability summary"
+  )
+} else {
+  emit_report_table(empty_note_tbl("No NN identifiability diagnostics are available."), caption = "NN identifiability summary")
+}
+
+nn_diagnostic_figure_artifact_tbl <- benchmark_run$nn_diagnostic_figure_artifact_tbl
+if (nrow(nn_diagnostic_figure_artifact_tbl)) {
+  emit_report_image_grid(
+    nn_diagnostic_figure_artifact_tbl %>%
+      dplyr::filter(artifact %in% c("nn_identifiability_class", "nn_prior_source_fraction")) %>%
+      dplyr::transmute(
+        title = title,
+        path = png_path,
+        alt = title
+      ),
+    cols = 1L
+  )
+}
+```
+
+## NN Bootstrap Stability
+
+```{r nn-stability, results='asis'}
+nn_stability_case_tbl <- benchmark_run$nn_stability_case_tbl
+nn_stability_pairwise_tbl <- benchmark_run$nn_stability_weighted_empirical_tbl
+if (nrow(nn_stability_case_tbl)) {
+  emit_report_table(
+    nn_stability_case_tbl %>%
+      dplyr::mutate(pm = format(pm, scientific = TRUE, trim = TRUE)) %>%
+      dplyr::select(
+        parameter_label,
+        patient_id,
+        minobs,
+        pm,
+        n_nn_children,
+        median_finite_fraction,
+        median_nn_bootstrap_sd,
+        median_nn_bootstrap_iqr
+      ),
+    caption = "NN bootstrap stability by case"
+  )
+} else {
+  emit_report_table(empty_note_tbl("No NN bootstrap stability diagnostics are available."), caption = "NN bootstrap stability by case")
+}
+
+nn_pairwise_availability_tbl <- tibble::tribble(
+  ~comparison_label,
+  "weighted vs empirical",
+  "empirical_two_shell vs empirical",
+  "weighted vs empirical_two_shell"
+) %>%
+  dplyr::left_join(
+    nn_stability_pairwise_tbl %>%
+      dplyr::count(comparison_label, name = "n_nn_children_compared"),
+    by = "comparison_label"
+  ) %>%
+  dplyr::mutate(
+    n_nn_children_compared = dplyr::coalesce(n_nn_children_compared, 0L),
+    comparison_available = dplyr::if_else(n_nn_children_compared > 0L, "yes", "no")
+  )
+emit_report_table(
+  nn_pairwise_availability_tbl,
+  caption = "Pairwise NN comparison availability"
+)
+
+if (nrow(nn_diagnostic_figure_artifact_tbl)) {
+  emit_report_image_grid(
+    nn_diagnostic_figure_artifact_tbl %>%
+      dplyr::filter(artifact %in% c("nn_stability_by_method", "weighted_empirical_nn_sd_ratio")) %>%
+      dplyr::transmute(
+        title = title,
+        path = png_path,
+        alt = title
+      ),
+    cols = 2L
+  )
+}
+```
+
+## NN Holdout And Simulation
+
+```{r nn-holdout-simulation, results='asis'}
+nn_holdout_summary_tbl <- benchmark_run$nn_holdout_summary_tbl
+if (nrow(nn_holdout_summary_tbl)) {
+  emit_report_table(nn_holdout_summary_tbl, caption = "Observed-NN holdout summary")
+} else {
+  emit_report_table(empty_note_tbl("Observed-NN holdout was not run or produced no predictions."), caption = "Observed-NN holdout summary")
+}
+
+nn_simulation_summary_tbl <- benchmark_run$nn_simulation_summary_tbl
+if (nrow(nn_simulation_summary_tbl)) {
+  emit_report_table(nn_simulation_summary_tbl, caption = "NN simulation truth-calibration summary")
+} else {
+  emit_report_table(empty_note_tbl("NN simulation calibration was not run or produced no estimates."), caption = "NN simulation truth-calibration summary")
+}
+```
+
+## All-Sample Landscape Comparison
+
+```{r retained-landscape-comparison, results='asis'}
+all_sample_landscape_artifact_tbl <- benchmark_run$all_sample_landscape_artifact_tbl
+if (nrow(all_sample_landscape_artifact_tbl)) {
+  emit_report_image_grid(
+    all_sample_landscape_artifact_tbl %>%
+      dplyr::transmute(
+        title = title,
+        path = png_path,
+        alt = paste("All-sample landscape distribution for", title)
+      ),
+    cols = 2L
+  )
+} else {
+  cat("No all-sample landscape distribution plots are available yet.\n")
+}
+```
+
+## All-Sample Cross-Validation
+
+```{r retained-xval-scatter, results='asis'}
+all_sample_xval_artifact_tbl <- benchmark_run$all_sample_xval_artifact_tbl
+if (nrow(all_sample_xval_artifact_tbl)) {
+  emit_report_image_grid(
+    all_sample_xval_artifact_tbl %>%
+      dplyr::transmute(
+        title = title,
+        path = png_path,
+        alt = paste("All-sample cross-validation for", title)
+      ),
+    cols = 1L
+  )
+} else {
+  cat("No all-sample cross-validation plots are available yet.\n")
+}
+```
+
+## All-Sample UMAP
+
+```{r all-sample-umap-grid, results='asis'}
+all_sample_umap_artifact_tbl <- benchmark_run$all_sample_umap_artifact_tbl
+if (nrow(all_sample_umap_artifact_tbl)) {
+  emit_report_image_grid(
+    all_sample_umap_artifact_tbl %>%
+      dplyr::transmute(
+        title = title,
+        path = png_path,
+        alt = paste("All-sample UMAP for", title)
+      ),
+    cols = 4L
+  )
+} else {
+  cat("No all-sample UMAP plots are available yet.\n")
+}
+```
+
+## All-Sample Beneficial Karyotype Heatmaps
+
+```{r parameter-beneficial-artifacts-render, results='asis'}
+parameter_beneficial_artifact_tbl <- benchmark_run$parameter_beneficial_artifact_tbl
+if (nrow(parameter_beneficial_artifact_tbl)) {
+  emit_report_table(
+    parameter_beneficial_artifact_tbl %>%
+      dplyr::select(parameter_label, n_patients),
+    caption = "All-sample beneficial-heatmap coverage by parameter label"
+  )
+  emit_report_image_grid(
+    parameter_beneficial_artifact_tbl %>%
+      dplyr::transmute(
+        title = parameter_label,
+        path = heatmap_png_path,
+        alt = paste("All-sample beneficial heatmap for", parameter_label)
+      ),
+    cols = 2L
+  )
+} else {
+  emit_report_table(empty_note_tbl("No all-sample beneficial heatmaps are available yet."), caption = "All-sample beneficial-heatmap coverage")
+}
+```
+
+## Samplewise Results
+
+```{r focus-sections, results='asis'}
+if (!length(focus_results)) {
+  cat("No retained samples are available for samplewise display.\n")
+} else {
+  for (focus_pid in names(focus_results)) {
+    focus_res <- focus_results[[focus_pid]]
+    cat("### ", focus_pid, "\n\n", sep = "")
+
+    if (nrow(focus_res$focus_fit_index_tbl)) {
+      emit_report_table(
+        focus_res$focus_fit_index_tbl %>%
+          dplyr::transmute(
+            parameter_label,
+            minobs,
+            pm,
+            nn_prior,
+            status,
+            xval_r2,
+            elapsed_sec,
+            cached
+          ),
+        caption = paste("Retained fit index:", focus_pid)
+      )
+    } else {
+      emit_report_table(empty_note_tbl("No retained fit index is available for this sample."), caption = paste("Retained fit index:", focus_pid))
+    }
+
+    if (nrow(focus_res$focus_landscape_summary_tbl)) {
+      emit_report_table(focus_res$focus_landscape_summary_tbl, caption = paste("Landscape summary:", focus_pid))
+    } else {
+      emit_report_table(empty_note_tbl("No landscape summary is available for this sample."), caption = paste("Landscape summary:", focus_pid))
+    }
+
+    if (nrow(focus_res$focus_umap_artifact_tbl)) {
+      emit_report_image_grid(
+        focus_res$focus_umap_artifact_tbl %>%
+          dplyr::transmute(
+            title = parameter_label,
+            path = png_path,
+            alt = paste("Focus patient UMAP for", focus_pid, parameter_label)
+          ),
+        cols = 2L
+      )
+    }
+
+    if (nrow(focus_res$focus_density_artifact_tbl)) {
+      emit_report_image_grid(
+        focus_res$focus_density_artifact_tbl %>%
+          dplyr::transmute(
+            title = parameter_label,
+            path = png_path,
+            alt = paste("Landscape density for", focus_pid, parameter_label)
+          ),
+        cols = 2L
+      )
+    }
+    emit_report_image(focus_res$focus_figure_paths$parity, alt = paste("Landscape parity for", focus_pid))
+    emit_report_image(focus_res$focus_figure_paths$beneficial_heatmap, alt = paste("Beneficial heatmap for", focus_pid))
+    emit_report_image(focus_res$focus_figure_paths$state_fitness, alt = paste("State fitness decomposition for", focus_pid))
+    emit_report_image(focus_res$focus_figure_paths$edge_delta, alt = paste("Edge delta decomposition for", focus_pid))
+    emit_report_image(focus_res$focus_figure_paths$edge_beneficial, alt = paste("Edge beneficial decomposition for", focus_pid))
+  }
+}
+```
