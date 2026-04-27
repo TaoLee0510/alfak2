@@ -1,4 +1,4 @@
 library(testthat)
-library(alfakR)
+library(alfak2)
 
-test_check("alfakR")
+test_check("alfak2")
