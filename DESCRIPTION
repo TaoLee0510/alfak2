@@ -1,11 +1,13 @@
-Package: alfakR
+Package: alfak2
 Title: Adaptive Local Fitness landscapes for Aneuploid Karotypes 
-Version: 0.0.1.100
+Version: 0.0.2.000
 Authors@R: 
     person(given = "Richard", family = "Beck",
            email = "richard.beck@moffitt.org", role = c("aut", "cre"))
-Author: Richard Beck
-Maintainer: Richard Beck <richard.beck@moffitt.org>
+    person(given = "Tao", family = "Li",
+           email = "Tao.Li2@moffitt.org", role = c("aut", "cre"))
+Author: Richard Beck, Tao Li
+Maintainer: Tao Li <richard.beck@moffitt.org>
 Description: Methods to infer fitness landscapes for aneuploid karyotypes, and predict karyotype evolution.
 License: MIT + file LICENSE
 Encoding: UTF-8
