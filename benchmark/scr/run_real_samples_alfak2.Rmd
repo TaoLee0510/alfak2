@@ -1,0 +1,160 @@
+---
+title: "alfak2 Real Sample Landscapes"
+subtitle: "Run real two-timepoint samples and summarize one-step beneficial CN events"
+output:
+  html_document:
+    self_contained: true
+    toc: true
+    toc_float:
+      collapsed: false
+      smooth_scroll: true
+    number_sections: true
+params:
+  patient_subset: ["P2"]
+  min_total_count: 20
+  drop_diploid: true
+  beta: 0.01
+  min_cn: 0
+  max_cn: 5
+  local_shell_depth: 0
+  global_extra_shell: 1
+  max_nodes: 4000
+  force_refit: false
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(
+  echo = TRUE,
+  message = FALSE,
+  warning = FALSE,
+  fig.width = 11,
+  fig.height = 5.5,
+  dpi = 150
+)
+
+repo_dir <- normalizePath(file.path(dirname(knitr::current_input(dir = TRUE)), "../.."), winslash = "/")
+source(file.path(repo_dir, "benchmark", "R", "real_sample_helpers.R"))
+load_alfak2_for_benchmark(repo_dir)
+dirs <- ensure_benchmark_dirs(repo_dir, "real_samples")
+```
+
+## Input Samples
+
+The real-sample workflow reads local, non-versioned perspective data from
+`benchmark/data`. It builds a two-column karyotype count matrix for each
+patient, fits `alfak2`, saves the posterior landscape, and then summarizes
+one-step copy-number moves from directly informed states.
+
+The default settings keep the local TMB fit on directly observed nodes and add
+one global shell for graph-borrowed one-step neighbors. Set
+`local_shell_depth: 1` if you want the local hierarchical layer itself to
+include one-step borrowed nodes; that is slower for 22-chromosome real samples.
+
+```{r input-patients}
+data_dir <- file.path(repo_dir, "benchmark", "data")
+available_real_patient_ids(data_dir)
+```
+
+## Run alfak2
+
+```{r fit-real-samples}
+bundle_list <- run_real_sample_landscapes(
+  repo_dir = repo_dir,
+  patient_subset = params$patient_subset,
+  min_total_count = params$min_total_count,
+  drop_diploid = isTRUE(params$drop_diploid),
+  beta = params$beta,
+  min_cn = params$min_cn,
+  max_cn = params$max_cn,
+  local_shell_depth = params$local_shell_depth,
+  global_extra_shell = params$global_extra_shell,
+  max_nodes = params$max_nodes,
+  force = isTRUE(params$force_refit)
+)
+
+length(bundle_list)
+names(bundle_list)
+```
+
+```{r fit-summary}
+fit_summary <- do.call(rbind, lapply(bundle_list, function(x) {
+  data.frame(
+    patient_id = x$patient_id,
+    observed_karyotypes = nrow(x$input$counts),
+    t0_cells = sum(x$input$counts[, 1]),
+    t1_cells = sum(x$input$counts[, 2]),
+    dt = x$input$dt,
+    local_nodes = nrow(x$fit$local$summary),
+    global_nodes = nrow(x$fit$global$summary),
+    convergence = x$fit$local$diagnostics$convergence,
+    gradient_norm = x$fit$local$diagnostics$gradient_norm,
+    stringsAsFactors = FALSE
+  )
+}))
+
+utils::write.csv(fit_summary, file.path(dirs$tables, "real_sample_fit_summary.csv"), row.names = FALSE)
+fit_summary
+```
+
+## Landscape Distribution
+
+```{r landscape-distribution}
+p_landscape <- plot_landscape_distribution(bundle_list)
+ggplot2::ggsave(file.path(dirs$figures, "real_sample_landscape_distribution.png"),
+                p_landscape, width = 11, height = 5.5, dpi = 150)
+p_landscape
+```
+
+## One-Step Beneficial Matrix
+
+For each directly informed parent state, each available one-step gain/loss
+neighbor is evaluated as:
+
+`delta = fitness(child) - fitness(parent)`
+
+The matrix below shows the proportion of valid one-step moves that are
+beneficial for each patient and chromosome event.
+
+```{r beneficial-matrices}
+beneficial <- beneficial_matrices_from_bundles(bundle_list)
+
+write_matrix_csv(
+  beneficial$proportion,
+  file.path(dirs$tables, "real_sample_one_step_beneficial_proportion_matrix.csv")
+)
+write_matrix_csv(
+  beneficial$valid_n,
+  file.path(dirs$tables, "real_sample_one_step_valid_n_matrix.csv")
+)
+utils::write.csv(
+  beneficial$edges,
+  file.path(dirs$tables, "real_sample_one_step_edges.csv"),
+  row.names = FALSE
+)
+
+beneficial$proportion[, seq_len(min(10, ncol(beneficial$proportion))), drop = FALSE]
+```
+
+```{r beneficial-heatmap}
+p_beneficial <- plot_beneficial_matrix(beneficial$proportion)
+ggplot2::ggsave(file.path(dirs$figures, "real_sample_one_step_beneficial_heatmap.png"),
+                p_beneficial, width = 11, height = 5.5, dpi = 150)
+p_beneficial
+```
+
+```{r valid-edge-heatmap}
+p_valid <- plot_valid_matrix(beneficial$valid_n)
+ggplot2::ggsave(file.path(dirs$figures, "real_sample_one_step_valid_edges_heatmap.png"),
+                p_valid, width = 11, height = 5.5, dpi = 150)
+p_valid
+```
+
+## Top One-Step Fitness Gains
+
+```{r top-beneficial-edges}
+top_edges <- beneficial$edges[is.finite(beneficial$edges$delta), , drop = FALSE]
+top_edges <- top_edges[order(top_edges$patient_id, -top_edges$delta), , drop = FALSE]
+top_edges <- do.call(rbind, lapply(split(top_edges, top_edges$patient_id), head, 15))
+utils::write.csv(top_edges, file.path(dirs$tables, "real_sample_top_one_step_edges.csv"), row.names = FALSE)
+top_edges
+```

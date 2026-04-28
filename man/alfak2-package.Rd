@@ -4,12 +4,13 @@
 \name{alfak2-package}
 \alias{alfak2}
 \alias{alfak2-package}
-\title{alfak2: compiled hierarchical karyotype fitness inference}
+\title{alfak2: hierarchical fitness inference for aneuploid karyotype evolution}
 \description{
-\code{alfak2} fits one inference pipeline for sparse two-timepoint karyotype count
-data: a local hierarchical Bayesian posterior implemented in TMB followed by
-a graph Gaussian posterior with ordered copy-number epistasis penalties solved
-in compiled sparse linear algebra.
+\code{alfak2} provides methods to infer fitness landscapes for aneuploid
+karyotypes from sparse two-timepoint count data and to study karyotype
+evolution. The package builds bounded karyotype graphs, fits a local
+hierarchical Bayesian model, and propagates estimates across the graph with
+a Gaussian-process prior and ordered copy-number epistasis penalties.
 }
 \author{
 \strong{Maintainer}: Tao Li \email{Tao.Li2@moffitt.org}
