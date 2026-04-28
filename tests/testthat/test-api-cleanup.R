@@ -4,7 +4,8 @@ test_that("legacy exports are absent", {
   retired_exports <- c(
     paste0("al", "fak"),
     paste0("predict", "_", "evo"),
-    paste0("al", "fak_", "cohort_", "transition")
+    paste0("al", "fak_", "cohort_", "transition"),
+    paste0("simulate_", "to", "y_", "landscape")
   )
   retired_patterns <- paste(
     paste0("nn", "_", "prior"),

@@ -1,6 +1,14 @@
 tiny_input <- function() {
-  land <- simulate_toy_landscape(n_chr = 3, min_cn = 1, max_cn = 3, seed = 5)
-  sim <- simulate_sparse_counts(land, n0 = 80, n1 = 80, seed = 6)
+  land <- simulate_l1_gp_landscape(
+    n_chr = 3,
+    min_cn = 1,
+    max_cn = 3,
+    lower = -1,
+    upper = 2,
+    seed = 1,
+    include_table = FALSE
+  )
+  sim <- simulate_sparse_counts(land, n0 = 200, n1 = 200, seed = 2)
   list(landscape = land, sim = sim)
 }
 

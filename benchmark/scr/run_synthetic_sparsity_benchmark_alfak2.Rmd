@@ -10,7 +10,6 @@ output:
       smooth_scroll: true
     number_sections: true
 params:
-  families: ["structured_epistatic", "rugged"]
   pm_grid: [1e-04, 5e-04, 1e-03]
   min_obs_grid: [1]
   downsample_fraction_grid: [0.0002, 0.0005, 0.001]
@@ -18,6 +17,12 @@ params:
   n_chr: 6
   min_cn: 1
   max_cn: 8
+  diploid_cn: 2
+  diploid_fitness: 1
+  lower: -5
+  upper: 5
+  ell: 2.5
+  use_full_range: 0.95
   K: 1000000000
   N0: 100
   step_size: 0.2
@@ -50,10 +55,11 @@ dirs <- ensure_benchmark_dirs(repo_dir, "synthetic_sparsity")
 
 ## Benchmark Design
 
-This benchmark has an explicit truth table and a forward sampling model. For
-each synthetic landscape family, it:
+This benchmark has an explicit truth table and a forward sampling model. It:
 
-1. Generates a complete bounded copy-number landscape with known fitness.
+1. Generates a complete bounded copy-number landscape with known fitness using
+   `alfak2::simulate_l1_gp_landscape()`, an L1-correlated Gaussian random field
+   on the original karyotype lattice.
 2. Starts from the diploid state with fitness fixed to 1.
 3. Evolves the population under logistic growth with carrying capacity `K`.
 4. Applies paired gain/loss missegregation events with rate `pm` per chromosome
@@ -70,7 +76,7 @@ each synthetic landscape family, it:
 9. Fits `alfak2`.
 10. Scores posterior landscapes against the known truth.
 
-Reference-standard tasks are parallelizable over `family x replicate x pm`.
+Reference-standard tasks are parallelizable over `replicate x pm`.
 Each worker then runs the requested `min_obs x downsample_fraction` grid for
 that reference input.
 
@@ -97,7 +103,6 @@ data.frame(
 ```{r run-benchmark}
 bench <- run_synthetic_sparsity_benchmark(
   repo_dir = repo_dir,
-  families = params$families,
   pm_grid = as.numeric(params$pm_grid),
   min_obs_grid = as.integer(params$min_obs_grid),
   downsample_fraction_grid = as.numeric(params$downsample_fraction_grid),
@@ -105,6 +110,12 @@ bench <- run_synthetic_sparsity_benchmark(
   n_chr = as.integer(params$n_chr),
   min_cn = as.integer(params$min_cn),
   max_cn = as.integer(params$max_cn),
+  diploid_cn = as.integer(params$diploid_cn),
+  diploid_fitness = as.numeric(params$diploid_fitness),
+  lower = as.numeric(params$lower),
+  upper = as.numeric(params$upper),
+  ell = as.numeric(params$ell),
+  use_full_range = as.numeric(params$use_full_range),
   K = as.numeric(params$K),
   N0 = as.numeric(params$N0),
   step_size = as.numeric(params$step_size),
@@ -158,7 +169,7 @@ p_mae
 
 ```{r calibration}
 calibration_tbl <- aggregate(
-  cbind(coverage95, mean_width95, topk_overlap) ~ family + pm + min_obs + layer + downsample_fraction,
+  cbind(coverage95, mean_width95, topk_overlap) ~ landscape_model + pm + min_obs + layer + downsample_fraction,
   data = bench$metrics,
   FUN = mean,
   na.rm = TRUE

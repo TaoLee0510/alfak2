@@ -17,10 +17,6 @@ alfak2_build_graph_cpp <- function(labels, y0, y1, beta = 0.01, shell_depth = 2L
     .Call(`_alfak2_alfak2_build_graph_cpp`, labels, y0, y1, beta, shell_depth, min_cn, max_cn, max_nodes)
 }
 
-alfak2_toy_landscape_cpp <- function(n_chr = 4L, min_cn = 1L, max_cn = 4L, family = "additive_pairwise_epistatic", seed = 1L) {
-    .Call(`_alfak2_alfak2_toy_landscape_cpp`, n_chr, min_cn, max_cn, family, seed)
-}
-
 alfak2_simulate_counts_cpp <- function(karyotypes, labels, fitness, beta = 0.01, dt = 1.0, n0 = 500L, n1 = 500L, detection_threshold = 1L, dropout_prob = 0.0, seed = 1L, init_concentration = 1.5, overdispersion = 0.0) {
     .Call(`_alfak2_alfak2_simulate_counts_cpp`, karyotypes, labels, fitness, beta, dt, n0, n1, detection_threshold, dropout_prob, seed, init_concentration, overdispersion)
 }

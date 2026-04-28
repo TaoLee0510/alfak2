@@ -1,8 +1,8 @@
 ---
-title: "alfak2 Toy Pipeline"
+title: "alfak2 L1 GP Pipeline"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{alfak2 Toy Pipeline}
+  %\VignetteIndexEntry{alfak2 L1 GP Pipeline}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -15,15 +15,16 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 library(alfak2)
 ```
 
-Generate a complete toy truth landscape.
+Generate a complete L1-correlated GP truth landscape on the original copy-number
+lattice.
 
 ```{r landscape}
-landscape <- simulate_toy_landscape(
+landscape <- simulate_l1_gp_landscape(
   n_chr = 4,
   min_cn = 1,
   max_cn = 4,
-  family = "smooth_additive",
-  seed = 10
+  seed = 10,
+  include_table = FALSE
 )
 length(landscape$fitness)
 ```

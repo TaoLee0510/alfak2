@@ -73,21 +73,6 @@ BEGIN_RCPP
     return rcpp_result_gen;
 END_RCPP
 }
-// alfak2_toy_landscape_cpp
-Rcpp::List alfak2_toy_landscape_cpp(int n_chr, int min_cn, int max_cn, std::string family, int seed);
-RcppExport SEXP _alfak2_alfak2_toy_landscape_cpp(SEXP n_chrSEXP, SEXP min_cnSEXP, SEXP max_cnSEXP, SEXP familySEXP, SEXP seedSEXP) {
-BEGIN_RCPP
-    Rcpp::RObject rcpp_result_gen;
-    Rcpp::RNGScope rcpp_rngScope_gen;
-    Rcpp::traits::input_parameter< int >::type n_chr(n_chrSEXP);
-    Rcpp::traits::input_parameter< int >::type min_cn(min_cnSEXP);
-    Rcpp::traits::input_parameter< int >::type max_cn(max_cnSEXP);
-    Rcpp::traits::input_parameter< std::string >::type family(familySEXP);
-    Rcpp::traits::input_parameter< int >::type seed(seedSEXP);
-    rcpp_result_gen = Rcpp::wrap(alfak2_toy_landscape_cpp(n_chr, min_cn, max_cn, family, seed));
-    return rcpp_result_gen;
-END_RCPP
-}
 // alfak2_simulate_counts_cpp
 Rcpp::List alfak2_simulate_counts_cpp(Rcpp::IntegerMatrix karyotypes, Rcpp::CharacterVector labels, Rcpp::NumericVector fitness, double beta, double dt, int n0, int n1, int detection_threshold, double dropout_prob, int seed, double init_concentration, double overdispersion);
 RcppExport SEXP _alfak2_alfak2_simulate_counts_cpp(SEXP karyotypesSEXP, SEXP labelsSEXP, SEXP fitnessSEXP, SEXP betaSEXP, SEXP dtSEXP, SEXP n0SEXP, SEXP n1SEXP, SEXP detection_thresholdSEXP, SEXP dropout_probSEXP, SEXP seedSEXP, SEXP init_concentrationSEXP, SEXP overdispersionSEXP) {
@@ -141,7 +126,6 @@ static const R_CallMethodDef CallEntries[] = {
     {"_alfak2_alfak2_parse_karyotypes_cpp", (DL_FUNC) &_alfak2_alfak2_parse_karyotypes_cpp, 1},
     {"_alfak2_alfak2_stringify_karyotypes_cpp", (DL_FUNC) &_alfak2_alfak2_stringify_karyotypes_cpp, 1},
     {"_alfak2_alfak2_build_graph_cpp", (DL_FUNC) &_alfak2_alfak2_build_graph_cpp, 8},
-    {"_alfak2_alfak2_toy_landscape_cpp", (DL_FUNC) &_alfak2_alfak2_toy_landscape_cpp, 5},
     {"_alfak2_alfak2_simulate_counts_cpp", (DL_FUNC) &_alfak2_alfak2_simulate_counts_cpp, 12},
     {"_alfak2_alfak2_pij_cpp", (DL_FUNC) &_alfak2_alfak2_pij_cpp, 3},
     {"_alfak2_alfak2_transition_operator_cpp", (DL_FUNC) &_alfak2_alfak2_transition_operator_cpp, 2},

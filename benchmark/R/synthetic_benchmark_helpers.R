@@ -35,6 +35,10 @@ benchmark_token <- function(x) {
   gsub("[^A-Za-z0-9_-]+", "_", x)
 }
 
+benchmark_or <- function(x, y) {
+  if (is.null(x)) y else x
+}
+
 reference_standard_cache_dir <- function(repo_dir,
                                          subdir = "reference_standard_inputs") {
   path <- file.path(repo_dir, "benchmark", "data", subdir)
@@ -43,12 +47,17 @@ reference_standard_cache_dir <- function(repo_dir,
 }
 
 reference_standard_cache_file <- function(repo_dir,
-                                          family,
                                           replicate,
                                           pm,
                                           n_chr,
                                           min_cn,
                                           max_cn,
+                                          diploid_cn,
+                                          diploid_fitness,
+                                          lower,
+                                          upper,
+                                          ell,
+                                          use_full_range,
                                           K,
                                           N0,
                                           step_size,
@@ -57,11 +66,16 @@ reference_standard_cache_file <- function(repo_dir,
                                           subdir = "reference_standard_inputs") {
   name <- paste(
     "standard",
-    benchmark_token(family),
+    "l1_gp",
     paste0("rep", replicate),
     paste0("pm", benchmark_token(pm)),
     paste0("chr", n_chr),
     paste0("cn", min_cn, "-", max_cn),
+    paste0("dip", diploid_cn),
+    paste0("dfit", benchmark_token(diploid_fitness)),
+    paste0("range", benchmark_token(lower), "_", benchmark_token(upper)),
+    paste0("ell", benchmark_token(ell)),
+    paste0("ufr", benchmark_token(use_full_range)),
     paste0("seed", landscape_seed),
     paste0("K", benchmark_token(K)),
     paste0("N0", benchmark_token(N0)),
@@ -73,13 +87,48 @@ reference_standard_cache_file <- function(repo_dir,
   file.path(reference_standard_cache_dir(repo_dir, subdir), paste0(name, ".rds"))
 }
 
+build_benchmark_truth_landscape <- function(n_chr,
+                                            min_cn,
+                                            max_cn,
+                                            diploid_cn,
+                                            diploid_fitness,
+                                            lower,
+                                            upper,
+                                            ell,
+                                            use_full_range,
+                                            seed) {
+  fn <- if (exists("simulate_l1_gp_landscape", mode = "function")) {
+    simulate_l1_gp_landscape
+  } else {
+    alfak2::simulate_l1_gp_landscape
+  }
+  fn(
+    n_chr = n_chr,
+    min_cn = min_cn,
+    max_cn = max_cn,
+    diploid_cn = diploid_cn,
+    diploid_fitness = diploid_fitness,
+    lower = lower,
+    upper = upper,
+    ell = ell,
+    seed = seed,
+    use_full_range = use_full_range,
+    include_table = FALSE
+  )
+}
+
 load_or_build_reference_standard_data <- function(repo_dir,
-                                                  family,
                                                   replicate,
                                                   pm,
                                                   n_chr = 6,
                                                   min_cn = 1,
                                                   max_cn = 8,
+                                                  diploid_cn = 2,
+                                                  diploid_fitness = 1,
+                                                  lower = -5,
+                                                  upper = 5,
+                                                  ell = 2.5,
+                                                  use_full_range = 0.95,
                                                   K = 1e9,
                                                   N0 = 100,
                                                   step_size = 0.2,
@@ -90,12 +139,17 @@ load_or_build_reference_standard_data <- function(repo_dir,
                                                   verbose = TRUE) {
   cache_file <- reference_standard_cache_file(
     repo_dir = repo_dir,
-    family = family,
     replicate = replicate,
     pm = pm,
     n_chr = n_chr,
     min_cn = min_cn,
     max_cn = max_cn,
+    diploid_cn = diploid_cn,
+    diploid_fitness = diploid_fitness,
+    lower = lower,
+    upper = upper,
+    ell = ell,
+    use_full_range = use_full_range,
     K = K,
     N0 = N0,
     step_size = step_size,
@@ -112,11 +166,16 @@ load_or_build_reference_standard_data <- function(repo_dir,
   }
 
   if (isTRUE(verbose)) message("Building reference standard data: ", cache_file)
-  landscape <- generate_reference_fitness_landscape(
+  landscape <- build_benchmark_truth_landscape(
     n_chr = n_chr,
     min_cn = min_cn,
     max_cn = max_cn,
-    family = family,
+    diploid_cn = diploid_cn,
+    diploid_fitness = diploid_fitness,
+    lower = lower,
+    upper = upper,
+    ell = ell,
+    use_full_range = use_full_range,
     seed = landscape_seed
   )
   reference <- simulate_logistic_missegregation_reference(
@@ -128,12 +187,18 @@ load_or_build_reference_standard_data <- function(repo_dir,
     census_size = census_size
   )
   reference$benchmark <- list(
-    family = family,
+    landscape_model = "l1_gp",
     replicate = replicate,
     landscape_seed = landscape_seed,
     n_chr = n_chr,
     min_cn = min_cn,
     max_cn = max_cn,
+    diploid_cn = diploid_cn,
+    diploid_fitness = diploid_fitness,
+    lower = lower,
+    upper = upper,
+    ell = ell,
+    use_full_range = use_full_range,
     pm = pm,
     K = K,
     N0 = N0,
@@ -145,12 +210,14 @@ load_or_build_reference_standard_data <- function(repo_dir,
   reference
 }
 
-reference_summary_row <- function(reference, family, replicate, pm) {
+reference_summary_row <- function(reference, replicate, pm) {
   data.frame(
-    family = family,
+    landscape_model = "l1_gp",
     replicate = replicate,
     pm = pm,
     n_reference_states = length(reference$landscape$labels),
+    truth_family = benchmark_or(reference$landscape$family, "l1_gp"),
+    covariance = benchmark_or(reference$landscape$covariance, NA_character_),
     standard_input_rows = nrow(reference$counts),
     occupied_states = reference$sparsity$occupied_states,
     fraction_occupied = reference$sparsity$fraction_occupied,
@@ -167,7 +234,6 @@ reference_summary_row <- function(reference, family, replicate, pm) {
 
 metric_from_fit <- function(fit,
                             landscape,
-                            family,
                             pm,
                             replicate,
                             downsample_fraction,
@@ -185,7 +251,7 @@ metric_from_fit <- function(fit,
   err <- pred[ok] - truth[ok]
   coverage95 <- mean(truth[ok] >= s$conf_low[ok] & truth[ok] <= s$conf_high[ok], na.rm = TRUE)
   data.frame(
-    family = family,
+    landscape_model = "l1_gp",
     pm = pm,
     replicate = replicate,
     downsample_fraction = downsample_fraction,
@@ -253,6 +319,12 @@ run_synthetic_reference_task <- function(task,
                                          n_chr,
                                          min_cn,
                                          max_cn,
+                                         diploid_cn,
+                                         diploid_fitness,
+                                         lower,
+                                         upper,
+                                         ell,
+                                         use_full_range,
                                          K,
                                          N0,
                                          step_size,
@@ -265,19 +337,23 @@ run_synthetic_reference_task <- function(task,
                                          force_rebuild_reference,
                                          reference_cache_subdir,
                                          verbose) {
-  family <- as.character(task$family)
   replicate <- as.integer(task$replicate)
   pm <- as.numeric(task$pm)
   landscape_seed <- as.integer(task$landscape_seed)
 
   reference <- load_or_build_reference_standard_data(
     repo_dir = repo_dir,
-    family = family,
     replicate = replicate,
     pm = pm,
     n_chr = n_chr,
     min_cn = min_cn,
     max_cn = max_cn,
+    diploid_cn = diploid_cn,
+    diploid_fitness = diploid_fitness,
+    lower = lower,
+    upper = upper,
+    ell = ell,
+    use_full_range = use_full_range,
     K = K,
     N0 = N0,
     step_size = step_size,
@@ -288,7 +364,7 @@ run_synthetic_reference_task <- function(task,
     verbose = verbose
   )
   landscape <- reference$landscape
-  reference_row <- reference_summary_row(reference, family, replicate, pm)
+  reference_row <- reference_summary_row(reference, replicate, pm)
   rows <- list()
   fits <- list()
   row_idx <- 0L
@@ -318,14 +394,13 @@ run_synthetic_reference_task <- function(task,
         sigma_obs_grid = c(0.05),
         control = list(eval.max = 200, iter.max = 200)
       )
-      fit_key <- paste(family, replicate, pm, min_obs, downsample_fraction, sep = "__")
+      fit_key <- paste("l1_gp", replicate, pm, min_obs, downsample_fraction, sep = "__")
       fits[[fit_key]] <- fit
       for (layer in c("local", "global")) {
         row_idx <- row_idx + 1L
         rows[[row_idx]] <- metric_from_fit(
           fit,
           landscape = landscape,
-          family = family,
           pm = pm,
           replicate = replicate,
           downsample_fraction = downsample_fraction,
@@ -347,7 +422,6 @@ run_synthetic_reference_task <- function(task,
 }
 
 run_synthetic_sparsity_benchmark <- function(repo_dir,
-                                             families = c("structured_epistatic", "rugged"),
                                              pm_grid = c(1e-4, 5e-4, 1e-3),
                                              min_obs_grid = c(1L),
                                              downsample_fraction_grid = c(2e-4, 5e-4, 1e-3),
@@ -356,6 +430,12 @@ run_synthetic_sparsity_benchmark <- function(repo_dir,
                                              n_chr = 6,
                                              min_cn = 1,
                                              max_cn = 8,
+                                             diploid_cn = 2,
+                                             diploid_fitness = 1,
+                                             lower = -5,
+                                             upper = 5,
+                                             ell = 2.5,
+                                             use_full_range = 0.95,
                                              K = 1e9,
                                              N0 = 100,
                                              step_size = 0.2,
@@ -370,7 +450,6 @@ run_synthetic_sparsity_benchmark <- function(repo_dir,
                                              parallel_workers = 1L,
                                              verbose = TRUE) {
   dirs <- ensure_benchmark_dirs(repo_dir, "synthetic_sparsity")
-  families <- unique(as.character(families))
   pm_grid <- unique(as.numeric(pm_grid))
   downsample_fraction_grid <- coerce_fraction_grid(downsample_fraction_grid, depths, census_size)
   min_obs_grid <- sort(unique(as.integer(min_obs_grid)))
@@ -383,14 +462,12 @@ run_synthetic_sparsity_benchmark <- function(repo_dir,
   }
 
   tasks <- expand.grid(
-    family = families,
     replicate = seq_len(replicates),
     pm = pm_grid,
     KEEP.OUT.ATTRS = FALSE,
     stringsAsFactors = FALSE
   )
-  tasks$family_index <- match(tasks$family, families)
-  tasks$landscape_seed <- seed + 1000L * tasks$family_index + tasks$replicate
+  tasks$landscape_seed <- seed + tasks$replicate
 
   run_task <- function(i) {
     run_synthetic_reference_task(
@@ -401,6 +478,12 @@ run_synthetic_sparsity_benchmark <- function(repo_dir,
       n_chr = n_chr,
       min_cn = min_cn,
       max_cn = max_cn,
+      diploid_cn = diploid_cn,
+      diploid_fitness = diploid_fitness,
+      lower = lower,
+      upper = upper,
+      ell = ell,
+      use_full_range = use_full_range,
       K = K,
       N0 = N0,
       step_size = step_size,
@@ -467,7 +550,7 @@ plot_sparsity_performance <- function(metrics,
   ggplot2::ggplot(metrics, ggplot2::aes(.data[[x]], .data[[metric]], color = .data$layer)) +
     ggplot2::geom_point() +
     ggplot2::geom_smooth(method = "loess", se = FALSE, formula = y ~ x) +
-    ggplot2::facet_grid(min_obs + pm ~ family, labeller = ggplot2::label_both) +
+    ggplot2::facet_grid(min_obs ~ pm, labeller = ggplot2::label_both) +
     ggplot2::labs(x = x, y = metric, color = "Layer") +
     ggplot2::theme_bw()
 }
@@ -476,8 +559,8 @@ plot_error_vs_depth <- function(metrics, metric = "rmse") {
   if (!requireNamespace("ggplot2", quietly = TRUE)) stop("Package `ggplot2` is required.", call. = FALSE)
   ggplot2::ggplot(metrics, ggplot2::aes(.data$downsample_fraction, .data[[metric]], color = .data$layer)) +
     ggplot2::geom_point() +
-    ggplot2::geom_line(ggplot2::aes(group = interaction(.data$family, .data$replicate, .data$min_obs, .data$layer)), alpha = 0.35) +
-    ggplot2::facet_grid(min_obs + pm ~ family, labeller = ggplot2::label_both) +
+    ggplot2::geom_line(ggplot2::aes(group = interaction(.data$replicate, .data$min_obs, .data$pm, .data$layer)), alpha = 0.35) +
+    ggplot2::facet_grid(min_obs ~ pm, labeller = ggplot2::label_both) +
     ggplot2::labs(x = "Downsample fraction per timepoint", y = metric, color = "Layer") +
     ggplot2::theme_bw()
 }

@@ -1,101 +1,8 @@
-reference_lattice_size <- function(n_chr, min_cn, max_cn) {
-  states_per_chr <- max_cn - min_cn + 1L
-  states_per_chr^n_chr
-}
-
 encode_reference_karyotypes <- function(karyotypes, min_cn, max_cn) {
   karyotypes <- as.matrix(karyotypes)
   states_per_chr <- max_cn - min_cn + 1L
   powers <- states_per_chr^(seq_len(ncol(karyotypes)) - 1L)
   as.integer(1L + as.vector((karyotypes - min_cn) %*% powers))
-}
-
-enumerate_reference_lattice <- function(n_chr = 6, min_cn = 1, max_cn = 8) {
-  n_states <- reference_lattice_size(n_chr, min_cn, max_cn)
-  if (n_states > 5e6) {
-    stop(
-      "Requested reference lattice has ", format(n_states, big.mark = ","),
-      " states. Use implicit or sampled benchmarking for this scale.",
-      call. = FALSE
-    )
-  }
-  states_per_chr <- max_cn - min_cn + 1L
-  idx <- seq_len(n_states) - 1L
-  mat <- matrix(0L, nrow = n_states, ncol = n_chr)
-  for (chr in seq_len(n_chr)) {
-    mat[, chr] <- min_cn + (idx %/% states_per_chr^(chr - 1L)) %% states_per_chr
-  }
-  mat
-}
-
-reference_karyotype_labels <- function(karyotypes) {
-  apply(karyotypes, 1L, paste, collapse = ".")
-}
-
-generate_reference_fitness_landscape <- function(n_chr = 6,
-                                                 min_cn = 1,
-                                                 max_cn = 8,
-                                                 diploid_fitness = 1,
-                                                 family = c("structured_epistatic", "smooth_additive", "rugged"),
-                                                 seed = 1) {
-  family <- match.arg(family)
-  set.seed(seed)
-  karyotypes <- enumerate_reference_lattice(n_chr, min_cn, max_cn)
-  labels <- reference_karyotype_labels(karyotypes)
-  diploid <- rep(2L, n_chr)
-  if (any(diploid < min_cn | diploid > max_cn)) {
-    stop("Diploid state is outside the requested copy-number bounds.", call. = FALSE)
-  }
-  diploid_label <- paste(diploid, collapse = ".")
-  diploid_index <- match(diploid_label, labels)
-
-  centered <- sweep(karyotypes, 2L, diploid, "-")
-  additive <- stats::rnorm(n_chr, mean = 0, sd = 0.055)
-  quadratic <- stats::runif(n_chr, min = 0.012, max = 0.045)
-  log_fitness <- as.vector(centered %*% additive) -
-    as.vector((centered^2) %*% quadratic)
-
-  if (family %in% c("structured_epistatic", "rugged")) {
-    pair_count <- max(0L, n_chr - 1L)
-    pair_effect <- stats::rnorm(pair_count, mean = 0, sd = 0.025)
-    for (i in seq_len(pair_count)) {
-      log_fitness <- log_fitness + pair_effect[i] * centered[, i] * centered[, i + 1L]
-    }
-  }
-
-  mean_cn <- rowMeans(karyotypes)
-  log_fitness <- log_fitness +
-    ifelse(mean_cn >= 3.2, 0.04, 0) -
-    ifelse(mean_cn <= 1.4, 0.10, 0) -
-    0.015 * abs(mean_cn - 2)
-
-  if (family == "rugged") {
-    n_shock <- max(1L, floor(0.01 * length(log_fitness)))
-    shock_idx <- sample.int(length(log_fitness), n_shock)
-    log_fitness[shock_idx] <- log_fitness[shock_idx] + stats::rnorm(n_shock, 0, 0.18)
-  }
-
-  log_fitness <- log_fitness - log_fitness[diploid_index] + log(diploid_fitness)
-  fitness <- exp(log_fitness)
-  fitness[diploid_index] <- diploid_fitness
-
-  structure(
-    list(
-      labels = labels,
-      karyotypes = karyotypes,
-      fitness = fitness,
-      log_fitness = log_fitness,
-      diploid_label = diploid_label,
-      diploid_index = diploid_index,
-      n_chr = n_chr,
-      min_cn = min_cn,
-      max_cn = max_cn,
-      family = family,
-      seed = seed,
-      diploid_fitness = diploid_fitness
-    ),
-    class = "alfak2_reference_landscape"
-  )
 }
 
 build_paired_missegregation_neighbors <- function(karyotypes, min_cn, max_cn) {
@@ -193,10 +100,25 @@ simulate_logistic_missegregation_reference <- function(landscape,
                                                        step_size = 0.2,
                                                        census_size = K,
                                                        active_floor = 1e-8) {
-  if (!inherits(landscape, "alfak2_reference_landscape")) {
-    stop("`landscape` must be from generate_reference_fitness_landscape().", call. = FALSE)
+  required <- c("labels", "karyotypes", "fitness", "min_cn", "max_cn")
+  if (!is.list(landscape) || !all(required %in% names(landscape))) {
+    stop("`landscape` must contain labels, karyotypes, fitness, min_cn, and max_cn.", call. = FALSE)
   }
-  raw_T <- if (is.null(T)) log((K - N0) / N0) / landscape$diploid_fitness else T
+  diploid_cn <- if (!is.null(landscape$diploid_cn)) landscape$diploid_cn else 2L
+  diploid_index <- if (!is.null(landscape$diploid_index)) {
+    landscape$diploid_index
+  } else {
+    which(rowSums(abs(as.matrix(landscape$karyotypes) - diploid_cn)) == 0)
+  }
+  if (length(diploid_index) != 1L) {
+    stop("Could not identify exactly one diploid state in `landscape`.", call. = FALSE)
+  }
+  diploid_fitness <- if (!is.null(landscape$diploid_fitness)) {
+    landscape$diploid_fitness
+  } else {
+    landscape$fitness[diploid_index]
+  }
+  raw_T <- if (is.null(T)) log((K - N0) / N0) / diploid_fitness else T
   raw_dt <- if (is.null(dt)) 0.8 * raw_T else dt
   T <- round_reference_time(raw_T, "T")
   dt <- round_reference_time(raw_dt, "dt")
@@ -209,7 +131,7 @@ simulate_logistic_missegregation_reference <- function(landscape,
     max_cn = landscape$max_cn
   )
   counts <- numeric(length(landscape$fitness))
-  counts[landscape$diploid_index] <- N0
+  counts[diploid_index] <- N0
 
   snapshots <- vector("list", length(targets))
   names(snapshots) <- c("T", "T_plus_dt")

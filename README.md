@@ -24,18 +24,21 @@ The core API is intentionally small and only exposes this two-layer method.
   karyotype transitions.
 - Graph posterior smoothing with ordered copy-number epistasis penalties.
 - Posterior summaries and plots for fitness estimates and uncertainty.
+- Benchmark truth landscapes can be generated directly on the original
+  bounded karyotype lattice with `simulate_l1_gp_landscape()`, which uses an
+  L1-correlated Gaussian random field without embedding the states.
 
 ## Minimal Example
 
 ```r
 library(alfak2)
 
-landscape <- simulate_toy_landscape(
+landscape <- simulate_l1_gp_landscape(
   n_chr = 4,
   min_cn = 1,
   max_cn = 4,
-  family = "additive_pairwise_epistatic",
-  seed = 1
+  seed = 1,
+  include_table = FALSE
 )
 
 sim <- simulate_sparse_counts(

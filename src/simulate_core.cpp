@@ -3,84 +3,6 @@
 
 using namespace Rcpp;
 
-static std::vector< std::vector<int> > enumerate_lattice_vec(int n_chr, int min_cn, int max_cn) {
-  if (n_chr <= 0) Rcpp::stop("`n_chr` must be positive.");
-  if (min_cn > max_cn) Rcpp::stop("`min_cn` must be <= `max_cn`.");
-  long long n = 1;
-  int states = max_cn - min_cn + 1;
-  for (int i = 0; i < n_chr; ++i) n *= states;
-  if (n > 200000) Rcpp::stop("Requested lattice is too large for the toy generator.");
-  std::vector< std::vector<int> > nodes(n, std::vector<int>(n_chr));
-  for (long long idx = 0; idx < n; ++idx) {
-    long long z = idx;
-    for (int c = 0; c < n_chr; ++c) {
-      nodes[idx][c] = min_cn + (z % states);
-      z /= states;
-    }
-  }
-  return nodes;
-}
-
-static Rcpp::IntegerMatrix nodes_to_matrix(const std::vector< std::vector<int> >& nodes) {
-  int n = nodes.size();
-  int p = nodes.empty() ? 0 : nodes[0].size();
-  Rcpp::IntegerMatrix mat(n, p);
-  for (int i = 0; i < n; ++i) {
-    for (int j = 0; j < p; ++j) mat(i, j) = nodes[i][j];
-  }
-  return mat;
-}
-
-static Rcpp::NumericVector generate_fitness(const std::vector< std::vector<int> >& nodes,
-                                            const std::string& family,
-                                            int seed) {
-  std::mt19937 rng(seed);
-  std::normal_distribution<double> norm01(0.0, 1.0);
-  std::uniform_real_distribution<double> unif(0.0, 1.0);
-  int n = nodes.size();
-  int p = nodes[0].size();
-  std::vector<double> additive(p), quad(p);
-  for (int c = 0; c < p; ++c) {
-    additive[c] = 0.08 * norm01(rng);
-    quad[c] = 0.03 + 0.04 * unif(rng);
-  }
-  std::vector<double> pairwise(std::max(0, p - 1), 0.0);
-  if (family == "additive_pairwise_epistatic" || family == "rugged_local_shocks") {
-    for (int c = 0; c < p - 1; ++c) pairwise[c] = 0.04 * norm01(rng);
-  }
-
-  Rcpp::NumericVector f(n);
-  for (int i = 0; i < n; ++i) {
-    double total = 0.0;
-    double ploidy = 0.0;
-    for (int c = 0; c < p; ++c) {
-      double x = nodes[i][c] - 2.0;
-      ploidy += nodes[i][c];
-      total += additive[c] * x - quad[c] * x * x;
-    }
-    for (int c = 0; c < p - 1; ++c) {
-      total += pairwise[c] * (nodes[i][c] - 2.0) * (nodes[i][c + 1] - 2.0);
-    }
-    double mean_cn = ploidy / p;
-    if (mean_cn >= 3.0) total += 0.08;
-    if (mean_cn <= 1.5) total -= 0.08;
-    f[i] = total;
-  }
-  if (family == "rugged_local_shocks") {
-    std::normal_distribution<double> shock(0.0, 0.22);
-    int n_shock = std::max(1, static_cast<int>(std::floor(0.05 * n)));
-    std::uniform_int_distribution<int> pick(0, n - 1);
-    for (int s = 0; s < n_shock; ++s) f[pick(rng)] += shock(rng);
-  } else if (family != "smooth_additive" && family != "additive_pairwise_epistatic") {
-    Rcpp::stop("Unknown landscape family.");
-  }
-  double mean = 0.0;
-  for (double v : f) mean += v;
-  mean /= n;
-  for (int i = 0; i < n; ++i) f[i] -= mean;
-  return f;
-}
-
 static Rcpp::IntegerVector multinomial_draw(const Rcpp::NumericVector& prob,
                                             int size,
                                             std::mt19937& rng,
@@ -203,28 +125,6 @@ static Rcpp::List simulate_counts_impl(Rcpp::IntegerMatrix karyotypes,
       Rcpp::Named("detection_threshold") = detection_threshold,
       Rcpp::Named("dropout_prob") = dropout_prob
     )
-  );
-}
-
-// [[Rcpp::export]]
-Rcpp::List alfak2_toy_landscape_cpp(int n_chr = 4,
-                                    int min_cn = 1,
-                                    int max_cn = 4,
-                                    std::string family = "additive_pairwise_epistatic",
-                                    int seed = 1) {
-  std::vector< std::vector<int> > nodes = enumerate_lattice_vec(n_chr, min_cn, max_cn);
-  Rcpp::IntegerMatrix mat = nodes_to_matrix(nodes);
-  Rcpp::CharacterVector labels = alfak2::matrix_to_labels(mat);
-  Rcpp::NumericVector fitness = generate_fitness(nodes, family, seed);
-  return Rcpp::List::create(
-    Rcpp::Named("labels") = labels,
-    Rcpp::Named("karyotypes") = mat,
-    Rcpp::Named("fitness") = fitness,
-    Rcpp::Named("family") = family,
-    Rcpp::Named("seed") = seed,
-    Rcpp::Named("min_cn") = min_cn,
-    Rcpp::Named("max_cn") = max_cn,
-    Rcpp::Named("n_chr") = n_chr
   );
 }
 

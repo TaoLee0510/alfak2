@@ -18,7 +18,8 @@ simulate_sparse_counts(
 )
 }
 \arguments{
-\item{landscape}{Object returned by \code{simulate_toy_landscape()}.}
+\item{landscape}{Object returned by \code{simulate_l1_gp_landscape()}, or another
+landscape-like list containing \code{karyotypes}, \code{labels}, and \code{fitness}.}
 
 \item{beta, dt}{Dynamics parameters.}
 
