@@ -11,14 +11,18 @@ output:
     number_sections: true
 params:
   patient_subset: ["P2"]
-  min_total_count: 20
+  min_total_count_grid: [5, 10, 20]
   drop_diploid: true
-  beta: 0.01
+  beta: 0.00005
   min_cn: 0
   max_cn: 5
   local_shell_depth: 0
   global_extra_shell: 1
   max_nodes: 4000
+  parallel_workers: Inf
+  compute_xval: true
+  xval_max_folds: Inf
+  xval_seed: 1
   force_refit: false
 ---
 
@@ -42,11 +46,15 @@ dirs <- ensure_benchmark_dirs(repo_dir, "real_samples")
 
 The real-sample workflow reads local, non-versioned perspective data from
 `benchmark/data`. It builds a two-column karyotype count matrix for each
-patient, fits `alfak2`, saves the posterior landscape, and then summarizes
-one-step copy-number moves from directly informed states.
+patient and each requested minimum-observation threshold, fits `alfak2`, saves
+the posterior landscape, and then summarizes one-step copy-number moves from
+directly informed states.
 
 The default settings keep the local TMB fit on directly observed nodes and add
-one global shell for graph-borrowed one-step neighbors. Set
+one global shell for graph-borrowed one-step neighbors. Each
+`patient_id x min_total_count` task is scheduled in parallel, while each
+individual `alfak2` fit is run serially. `parallel_workers: Inf` means one
+worker per task; lower it to a fixed integer if memory pressure is high. Set
 `local_shell_depth: 1` if you want the local hierarchical layer itself to
 include one-step borrowed nodes; that is slower for 22-chromosome real samples.
 
@@ -58,10 +66,10 @@ available_real_patient_ids(data_dir)
 ## Run alfak2
 
 ```{r fit-real-samples}
-bundle_list <- run_real_sample_landscapes(
+bundle_list <- run_real_sample_landscape_grid(
   repo_dir = repo_dir,
   patient_subset = params$patient_subset,
-  min_total_count = params$min_total_count,
+  min_total_count_grid = params$min_total_count_grid,
   drop_diploid = isTRUE(params$drop_diploid),
   beta = params$beta,
   min_cn = params$min_cn,
@@ -69,8 +77,25 @@ bundle_list <- run_real_sample_landscapes(
   local_shell_depth = params$local_shell_depth,
   global_extra_shell = params$global_extra_shell,
   max_nodes = params$max_nodes,
+  parallel_workers = params$parallel_workers,
+  compute_xval = isTRUE(params$compute_xval),
+  xval_max_folds = as.numeric(params$xval_max_folds),
+  xval_seed = as.integer(params$xval_seed),
   force = isTRUE(params$force_refit)
 )
+
+if (!length(bundle_list)) {
+  stop("No successful alfak2 tasks were produced.", call. = FALSE)
+}
+
+bundle_by_minobs <- split(
+  bundle_list,
+  vapply(bundle_list, function(x) as.character(x$min_total_count), character(1))
+)
+bundle_by_minobs <- lapply(bundle_by_minobs, function(x) {
+  names(x) <- vapply(x, function(y) y$patient_id, character(1))
+  x
+})
 
 length(bundle_list)
 names(bundle_list)
@@ -78,20 +103,32 @@ names(bundle_list)
 
 ```{r fit-summary}
 fit_summary <- do.call(rbind, lapply(bundle_list, function(x) {
+  task_id <- if (!is.null(x$task_id)) {
+    x$task_id
+  } else {
+    paste0(x$patient_id, "_MINOBS_", x$min_total_count)
+  }
   data.frame(
+    task_id = task_id,
     patient_id = x$patient_id,
+    min_total_count = x$min_total_count,
+    output_subdir = x$output_subdir,
     observed_karyotypes = nrow(x$input$counts),
     t0_cells = sum(x$input$counts[, 1]),
     t1_cells = sum(x$input$counts[, 2]),
     dt = x$input$dt,
     local_nodes = nrow(x$fit$local$summary),
     global_nodes = nrow(x$fit$global$summary),
+    xval_r2 = if (!is.null(x$xval$R2R)) x$xval$R2R else NA_real_,
+    xval_n = if (!is.null(x$xval$detail)) nrow(x$xval$detail) else NA_integer_,
     convergence = x$fit$local$diagnostics$convergence,
     gradient_norm = x$fit$local$diagnostics$gradient_norm,
     stringsAsFactors = FALSE
   )
 }))
+fit_summary <- fit_summary[order(fit_summary$min_total_count, fit_summary$patient_id), , drop = FALSE]
 
+utils::write.csv(fit_summary, file.path(dirs$tables, "real_sample_fit_summary_by_minobs.csv"), row.names = FALSE)
 utils::write.csv(fit_summary, file.path(dirs$tables, "real_sample_fit_summary.csv"), row.names = FALSE)
 fit_summary
 ```
@@ -99,10 +136,21 @@ fit_summary
 ## Landscape Distribution
 
 ```{r landscape-distribution}
-p_landscape <- plot_landscape_distribution(bundle_list)
-ggplot2::ggsave(file.path(dirs$figures, "real_sample_landscape_distribution.png"),
-                p_landscape, width = 11, height = 5.5, dpi = 150)
-p_landscape
+landscape_plots <- lapply(names(bundle_by_minobs), function(min_obs) {
+  suffix <- paste0("MINOBS_", min_obs)
+  p <- plot_landscape_distribution(bundle_by_minobs[[min_obs]]) +
+    ggplot2::ggtitle(paste("Landscape distribution", suffix))
+  ggplot2::ggsave(
+    file.path(dirs$figures, paste0("real_sample_landscape_distribution_", suffix, ".png")),
+    p,
+    width = 11,
+    height = 5.5,
+    dpi = 150
+  )
+  print(p)
+  p
+})
+names(landscape_plots) <- names(bundle_by_minobs)
 ```
 
 ## One-Step Beneficial Matrix
@@ -116,45 +164,93 @@ The matrix below shows the proportion of valid one-step moves that are
 beneficial for each patient and chromosome event.
 
 ```{r beneficial-matrices}
-beneficial <- beneficial_matrices_from_bundles(bundle_list)
+beneficial_by_minobs <- lapply(names(bundle_by_minobs), function(min_obs) {
+  suffix <- paste0("MINOBS_", min_obs)
+  beneficial <- beneficial_matrices_from_bundles(bundle_by_minobs[[min_obs]])
+  write_matrix_csv(
+    beneficial$proportion,
+    file.path(dirs$tables, paste0("real_sample_one_step_beneficial_proportion_matrix_", suffix, ".csv"))
+  )
+  write_matrix_csv(
+    beneficial$valid_n,
+    file.path(dirs$tables, paste0("real_sample_one_step_valid_n_matrix_", suffix, ".csv"))
+  )
+  utils::write.csv(
+    beneficial$edges,
+    file.path(dirs$tables, paste0("real_sample_one_step_edges_", suffix, ".csv")),
+    row.names = FALSE
+  )
+  beneficial
+})
+names(beneficial_by_minobs) <- names(bundle_by_minobs)
 
-write_matrix_csv(
-  beneficial$proportion,
-  file.path(dirs$tables, "real_sample_one_step_beneficial_proportion_matrix.csv")
-)
-write_matrix_csv(
-  beneficial$valid_n,
-  file.path(dirs$tables, "real_sample_one_step_valid_n_matrix.csv")
-)
-utils::write.csv(
-  beneficial$edges,
-  file.path(dirs$tables, "real_sample_one_step_edges.csv"),
-  row.names = FALSE
-)
-
-beneficial$proportion[, seq_len(min(10, ncol(beneficial$proportion))), drop = FALSE]
+beneficial_by_minobs[[1]]$proportion[, seq_len(min(10, ncol(beneficial_by_minobs[[1]]$proportion))), drop = FALSE]
 ```
 
 ```{r beneficial-heatmap}
-p_beneficial <- plot_beneficial_matrix(beneficial$proportion)
-ggplot2::ggsave(file.path(dirs$figures, "real_sample_one_step_beneficial_heatmap.png"),
-                p_beneficial, width = 11, height = 5.5, dpi = 150)
-p_beneficial
+beneficial_plots <- lapply(names(beneficial_by_minobs), function(min_obs) {
+  suffix <- paste0("MINOBS_", min_obs)
+  p <- plot_beneficial_matrix(beneficial_by_minobs[[min_obs]]$proportion) +
+    ggplot2::ggtitle(paste("One-step beneficial proportion", suffix))
+  ggplot2::ggsave(
+    file.path(dirs$figures, paste0("real_sample_one_step_beneficial_heatmap_", suffix, ".png")),
+    p,
+    width = 11,
+    height = 5.5,
+    dpi = 150
+  )
+  print(p)
+  p
+})
+names(beneficial_plots) <- names(beneficial_by_minobs)
 ```
 
 ```{r valid-edge-heatmap}
-p_valid <- plot_valid_matrix(beneficial$valid_n)
-ggplot2::ggsave(file.path(dirs$figures, "real_sample_one_step_valid_edges_heatmap.png"),
-                p_valid, width = 11, height = 5.5, dpi = 150)
-p_valid
+valid_plots <- lapply(names(beneficial_by_minobs), function(min_obs) {
+  suffix <- paste0("MINOBS_", min_obs)
+  p <- plot_valid_matrix(beneficial_by_minobs[[min_obs]]$valid_n) +
+    ggplot2::ggtitle(paste("Valid one-step edges", suffix))
+  ggplot2::ggsave(
+    file.path(dirs$figures, paste0("real_sample_one_step_valid_edges_heatmap_", suffix, ".png")),
+    p,
+    width = 11,
+    height = 5.5,
+    dpi = 150
+  )
+  print(p)
+  p
+})
+names(valid_plots) <- names(beneficial_by_minobs)
 ```
 
 ## Top One-Step Fitness Gains
 
 ```{r top-beneficial-edges}
-top_edges <- beneficial$edges[is.finite(beneficial$edges$delta), , drop = FALSE]
-top_edges <- top_edges[order(top_edges$patient_id, -top_edges$delta), , drop = FALSE]
-top_edges <- do.call(rbind, lapply(split(top_edges, top_edges$patient_id), head, 15))
-utils::write.csv(top_edges, file.path(dirs$tables, "real_sample_top_one_step_edges.csv"), row.names = FALSE)
+top_edges <- do.call(rbind, lapply(names(beneficial_by_minobs), function(min_obs) {
+  suffix <- paste0("MINOBS_", min_obs)
+  edges <- beneficial_by_minobs[[min_obs]]$edges
+  edges <- edges[is.finite(edges$delta), , drop = FALSE]
+  edges <- edges[order(edges$patient_id, -edges$delta), , drop = FALSE]
+  edges <- if (nrow(edges)) {
+    do.call(rbind, lapply(split(edges, edges$patient_id), head, 15))
+  } else {
+    data.frame()
+  }
+  if (!is.null(edges) && nrow(edges)) {
+    edges$min_total_count <- as.integer(min_obs)
+    utils::write.csv(
+      edges,
+      file.path(dirs$tables, paste0("real_sample_top_one_step_edges_", suffix, ".csv")),
+      row.names = FALSE
+    )
+  }
+  edges
+}))
+if (is.null(top_edges)) top_edges <- data.frame()
+utils::write.csv(
+  top_edges,
+  file.path(dirs$tables, "real_sample_top_one_step_edges_by_minobs.csv"),
+  row.names = FALSE
+)
 top_edges
 ```

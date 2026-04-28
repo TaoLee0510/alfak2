@@ -34,7 +34,7 @@ double alfak2_pij_cpp(int parent_cn, int child_cn, double beta) {
 
 // [[Rcpp::export]]
 Rcpp::List alfak2_transition_operator_cpp(Rcpp::IntegerMatrix karyotypes,
-                                          double beta = 0.01) {
+                                          double beta = 0.00005) {
   Rcpp::CharacterVector labels = alfak2::matrix_to_labels(karyotypes);
   int n = labels.size();
   std::vector< std::vector<int> > nodes(n);

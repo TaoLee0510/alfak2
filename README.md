@@ -43,7 +43,7 @@ landscape <- simulate_l1_gp_landscape(
 
 sim <- simulate_sparse_counts(
   landscape,
-  beta = 0.01,
+  beta = 0.00005,
   dt = 1,
   n0 = 200,
   n1 = 200,
@@ -53,7 +53,7 @@ sim <- simulate_sparse_counts(
 fit <- fit_alfak2(
   sim$counts,
   dt = 1,
-  beta = 0.01,
+  beta = 0.00005,
   min_cn = 1,
   max_cn = 4
 )

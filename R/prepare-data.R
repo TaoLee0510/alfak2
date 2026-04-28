@@ -8,7 +8,7 @@
 #'
 #' @return An `alfak2_data` object.
 #' @export
-prepare_alfak2_data <- function(counts, dt = 1, beta = 0.01, metadata = list()) {
+prepare_alfak2_data <- function(counts, dt = 1, beta = 0.00005, metadata = list()) {
   counts <- validate_count_matrix(counts)
   validate_scalar(dt, "dt", lower = .Machine$double.eps)
   validate_scalar(beta, "beta", lower = 0, upper = 1)

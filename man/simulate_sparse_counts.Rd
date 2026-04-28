@@ -6,7 +6,7 @@
 \usage{
 simulate_sparse_counts(
   landscape,
-  beta = 0.01,
+  beta = 5e-05,
   dt = 1,
   n0 = 500,
   n1 = 500,

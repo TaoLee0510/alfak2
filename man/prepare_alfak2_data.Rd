@@ -4,7 +4,7 @@
 \alias{prepare_alfak2_data}
 \title{Prepare two-timepoint karyotype count data}
 \usage{
-prepare_alfak2_data(counts, dt = 1, beta = 0.01, metadata = list())
+prepare_alfak2_data(counts, dt = 1, beta = 5e-05, metadata = list())
 }
 \arguments{
 \item{counts}{Matrix or data frame with two columns and dot-separated

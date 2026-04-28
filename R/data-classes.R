@@ -50,5 +50,8 @@ print.alfak2_fit <- function(x, ...) {
   cat("  local nodes:", nrow(x$local$summary), "\n")
   cat("  global nodes:", nrow(x$global$summary), "\n")
   cat("  convergence:", x$local$diagnostics$convergence, "\n")
+  if (!is.null(x$xval$R2R)) {
+    cat("  xval R2R:", x$xval$R2R, "\n")
+  }
   invisible(x)
 }

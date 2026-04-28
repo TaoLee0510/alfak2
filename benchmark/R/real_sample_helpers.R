@@ -184,27 +184,188 @@ landscape_from_alfak2_fit <- function(fit, patient_id) {
   )
 }
 
+xval_r2r <- function(obs, pred) {
+  ok <- is.finite(obs) & is.finite(pred)
+  obs <- as.numeric(obs[ok])
+  pred <- as.numeric(pred[ok])
+  if (length(obs) < 2L) return(NA_real_)
+  obs <- obs - mean(obs)
+  pred <- pred - mean(pred)
+  denom <- sum((obs - mean(obs))^2)
+  if (!is.finite(denom) || denom <= 0) return(NA_real_)
+  1 - sum((pred - obs)^2) / denom
+}
+
+one_step_neighbor_labels_bench <- function(label, min_cn = 0) {
+  k <- as.integer(strsplit(as.character(label), ".", fixed = TRUE)[[1]])
+  if (anyNA(k)) return(character(0))
+  out <- character(0)
+  for (chr in seq_along(k)) {
+    for (direction in c(1L, -1L)) {
+      child <- k
+      child[chr] <- child[chr] + direction
+      if (any(child < min_cn)) next
+      out <- c(out, paste(child, collapse = "."))
+    }
+  }
+  unique(out)
+}
+
+alfak2_heldout_xval <- function(fit,
+                                 min_cn = 0,
+                                 max_folds = Inf,
+                                 seed = 1) {
+  if (!inherits(fit, "alfak2_fit")) {
+    stop("`fit` must be an alfak2_fit object.", call. = FALSE)
+  }
+  local_summary <- fit$local$summary
+  global_graph <- fit$global$graph
+  if (is.null(local_summary) || !nrow(local_summary)) {
+    return(list(R2R = NA_real_, detail = data.frame(), status = "no_local_summary"))
+  }
+  direct_labels <- as.character(local_summary$karyotype[local_summary$support_tier == "directly_informed"])
+  anchor_labels <- as.character(local_summary$karyotype[is.finite(local_summary$fitness_mean)])
+  if (!length(direct_labels) || length(anchor_labels) < 3L) {
+    return(list(R2R = NA_real_, detail = data.frame(), status = "too_few_anchors"))
+  }
+
+  ids <- unlist(lapply(seq_along(direct_labels), function(i) {
+    ki <- unique(c(direct_labels[i], one_step_neighbor_labels_bench(direct_labels[i], min_cn = min_cn)))
+    ki <- ki[ki %in% anchor_labels]
+    out <- rep(i, length(ki))
+    names(out) <- ki
+    out
+  }))
+  ids <- ids[!duplicated(names(ids))]
+  fold_ids <- unique(ids)
+  if (is.finite(max_folds) && max_folds > 0 && length(fold_ids) > max_folds) {
+    set.seed(as.integer(seed))
+    fold_ids <- sort(sample(fold_ids, size = as.integer(max_folds)))
+  }
+  hp <- fit$global$hyperparameters
+  detail <- vector("list", length(fold_ids))
+
+  for (i in seq_along(fold_ids)) {
+    fold <- fold_ids[i]
+    test_labels <- names(ids)[ids == fold]
+    heldout_local <- fit$local
+    heldout_local$summary <- local_summary[!(as.character(local_summary$karyotype) %in% test_labels), , drop = FALSE]
+    if (nrow(heldout_local$summary) < 2L) {
+      detail[[i]] <- data.frame(
+        fold = fold,
+        k = test_labels,
+        state_class = ifelse(test_labels %in% direct_labels, "fq", "nn"),
+        validation = local_summary$fitness_mean[match(test_labels, local_summary$karyotype)],
+        estimate = NA_real_,
+        stringsAsFactors = FALSE
+      )
+      next
+    }
+    pred_fit <- try(
+      alfak2::fit_graph_posterior(
+        heldout_local,
+        global_graph,
+        lambda_l_grid = hp$lambda_l,
+        lambda_e_grid = hp$lambda_e,
+        sigma_obs_grid = hp$sigma_obs
+      ),
+      silent = TRUE
+    )
+    validation <- local_summary$fitness_mean[match(test_labels, local_summary$karyotype)]
+    estimate <- rep(NA_real_, length(test_labels))
+    if (!inherits(pred_fit, "try-error")) {
+      idx <- match(test_labels, as.character(pred_fit$summary$karyotype))
+      ok <- !is.na(idx)
+      estimate[ok] <- pred_fit$summary$fitness_mean[idx[ok]]
+    }
+    detail[[i]] <- data.frame(
+      fold = fold,
+      k = test_labels,
+      state_class = ifelse(test_labels %in% direct_labels, "fq", "nn"),
+      validation = as.numeric(validation),
+      estimate = as.numeric(estimate),
+      stringsAsFactors = FALSE
+    )
+  }
+
+  detail <- do.call(rbind, detail)
+  detail <- detail[is.finite(detail$validation) & is.finite(detail$estimate), , drop = FALSE]
+  list(
+    R2R = xval_r2r(detail$validation, detail$estimate),
+    detail = detail,
+    status = if (nrow(detail) >= 2L) "ok" else "too_few_complete_predictions",
+    max_folds = max_folds,
+    evaluated_folds = length(fold_ids)
+  )
+}
+
+attach_alfak2_xval <- function(fit, xval) {
+  if (is.null(xval)) return(fit)
+  fit$xval <- xval
+  if (is.null(fit$diagnostics)) fit$diagnostics <- list()
+  fit$diagnostics$xval <- list(
+    R2R = xval$R2R,
+    status = xval$status,
+    n = if (!is.null(xval$detail)) nrow(xval$detail) else NA_integer_,
+    evaluated_folds = xval$evaluated_folds,
+    max_folds = xval$max_folds
+  )
+  fit
+}
+
 fit_real_patient_alfak2 <- function(repo_dir,
                                     patient_id,
                                     min_total_count = 20,
                                     drop_diploid = TRUE,
-                                    beta = 0.01,
+                                    beta = 0.00005,
                                     min_cn = 0,
                                     max_cn = 5,
                                     local_shell_depth = 0,
                                     global_extra_shell = 1,
                                     max_nodes = 4000,
+                                    compute_xval = TRUE,
+                                    xval_max_folds = Inf,
+                                    xval_seed = 1,
                                     force = FALSE,
+                                    output_subdir = "real_samples",
                                     control = list(eval.max = 250, iter.max = 250)) {
-  dirs <- ensure_benchmark_dirs(repo_dir, "real_samples")
+  dirs <- ensure_benchmark_dirs(repo_dir, output_subdir)
   fit_dir <- file.path(dirs$fits, patient_id)
   dir.create(fit_dir, recursive = TRUE, showWarnings = FALSE)
+  bundle_path <- file.path(fit_dir, "bundle.rds")
   fit_path <- file.path(fit_dir, "alfak2_fit.rds")
   landscape_path <- file.path(fit_dir, "landscape.rds")
   counts_path <- file.path(fit_dir, "counts.csv")
+  xval_path <- file.path(fit_dir, "xval.Rds")
+  xval_detail_path <- file.path(fit_dir, "xval_detail.csv")
 
-  if (!force && file.exists(fit_path) && file.exists(landscape_path)) {
-    return(readRDS(file.path(fit_dir, "bundle.rds")))
+  if (!force && file.exists(fit_path) && file.exists(landscape_path) && file.exists(bundle_path)) {
+    bundle <- readRDS(bundle_path)
+    bundle$min_total_count <- min_total_count
+    bundle$output_subdir <- output_subdir
+    if (isTRUE(compute_xval) && !file.exists(xval_path)) {
+      xval <- alfak2_heldout_xval(bundle$fit, min_cn = min_cn, max_folds = xval_max_folds, seed = xval_seed)
+      saveRDS(xval$R2R, xval_path)
+      utils::write.csv(xval$detail, xval_detail_path, row.names = FALSE)
+      bundle$fit <- attach_alfak2_xval(bundle$fit, xval)
+      bundle$xval <- xval
+      bundle$paths$xval <- xval_path
+      bundle$paths$xval_detail <- xval_detail_path
+      saveRDS(bundle$fit, fit_path)
+      saveRDS(bundle, bundle_path)
+    } else if (file.exists(xval_path)) {
+      bundle$xval <- list(
+        R2R = readRDS(xval_path),
+        detail = if (file.exists(xval_detail_path)) utils::read.csv(xval_detail_path, stringsAsFactors = FALSE) else data.frame(),
+        status = "loaded"
+      )
+      bundle$fit <- attach_alfak2_xval(bundle$fit, bundle$xval)
+      bundle$paths$xval <- xval_path
+      bundle$paths$xval_detail <- xval_detail_path
+      saveRDS(bundle$fit, fit_path)
+      saveRDS(bundle, bundle_path)
+    }
+    return(bundle)
   }
 
   built <- build_real_count_matrix(
@@ -230,30 +391,54 @@ fit_real_patient_alfak2 <- function(repo_dir,
     control = control
   )
   landscape <- landscape_from_alfak2_fit(fit, patient_id)
+  xval <- if (isTRUE(compute_xval)) {
+    alfak2_heldout_xval(fit, min_cn = min_cn, max_folds = xval_max_folds, seed = xval_seed)
+  } else {
+    NULL
+  }
   utils::write.csv(landscape, file.path(fit_dir, "landscape.csv"), row.names = FALSE)
+  if (!is.null(xval)) {
+    saveRDS(xval$R2R, xval_path)
+    utils::write.csv(xval$detail, xval_detail_path, row.names = FALSE)
+    fit <- attach_alfak2_xval(fit, xval)
+  }
   saveRDS(fit, fit_path)
   saveRDS(landscape, landscape_path)
   bundle <- list(
     patient_id = patient_id,
+    min_total_count = min_total_count,
+    output_subdir = output_subdir,
     input = built,
     fit = fit,
     landscape = landscape,
-    paths = list(fit = fit_path, landscape = landscape_path, counts = counts_path)
+    xval = xval,
+    paths = list(
+      fit = fit_path,
+      landscape = landscape_path,
+      counts = counts_path,
+      xval = xval_path,
+      xval_detail = xval_detail_path
+    )
   )
-  saveRDS(bundle, file.path(fit_dir, "bundle.rds"))
+  saveRDS(bundle, bundle_path)
   bundle
 }
 
-run_real_sample_landscapes <- function(repo_dir,
-                                       patient_subset = NULL,
-                                       continue_on_error = TRUE,
-                                       ...) {
+selected_real_patient_ids <- function(repo_dir, patient_subset = NULL) {
   data_dir <- file.path(repo_dir, "benchmark", "data")
   pids <- available_real_patient_ids(data_dir)
   if (!is.null(patient_subset) && length(patient_subset)) {
     pids <- intersect(sort_pid_levels_bench(patient_subset), pids)
   }
   if (!length(pids)) stop("No patient ids selected.", call. = FALSE)
+  pids
+}
+
+run_real_sample_landscapes <- function(repo_dir,
+                                       patient_subset = NULL,
+                                       continue_on_error = TRUE,
+                                       ...) {
+  pids <- selected_real_patient_ids(repo_dir, patient_subset = patient_subset)
   names(pids) <- pids
   out <- lapply(pids, function(pid) {
     tryCatch(
@@ -266,6 +451,70 @@ run_real_sample_landscapes <- function(repo_dir,
     )
   })
   out[!vapply(out, is.null, logical(1))]
+}
+
+run_real_sample_landscape_grid <- function(repo_dir,
+                                           patient_subset = NULL,
+                                           min_total_count_grid = c(5L, 10L, 20L),
+                                           parallel_workers = 1L,
+                                           output_root = "real_samples",
+                                           continue_on_error = TRUE,
+                                           ...) {
+  pids <- selected_real_patient_ids(repo_dir, patient_subset = patient_subset)
+  min_total_count_grid <- as.integer(min_total_count_grid)
+  if (!length(min_total_count_grid) || anyNA(min_total_count_grid) || any(min_total_count_grid < 1L)) {
+    stop("`min_total_count_grid` must contain positive integers.", call. = FALSE)
+  }
+  min_total_count_grid <- unique(min_total_count_grid)
+  tasks <- expand.grid(
+    patient_id = pids,
+    min_total_count = min_total_count_grid,
+    KEEP.OUT.ATTRS = FALSE,
+    stringsAsFactors = FALSE
+  )
+  tasks$task_id <- paste0(tasks$patient_id, "_MINOBS_", tasks$min_total_count)
+
+  run_one <- function(i) {
+    task <- tasks[i, , drop = FALSE]
+    out_subdir <- file.path(output_root, paste0("MINOBS_", task$min_total_count))
+    tryCatch(
+      {
+        bundle <- fit_real_patient_alfak2(
+          repo_dir = repo_dir,
+          patient_id = task$patient_id,
+          min_total_count = task$min_total_count,
+          output_subdir = out_subdir,
+          ...
+        )
+        bundle$task_id <- task$task_id
+        bundle$min_total_count <- task$min_total_count
+        bundle$output_subdir <- out_subdir
+        bundle
+      },
+      error = function(e) {
+        if (!continue_on_error) stop(e)
+        warning("Skipping ", task$task_id, ": ", conditionMessage(e), call. = FALSE)
+        NULL
+      }
+    )
+  }
+
+  idx <- seq_len(nrow(tasks))
+  parallel_workers <- suppressWarnings(as.numeric(parallel_workers)[1])
+  if (is.na(parallel_workers) || parallel_workers < 1) parallel_workers <- 1
+  if (is.infinite(parallel_workers)) parallel_workers <- length(idx)
+  parallel_workers <- as.integer(min(parallel_workers, length(idx)))
+  if (parallel_workers > 1L && .Platform$OS.type != "windows") {
+    out <- parallel::mclapply(idx, run_one, mc.cores = parallel_workers)
+  } else {
+    if (parallel_workers > 1L && .Platform$OS.type == "windows") {
+      warning("Forked parallelism is unavailable on Windows; running tasks serially.", call. = FALSE)
+    }
+    out <- lapply(idx, run_one)
+  }
+  names(out) <- tasks$task_id
+  out <- out[!vapply(out, is.null, logical(1))]
+  out
 }
 
 parse_karyotype_matrix_bench <- function(labels) {

@@ -17,7 +17,7 @@ Rcpp::CharacterVector alfak2_stringify_karyotypes_cpp(Rcpp::IntegerMatrix karyot
 Rcpp::List alfak2_build_graph_cpp(Rcpp::CharacterVector labels,
                                   Rcpp::IntegerVector y0,
                                   Rcpp::IntegerVector y1,
-                                  double beta = 0.01,
+                                  double beta = 0.00005,
                                   int shell_depth = 2,
                                   int min_cn = 0,
                                   int max_cn = 5,

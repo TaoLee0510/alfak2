@@ -7,7 +7,7 @@
 fit_alfak2(
   counts,
   dt = 1,
-  beta = 0.01,
+  beta = 5e-05,
   local_shell_depth = 2,
   global_extra_shell = 1,
   min_cn = 0,

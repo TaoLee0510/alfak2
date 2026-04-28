@@ -18,7 +18,7 @@
 #' @export
 fit_alfak2 <- function(counts,
                        dt = 1,
-                       beta = 0.01,
+                       beta = 0.00005,
                        local_shell_depth = 2,
                        global_extra_shell = 1,
                        min_cn = 0,

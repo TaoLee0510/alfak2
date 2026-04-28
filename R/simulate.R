@@ -13,7 +13,7 @@
 #' @return A list containing a two-column count matrix and sparsity metadata.
 #' @export
 simulate_sparse_counts <- function(landscape,
-                                   beta = 0.01,
+                                   beta = 0.00005,
                                    dt = 1,
                                    n0 = 500,
                                    n1 = 500,

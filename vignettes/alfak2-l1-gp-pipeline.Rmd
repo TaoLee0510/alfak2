@@ -34,7 +34,7 @@ Simulate sparse two-timepoint data from the known landscape.
 ```{r simulate}
 sim <- simulate_sparse_counts(
   landscape,
-  beta = 0.01,
+  beta = 0.00005,
   n0 = 150,
   n1 = 150,
   detection_threshold = 1,
@@ -49,7 +49,7 @@ Fit the two-layer compiled pipeline.
 fit <- fit_alfak2(
   sim$counts,
   dt = 1,
-  beta = 0.01,
+  beta = 0.00005,
   min_cn = 1,
   max_cn = 4,
   local_shell_depth = 2,
