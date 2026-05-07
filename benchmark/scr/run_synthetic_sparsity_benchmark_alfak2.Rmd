@@ -31,6 +31,11 @@ params:
   fit_max_nodes: 15000
   local_shell_depth: 0
   global_extra_shell: 1
+  input_depth: "raw"
+  effective_depth: null
+  effective_depth_mode: "min"
+  observation_model: null
+  dm_concentration: null
   force_rebuild_reference: false
   parallel_workers: 1
 ---
@@ -55,11 +60,12 @@ dirs <- ensure_benchmark_dirs(repo_dir, "synthetic_sparsity")
 
 ## Benchmark Design
 
-This benchmark has an explicit truth table and a forward sampling model. It:
+This benchmark has a known truth landscape and a forward sampling model. It:
 
-1. Generates a complete bounded copy-number landscape with known fitness using
-   `alfak2::simulate_l1_gp_landscape()`, an L1-correlated Gaussian random field
-   on the original karyotype lattice.
+1. Generates a bounded copy-number truth landscape with known fitness using
+   `alfak2::simulate_l1_gp_landscape()`, a lazy paper-style GRF oracle. For the
+   logistic reference simulation, small benchmark lattices are materialized into
+   an explicit `labels/karyotypes/fitness` table.
 2. Starts from the diploid state with fitness fixed to 1.
 3. Evolves the population under logistic growth with carrying capacity `K`.
 4. Applies paired gain/loss missegregation events with rate `pm` per chromosome
@@ -74,7 +80,9 @@ This benchmark has an explicit truth table and a forward sampling model. It:
    fixed timepoints, not from a previously sampled count table.
 8. Applies `min_obs` rare-node filtering and optional dropout.
 9. Fits `alfak2`.
-10. Scores posterior landscapes against the known truth.
+10. Scores posterior landscapes against the known truth, using direct table
+    lookup when available and `predict_landscape_fitness()` for lazy GRF
+    landscapes.
 
 Reference-standard tasks are parallelizable over `replicate x pm`.
 Each worker then runs the requested `min_obs x downsample_fraction` grid for
@@ -82,8 +90,9 @@ that reference input.
 
 The primary plot is sparsity versus recovery accuracy.
 
-The complete reference landscape size is `(max_cn - min_cn + 1)^n_chr`.
-The default is intentionally small enough to enumerate exactly. A full
+The materialized reference landscape size is `(max_cn - min_cn + 1)^n_chr`.
+The default benchmark lattice is intentionally small enough to enumerate exactly.
+A full
 22-chromosome lattice with copy numbers 1 through 8 would contain
 `8^22 = 73,786,976,294,838,206,464` states and is not enumerable or storable
 as a dense truth table.
@@ -124,6 +133,11 @@ bench <- run_synthetic_sparsity_benchmark(
   fit_max_nodes = as.integer(params$fit_max_nodes),
   local_shell_depth = as.integer(params$local_shell_depth),
   global_extra_shell = as.integer(params$global_extra_shell),
+  input_depth = params$input_depth,
+  effective_depth = if (is.null(params$effective_depth)) NULL else as.numeric(params$effective_depth),
+  effective_depth_mode = params$effective_depth_mode,
+  observation_model = if (is.null(params$observation_model)) NULL else params$observation_model,
+  dm_concentration = if (is.null(params$dm_concentration)) NULL else as.numeric(params$dm_concentration),
   force_rebuild_reference = isTRUE(params$force_rebuild_reference),
   parallel_workers = as.integer(params$parallel_workers)
 )

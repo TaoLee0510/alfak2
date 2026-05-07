@@ -1,6 +1,6 @@
 ---
 title: "alfak2 vs alfakR Real Sample Landscape Comparison"
-subtitle: "Current alfak2 single-sample fits versus legacy nn_prior_empirical_two_shell outputs"
+subtitle: "MINOBS-stratified comparison against legacy nn_prior_empirical_two_shell outputs"
 output:
   html_document:
     self_contained: true
@@ -11,8 +11,9 @@ output:
     number_sections: true
 params:
   patient_subset: null
-  alfak2_fit_dir: "/Users/4482173/Documents/GitHub/alfak2/benchmark/results/real_samples/MINOBS_20/fits"
-  alfakR_fit_dir: "/Users/4482173/Documents/GitHub/alfakR/benchmark/results/fits/nn_prior_empirical_two_shell/pm_0.00005/MINOBS_20"
+  min_total_count_grid: [5, 10, 20]
+  alfak2_fit_root: "/Users/4482173/Documents/GitHub/alfak2/benchmark/results/real_samples"
+  alfakR_fit_root: "/Users/4482173/Documents/GitHub/alfakR/benchmark/results/fits/nn_prior_empirical_two_shell/pm_0.00005"
 ---
 
 ```{r setup, include=FALSE}
@@ -35,9 +36,11 @@ dirs <- ensure_benchmark_dirs(repo_dir, "legacy_comparison")
 
 This report compares existing result files. It does not refit either method.
 
-- New method: current `alfak2` real-sample fits from `params$alfak2_fit_dir`.
+- New method: current `alfak2` real-sample fits from `params$alfak2_fit_root`.
 - Legacy method: `alfakR` `nn_prior_empirical_two_shell`, `pm = 0.00005`,
-  `MINOBS = 20`, from `params$alfakR_fit_dir`.
+  from `params$alfakR_fit_root`.
+- Minimum-observation thresholds are compared separately using
+  `params$min_total_count_grid`.
 
 Real samples do not provide a complete truth landscape. Therefore, this report
 does not claim absolute accuracy improvement. It reports comparable output
@@ -48,14 +51,15 @@ and one-step beneficial event differences.
 ## Run Comparison
 
 ```{r run-comparison}
-comparison <- run_alfakR_alfak2_real_comparison(
+comparison <- run_alfakR_alfak2_real_comparison_grid(
   repo_dir = repo_dir,
-  new_fit_dir = params$alfak2_fit_dir,
-  old_fit_dir = params$alfakR_fit_dir,
+  new_fit_root = params$alfak2_fit_root,
+  old_fit_root = params$alfakR_fit_root,
+  min_total_count_grid = params$min_total_count_grid,
   patient_subset = params$patient_subset
 )
 
-comparison$patients
+comparison$minobs_grid
 comparison$landscape_metrics
 comparison$beneficial_summary
 ```
@@ -64,8 +68,8 @@ comparison$beneficial_summary
 
 ```{r node-counts}
 p_nodes <- plot_node_count_comparison(comparison$landscape_metrics)
-ggplot2::ggsave(file.path(dirs$figures, "alfakR_vs_alfak2_node_counts.png"),
-                p_nodes, width = 11, height = 5.5, dpi = 150)
+ggplot2::ggsave(file.path(dirs$figures, "alfakR_vs_alfak2_node_counts_by_minobs.png"),
+                p_nodes, width = 11, height = 8, dpi = 150)
 p_nodes
 ```
 
@@ -73,17 +77,26 @@ p_nodes
 
 ```{r common-rank}
 p_rank <- plot_common_rank_comparison(comparison$landscape_metrics)
-ggplot2::ggsave(file.path(dirs$figures, "alfakR_vs_alfak2_common_rank_spearman.png"),
-                p_rank, width = 11, height = 5.5, dpi = 150)
+ggplot2::ggsave(file.path(dirs$figures, "alfakR_vs_alfak2_common_rank_spearman_by_minobs.png"),
+                p_rank, width = 11, height = 8, dpi = 150)
 p_rank
+```
+
+## Held-Out Validation
+
+```{r xval}
+p_xval <- plot_xval_comparison(comparison$landscape_metrics)
+ggplot2::ggsave(file.path(dirs$figures, "alfakR_vs_alfak2_xval_r2_by_minobs.png"),
+                p_xval, width = 11, height = 8, dpi = 150)
+p_xval
 ```
 
 ## One-Step Beneficial Differences
 
 ```{r beneficial-delta}
 p_beneficial_delta <- plot_beneficial_delta_heatmap(comparison$beneficial_profile)
-ggplot2::ggsave(file.path(dirs$figures, "alfakR_vs_alfak2_beneficial_delta_heatmap.png"),
-                p_beneficial_delta, width = 11, height = 5.5, dpi = 150)
+ggplot2::ggsave(file.path(dirs$figures, "alfakR_vs_alfak2_beneficial_delta_heatmap_by_minobs.png"),
+                p_beneficial_delta, width = 11, height = 9, dpi = 150)
 p_beneficial_delta
 ```
 
@@ -92,5 +105,5 @@ p_beneficial_delta
 ```{r output-files}
 list.files(dirs$tables, full.names = TRUE)
 list.files(dirs$figures, full.names = TRUE)
-file.path(dirs$results, "alfakR_vs_alfak2_real_comparison.rds")
+file.path(dirs$results, "alfakR_vs_alfak2_real_comparison_by_minobs.rds")
 ```

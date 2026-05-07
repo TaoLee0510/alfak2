@@ -2,57 +2,73 @@
 % Please edit documentation in R/simulate-l1-gp-landscape.R
 \name{simulate_l1_gp_landscape}
 \alias{simulate_l1_gp_landscape}
-\title{Simulate an L1-correlated Gaussian random-field truth landscape}
+\title{Simulate a lazy GRF truth landscape}
 \usage{
 simulate_l1_gp_landscape(
-  n_chr = 6,
+  n_chr = 22,
   min_cn = 1,
   max_cn = 8,
   diploid_cn = 2,
   diploid_fitness = 1,
-  lower = -5,
-  upper = 5,
-  ell = 2.5,
+  lower = NULL,
+  upper = NULL,
+  ell = NULL,
   seed = 1,
-  use_full_range = 0.95,
-  include_table = TRUE
+  use_full_range = NULL,
+  include_table = NULL,
+  n_centroids = 30,
+  lambda = if (is.null(ell)) 0.8 else ell,
+  founder = NULL,
+  founder_cn = diploid_cn,
+  founder_fitness = diploid_fitness,
+  scale = 1,
+  centroid_min = -10,
+  centroid_max = 20,
+  cache = TRUE
 )
 }
 \arguments{
 \item{n_chr}{Number of chromosomes.}
 
-\item{min_cn, max_cn}{Copy-number bounds.}
+\item{min_cn, max_cn}{Viability bounds used by lazy simulators.}
 
-\item{diploid_cn}{Diploid copy number used as the anchor state.}
+\item{diploid_cn}{Deprecated alias for \code{founder_cn}.}
 
-\item{diploid_fitness}{Fitness value assigned exactly to the diploid state.}
+\item{diploid_fitness}{Deprecated alias for \code{founder_fitness}.}
 
-\item{lower, upper}{Lower and upper bounds for generated fitness values.}
+\item{lower, upper, use_full_range, include_table}{Deprecated full-lattice
+options that are ignored by the lazy GRF implementation.}
 
-\item{ell}{Positive Manhattan-distance length scale.}
+\item{ell}{Deprecated. Use \code{lambda}.}
 
-\item{seed}{Reproducibility seed.}
+\item{seed}{Reproducibility seed for centroid generation.}
 
-\item{use_full_range}{Fraction of the feasible centered range to use.}
+\item{n_centroids}{Number of random GRF centroids/waves.}
 
-\item{include_table}{Whether to include a long table with one row per
-karyotype.}
+\item{lambda}{Positive wavelength parameter. Larger values produce smoother
+landscapes.}
+
+\item{founder}{Integer founder/diploid karyotype. Defaults to all
+\code{founder_cn}.}
+
+\item{founder_cn}{Copy number used to build the default founder.}
+
+\item{founder_fitness}{Fitness assigned exactly to \code{founder}.}
+
+\item{scale}{Multiplicative scale applied after founder-centering the raw
+GRF.}
+
+\item{centroid_min, centroid_max}{Inclusive integer range used for random
+centroids.}
+
+\item{cache}{Whether to attach an environment cache for repeated fitness
+queries.}
 }
 \value{
-An \code{alfak2_landscape} object with \code{labels}, \code{karyotypes}, \code{fitness},
-metadata, and optionally \code{table}.
+An \code{alfak2_grf_landscape} object.
 }
 \description{
-Generates a complete in silico benchmark fitness landscape directly on the
-original bounded karyotype copy-number lattice. No UMAP, PCA, t-SNE, or other
-embedding is used. Correlation decays exponentially with Manhattan distance:
-\verb{Cov(F(k), F(k')) = exp(-Manhattan(k, k') / ell)}, where \code{ell} controls
-smoothness. The implementation avoids constructing the full covariance matrix
-by using the separable/Kronecker structure of this covariance across
-chromosome dimensions.
-}
-\details{
-The diploid karyotype is anchored exactly to \code{diploid_fitness}, and all
-fitness values are scaled to lie inside \verb{[lower, upper]}. The return object is
-compatible with \code{simulate_sparse_counts()}.
+Backward-compatible entry point for the package's synthetic landscape
+generator. The implementation now follows the paper-style lazy GRF oracle and
+no longer enumerates the full karyotype lattice.
 }

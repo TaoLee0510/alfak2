@@ -1,0 +1,79 @@
+test_that("effective-depth preprocessing preserves controlled column totals", {
+  counts <- matrix(
+    c(90, 9,
+      10, 1,
+      0, 90),
+    nrow = 3,
+    byrow = TRUE,
+    dimnames = list(c("2.2", "2.3", "3.3"), c("t0", "t1"))
+  )
+  out <- apply_effective_depth_counts(counts, effective_depth = 20, effective_depth_mode = "fixed")
+  info <- attr(out, "effective_depth_info")
+
+  expect_equal(colSums(out), c(t0 = 20L, t1 = 20L))
+  expect_equal(info$effective_depth, c(20, 20))
+  expect_equal(info$raw_depth, c(100, 100))
+  expect_true(all(rowSums(out) > 0))
+})
+
+test_that("effective-depth fit defaults to dirichlet-multinomial controls", {
+  counts <- matrix(
+    c(30, 20,
+      10, 30),
+    nrow = 2,
+    byrow = TRUE,
+    dimnames = list(c("2.2", "2.3"), c("t0", "t1"))
+  )
+  fit <- fit_alfak2(
+    counts,
+    dt = 1,
+    beta = 0.01,
+    local_shell_depth = 1,
+    global_extra_shell = 0,
+    min_cn = 1,
+    max_cn = 3,
+    max_nodes = 100,
+    lambda_l_grid = 1,
+    lambda_e_grid = 0.1,
+    sigma_obs_grid = 0.05,
+    input_depth = "effective",
+    effective_depth = 20,
+    effective_depth_mode = "fixed",
+    control = list(eval.max = 120, iter.max = 120)
+  )
+
+  expect_s3_class(fit, "alfak2_fit")
+  expect_equal(fit$local$diagnostics$observation_model, "dirichlet_multinomial")
+  expect_equal(fit$diagnostics$dm_concentration, 50)
+  expect_equal(colSums(fit$data$counts), c(t0 = 20L, t1 = 20L))
+  expect_equal(fit$data$metadata$input_depth$effective_depth, c(20, 20))
+  expect_true(all(is.finite(summarize_alfak2(fit)$fitness_mean)))
+})
+
+test_that("raw input depth keeps the existing multinomial default", {
+  counts <- matrix(
+    c(30, 20,
+      10, 30),
+    nrow = 2,
+    byrow = TRUE,
+    dimnames = list(c("2.2", "2.3"), c("t0", "t1"))
+  )
+  fit <- fit_alfak2(
+    counts,
+    dt = 1,
+    beta = 0.01,
+    local_shell_depth = 1,
+    global_extra_shell = 0,
+    min_cn = 1,
+    max_cn = 3,
+    max_nodes = 100,
+    lambda_l_grid = 1,
+    lambda_e_grid = 0.1,
+    sigma_obs_grid = 0.05,
+    control = list(eval.max = 120, iter.max = 120)
+  )
+
+  expect_equal(fit$local$diagnostics$observation_model, "multinomial")
+  expect_equal(fit$diagnostics$dm_concentration, 200)
+  expect_equal(fit$diagnostics$input_depth$input_depth, "raw")
+})

@@ -8,6 +8,7 @@
 ^.*\.Rcheck$
 ^.*\.tar\.gz$
 ^src/.*\.(o|so|dll|dylib)$
+^src/.*\.tmp$
 ^src/symbols\.rds$
 ^benchmark$
 ^doc$

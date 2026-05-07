@@ -24,21 +24,23 @@ The core API is intentionally small and only exposes this two-layer method.
   karyotype transitions.
 - Graph posterior smoothing with ordered copy-number epistasis penalties.
 - Posterior summaries and plots for fitness estimates and uncertainty.
-- Benchmark truth landscapes can be generated directly on the original
-  bounded karyotype lattice with `simulate_l1_gp_landscape()`, which uses an
-  L1-correlated Gaussian random field without embedding the states.
+- Benchmark truth landscapes can be generated as lightweight paper-style GRF
+  oracles with `simulate_grf_landscape()`. Fitness is computed on demand for
+  requested karyotypes, so synthetic simulations can use 22 chromosomes without
+  enumerating the full copy-number lattice.
 
 ## Minimal Example
 
 ```r
 library(alfak2)
 
-landscape <- simulate_l1_gp_landscape(
-  n_chr = 4,
+landscape <- simulate_grf_landscape(
+  n_chr = 22,
+  n_centroids = 30,
+  lambda = 0.8,
   min_cn = 1,
   max_cn = 4,
-  seed = 1,
-  include_table = FALSE
+  seed = 1
 )
 
 sim <- simulate_sparse_counts(
@@ -47,7 +49,8 @@ sim <- simulate_sparse_counts(
   dt = 1,
   n0 = 200,
   n1 = 200,
-  seed = 2
+  seed = 2,
+  initial_population = 1000
 )
 
 fit <- fit_alfak2(
@@ -55,7 +58,8 @@ fit <- fit_alfak2(
   dt = 1,
   beta = 0.00005,
   min_cn = 1,
-  max_cn = 4
+  max_cn = 4,
+  max_nodes = 5000
 )
 
 head(summarize_alfak2(fit))

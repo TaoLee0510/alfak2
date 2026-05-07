@@ -2,7 +2,7 @@
 % Please edit documentation in R/simulate.R
 \name{simulate_sparse_counts}
 \alias{simulate_sparse_counts}
-\title{Simulate sparse two-timepoint counts from a truth landscape}
+\title{Simulate sparse count data from a lazy GRF truth landscape}
 \usage{
 simulate_sparse_counts(
   landscape,
@@ -14,16 +14,23 @@ simulate_sparse_counts(
   dropout_prob = 0,
   seed = 1,
   init_concentration = 1.5,
-  overdispersion = 0
+  overdispersion = 0,
+  initial_population = NULL,
+  initial_shell_depth = 1,
+  time_step = 0.1,
+  carrying_capacity = Inf,
+  passage_fraction = 0.2,
+  max_unique = 50000
 )
 }
 \arguments{
-\item{landscape}{Object returned by \code{simulate_l1_gp_landscape()}, or another
-landscape-like list containing \code{karyotypes}, \code{labels}, and \code{fitness}.}
+\item{landscape}{Object returned by \code{simulate_grf_landscape()}.}
 
-\item{beta, dt}{Dynamics parameters.}
+\item{beta}{Per-chromosome missegregation probability.}
 
-\item{n0, n1}{Sampling depths.}
+\item{dt}{Time interval between the two sampled count columns.}
+
+\item{n0, n1}{Sampling depths at the start and end of the interval.}
 
 \item{detection_threshold}{Minimum total observed count retained.}
 
@@ -31,13 +38,33 @@ landscape-like list containing \code{karyotypes}, \code{labels}, and \code{fitne
 
 \item{seed}{Reproducibility seed.}
 
-\item{init_concentration}{Concentration around diploid-like center.}
+\item{init_concentration}{Concentration around the founder for the initial
+local population.}
 
-\item{overdispersion}{Dirichlet concentration; \code{0} means multinomial.}
+\item{overdispersion}{Dirichlet-multinomial concentration; \code{0} means
+multinomial.}
+
+\item{initial_population}{Number of cells in the simulated population before
+the first sample. Defaults to \code{5 * max(n0, n1)}.}
+
+\item{initial_shell_depth}{Initial population support around the founder in
+one-missegregation steps.}
+
+\item{time_step}{Internal ABM time step.}
+
+\item{carrying_capacity}{Optional population cap. Use \code{Inf} to disable.}
+
+\item{passage_fraction}{Fraction retained if \code{carrying_capacity} is exceeded.}
+
+\item{max_unique}{Maximum number of unique live karyotypes allowed during
+simulation.}
 }
 \value{
 A list containing a two-column count matrix and sparsity metadata.
 }
 \description{
-Simulate sparse two-timepoint counts from a truth landscape
+Simulates karyotype evolution without enumerating the full copy-number
+lattice. The simulator keeps only karyotypes currently present in the
+population. When mutations create a new karyotype, its fitness is queried from
+the lazy GRF oracle with \code{predict_landscape_fitness()}.
 }

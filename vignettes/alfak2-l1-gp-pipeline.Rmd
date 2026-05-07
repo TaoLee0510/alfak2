@@ -1,8 +1,8 @@
 ---
-title: "alfak2 L1 GP Pipeline"
+title: "alfak2 Lazy GRF Pipeline"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{alfak2 L1 GP Pipeline}
+  %\VignetteIndexEntry{alfak2 Lazy GRF Pipeline}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -15,18 +15,19 @@ knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 library(alfak2)
 ```
 
-Generate a complete L1-correlated GP truth landscape on the original copy-number
-lattice.
+Generate a lightweight paper-style GRF truth landscape. The object stores GRF
+centroids and computes fitness only for requested karyotypes.
 
 ```{r landscape}
-landscape <- simulate_l1_gp_landscape(
+landscape <- simulate_grf_landscape(
   n_chr = 4,
+  n_centroids = 12,
+  lambda = 0.8,
   min_cn = 1,
   max_cn = 4,
-  seed = 10,
-  include_table = FALSE
+  seed = 10
 )
-length(landscape$fitness)
+predict_landscape_fitness(landscape, matrix(c(2, 2, 2, 2), nrow = 1))
 ```
 
 Simulate sparse two-timepoint data from the known landscape.
@@ -38,7 +39,8 @@ sim <- simulate_sparse_counts(
   n0 = 150,
   n1 = 150,
   detection_threshold = 1,
-  seed = 20
+  seed = 20,
+  initial_population = 500
 )
 sim$sparsity
 ```

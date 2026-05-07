@@ -16,6 +16,16 @@ fit_alfak2(
   lambda_l_grid = c(0.2, 1, 5),
   lambda_e_grid = c(0.05, 0.25, 1),
   sigma_obs_grid = c(0.02, 0.05, 0.1),
+  input_depth = c("raw", "effective"),
+  effective_depth = NULL,
+  effective_depth_mode = c("min", "cap", "fixed"),
+  observation_model = NULL,
+  dm_concentration = NULL,
+  alfakR_scale = FALSE,
+  n0 = NULL,
+  nb = NULL,
+  correct_efflux = FALSE,
+  legacy_weight = c("pi0", "directly_informed", "uniform"),
   ...
 )
 }
@@ -36,6 +46,39 @@ fit_alfak2(
 
 \item{lambda_l_grid, lambda_e_grid, sigma_obs_grid}{Hyperparameter grids passed
 to the compiled graph posterior.}
+
+\item{input_depth}{\code{"raw"} uses the supplied count matrix directly. \code{"effective"}
+converts each timepoint to frequencies and re-counts them at a controlled
+effective depth before fitting.}
+
+\item{effective_depth}{Effective sequencing depth used when
+\code{input_depth = "effective"}. Required for \code{"cap"} and \code{"fixed"} modes; ignored
+by \code{"min"} mode.}
+
+\item{effective_depth_mode}{Effective-depth rule. \code{"min"} uses the smaller raw
+timepoint depth for both columns, \code{"cap"} caps each raw depth at
+\code{effective_depth}, and \code{"fixed"} uses \code{effective_depth} for every timepoint.}
+
+\item{observation_model}{Optional observation model passed to
+\code{fit_local_posterior()}. If omitted, raw input uses \code{"multinomial"} and
+effective-depth input uses \code{"dirichlet_multinomial"}.}
+
+\item{dm_concentration}{Optional Dirichlet-multinomial concentration. If omitted,
+effective-depth Dirichlet-multinomial fits use 50 and other fits use 200.}
+
+\item{alfakR_scale}{Logical; if \code{TRUE}, append \code{alfakR}-scale legacy fitness
+columns without changing the native \code{alfak2} posterior estimates.}
+
+\item{n0, nb}{Initial and final population sizes used to calibrate the
+\code{alfakR} absolute-growth scale. Required when \code{alfakR_scale = TRUE}.}
+
+\item{correct_efflux}{Logical; if \code{TRUE}, apply the \code{alfakR}
+missegregation-efflux viability correction to the legacy-scale columns.}
+
+\item{legacy_weight}{Weighting scheme used to set the legacy-scale zero point.
+\code{"pi0"} uses the local TMB posterior initial frequencies, \code{"directly_informed"}
+uses observed graph nodes, and \code{"uniform"} weights all finite summary rows
+equally.}
 
 \item{...}{Passed to \code{fit_local_posterior()}.}
 }

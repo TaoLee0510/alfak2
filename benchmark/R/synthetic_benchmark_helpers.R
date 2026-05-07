@@ -23,11 +23,97 @@ top_k_overlap <- function(truth, pred, k = 10) {
   length(intersect(top_truth, top_pred)) / k
 }
 
+benchmark_format_karyotypes <- function(karyotypes) {
+  if (exists("format_karyotypes", mode = "function")) {
+    out <- try(format_karyotypes(karyotypes), silent = TRUE)
+    if (!inherits(out, "try-error")) return(as.character(out))
+  }
+  apply(as.matrix(karyotypes), 1L, paste, collapse = ".")
+}
+
+benchmark_predict_landscape_fitness <- function(landscape, karyotypes) {
+  if (exists("predict_landscape_fitness", mode = "function")) {
+    return(as.numeric(predict_landscape_fitness(landscape, karyotypes)))
+  }
+  if (requireNamespace("alfak2", quietly = TRUE) &&
+      "predict_landscape_fitness" %in% getNamespaceExports("alfak2")) {
+    return(as.numeric(alfak2::predict_landscape_fitness(landscape, karyotypes)))
+  }
+  stop("Lazy benchmark landscapes require `predict_landscape_fitness()`.", call. = FALSE)
+}
+
 truth_for_summary <- function(summary_df, landscape) {
-  idx <- match(as.character(summary_df$karyotype), as.character(landscape$labels))
+  labels <- as.character(summary_df$karyotype)
   out <- rep(NA_real_, nrow(summary_df))
-  out[!is.na(idx)] <- landscape$fitness[idx[!is.na(idx)]]
+  if (!is.null(landscape$labels) && !is.null(landscape$fitness)) {
+    idx <- match(labels, as.character(landscape$labels))
+    out[!is.na(idx)] <- landscape$fitness[idx[!is.na(idx)]]
+    missing <- is.na(idx)
+  } else {
+    missing <- rep(TRUE, length(labels))
+  }
+  if (any(missing) && inherits(landscape, "alfak2_grf_landscape")) {
+    out[missing] <- benchmark_predict_landscape_fitness(landscape, labels[missing])
+  }
   out
+}
+
+benchmark_reference_state_count <- function(landscape) {
+  if (!is.null(landscape$labels)) return(length(landscape$labels))
+  if (!is.null(landscape$n_chr) && !is.null(landscape$min_cn) && !is.null(landscape$max_cn)) {
+    return((as.numeric(landscape$max_cn) - as.numeric(landscape$min_cn) + 1)^as.numeric(landscape$n_chr))
+  }
+  NA_real_
+}
+
+materialize_benchmark_landscape <- function(landscape,
+                                            n_chr,
+                                            min_cn,
+                                            max_cn,
+                                            diploid_cn,
+                                            diploid_fitness,
+                                            max_materialized_states = 1e6) {
+  required <- c("labels", "karyotypes", "fitness", "min_cn", "max_cn")
+  if (is.list(landscape) && all(required %in% names(landscape))) {
+    return(landscape)
+  }
+  states_per_chr <- as.numeric(max_cn) - as.numeric(min_cn) + 1
+  n_states <- states_per_chr^as.numeric(n_chr)
+  if (!is.finite(n_states) || n_states > max_materialized_states) {
+    stop(
+      "Synthetic logistic reference requires a materialized truth lattice; requested ",
+      format(n_states, scientific = FALSE, big.mark = ","),
+      " states, above `max_materialized_states = ",
+      format(max_materialized_states, scientific = FALSE, big.mark = ","),
+      "`.",
+      call. = FALSE
+    )
+  }
+
+  grid <- expand.grid(
+    replicate(n_chr, seq.int(min_cn, max_cn), simplify = FALSE),
+    KEEP.OUT.ATTRS = FALSE
+  )
+  karyotypes <- as.matrix(grid)
+  storage.mode(karyotypes) <- "integer"
+  labels <- benchmark_format_karyotypes(karyotypes)
+  fitness <- benchmark_predict_landscape_fitness(landscape, karyotypes)
+  diploid_index <- which(rowSums(abs(karyotypes - diploid_cn)) == 0)
+  if (length(diploid_index) != 1L) {
+    stop("Could not identify exactly one diploid state in materialized landscape.", call. = FALSE)
+  }
+
+  landscape$labels <- labels
+  landscape$karyotypes <- karyotypes
+  landscape$fitness <- fitness
+  landscape$min_cn <- min_cn
+  landscape$max_cn <- max_cn
+  landscape$diploid_cn <- diploid_cn
+  landscape$diploid_index <- diploid_index
+  landscape$diploid_fitness <- diploid_fitness
+  landscape$materialized_states <- nrow(karyotypes)
+  class(landscape) <- unique(c("alfak2_materialized_landscape", class(landscape)))
+  landscape
 }
 
 benchmark_token <- function(x) {
@@ -178,6 +264,14 @@ load_or_build_reference_standard_data <- function(repo_dir,
     use_full_range = use_full_range,
     seed = landscape_seed
   )
+  landscape <- materialize_benchmark_landscape(
+    landscape,
+    n_chr = n_chr,
+    min_cn = min_cn,
+    max_cn = max_cn,
+    diploid_cn = diploid_cn,
+    diploid_fitness = diploid_fitness
+  )
   reference <- simulate_logistic_missegregation_reference(
     landscape = landscape,
     pm = pm,
@@ -211,11 +305,12 @@ load_or_build_reference_standard_data <- function(repo_dir,
 }
 
 reference_summary_row <- function(reference, replicate, pm) {
+  cache <- benchmark_or(reference$cache, list(status = NA_character_, file = NA_character_))
   data.frame(
     landscape_model = "l1_gp",
     replicate = replicate,
     pm = pm,
-    n_reference_states = length(reference$landscape$labels),
+    n_reference_states = benchmark_reference_state_count(reference$landscape),
     truth_family = benchmark_or(reference$landscape$family, "l1_gp"),
     covariance = benchmark_or(reference$landscape$covariance, NA_character_),
     standard_input_rows = nrow(reference$counts),
@@ -226,8 +321,8 @@ reference_summary_row <- function(reference, replicate, pm) {
     K = reference$K,
     N0 = reference$N0,
     census_size = reference$census_size,
-    cache_status = reference$cache$status,
-    cache_file = reference$cache$file,
+    cache_status = benchmark_or(cache$status, NA_character_),
+    cache_file = benchmark_or(cache$file, NA_character_),
     stringsAsFactors = FALSE
   )
 }
@@ -261,7 +356,7 @@ metric_from_fit <- function(fit,
     sampling_fraction = downsample_fraction,
     fraction_observed = fraction_observed,
     reference_occupied_fraction = reference_occupied_fraction,
-    n_reference_states = length(landscape$labels),
+    n_reference_states = benchmark_reference_state_count(landscape),
     n_predicted = nrow(s),
     n_scored = sum(ok),
     pearson = safe_cor(pred, truth, "pearson"),
@@ -334,6 +429,11 @@ run_synthetic_reference_task <- function(task,
                                          fit_max_nodes,
                                          local_shell_depth,
                                          global_extra_shell,
+                                         input_depth,
+                                         effective_depth,
+                                         effective_depth_mode,
+                                         observation_model,
+                                         dm_concentration,
                                          force_rebuild_reference,
                                          reference_cache_subdir,
                                          verbose) {
@@ -392,6 +492,11 @@ run_synthetic_reference_task <- function(task,
         lambda_l_grid = c(1),
         lambda_e_grid = c(0.25),
         sigma_obs_grid = c(0.05),
+        input_depth = input_depth,
+        effective_depth = effective_depth,
+        effective_depth_mode = effective_depth_mode,
+        observation_model = observation_model,
+        dm_concentration = dm_concentration,
         control = list(eval.max = 200, iter.max = 200)
       )
       fit_key <- paste("l1_gp", replicate, pm, min_obs, downsample_fraction, sep = "__")
@@ -445,6 +550,11 @@ run_synthetic_sparsity_benchmark <- function(repo_dir,
                                              fit_max_nodes = 15000,
                                              local_shell_depth = 0,
                                              global_extra_shell = 1,
+                                             input_depth = "raw",
+                                             effective_depth = NULL,
+                                             effective_depth_mode = "min",
+                                             observation_model = NULL,
+                                             dm_concentration = NULL,
                                              force_rebuild_reference = FALSE,
                                              reference_cache_subdir = "reference_standard_inputs",
                                              parallel_workers = 1L,
@@ -493,6 +603,11 @@ run_synthetic_sparsity_benchmark <- function(repo_dir,
       fit_max_nodes = fit_max_nodes,
       local_shell_depth = local_shell_depth,
       global_extra_shell = global_extra_shell,
+      input_depth = input_depth,
+      effective_depth = effective_depth,
+      effective_depth_mode = effective_depth_mode,
+      observation_model = observation_model,
+      dm_concentration = dm_concentration,
       force_rebuild_reference = force_rebuild_reference,
       reference_cache_subdir = reference_cache_subdir,
       verbose = verbose

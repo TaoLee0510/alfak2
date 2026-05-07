@@ -1,89 +1,77 @@
-test_that("L1 GP landscape generator smoke test", {
-  x <- simulate_l1_gp_landscape(
-    n_chr = 3,
-    min_cn = 1,
-    max_cn = 4,
+test_that("paper-style GRF landscape is lightweight and reproducible", {
+  x <- simulate_grf_landscape(n_chr = 22, n_centroids = 8, seed = 42)
+  y <- simulate_grf_landscape(n_chr = 22, n_centroids = 8, seed = 42)
+  z <- simulate_grf_landscape(n_chr = 22, n_centroids = 8, seed = 43)
+
+  expect_s3_class(x, "alfak2_grf_landscape")
+  expect_null(x$karyotypes)
+  expect_null(x$fitness)
+  expect_equal(x$centroids, y$centroids)
+  expect_false(isTRUE(all.equal(x$centroids, z$centroids)))
+})
+
+test_that("GRF oracle anchors founder and is deterministic", {
+  x <- simulate_grf_landscape(
+    n_chr = 4,
+    n_centroids = 10,
+    founder = c(2, 2, 2, 2),
+    founder_fitness = 1.25,
+    scale = 0.8,
     seed = 1
   )
-  expect_equal(length(x$fitness), 4^3)
-  expect_equal(nrow(x$karyotypes), 4^3)
-  expect_equal(length(x$labels), 4^3)
-  expect_s3_class(x, "alfak2_landscape")
+  k <- rbind(
+    c(2, 2, 2, 2),
+    c(2, 2, 3, 2),
+    c(1, 2, 3, 2)
+  )
+  f1 <- predict_landscape_fitness(x, k)
+  f2 <- predict_landscape_fitness(x, format_karyotypes(k))
+
+  expect_equal(f1, f2)
+  expect_equal(f1[1], 1.25, tolerance = 1e-12)
+  expect_equal(f1, predict_landscape_fitness(x, k), tolerance = 1e-12)
 })
 
-test_that("L1 GP landscape anchors diploid fitness", {
-  x <- simulate_l1_gp_landscape(n_chr = 3, min_cn = 1, max_cn = 4, seed = 1)
-  dip <- which(rowSums(abs(x$karyotypes - x$diploid_cn)) == 0)
-  expect_length(dip, 1)
-  expect_equal(x$fitness[dip], x$diploid_fitness, tolerance = 1e-12)
-})
-
-test_that("L1 GP landscape stays inside requested range", {
+test_that("legacy landscape constructor now returns lazy GRF", {
   x <- simulate_l1_gp_landscape(
     n_chr = 3,
     min_cn = 1,
     max_cn = 4,
-    lower = -3,
-    upper = 4,
+    diploid_fitness = 1.1,
     seed = 1
   )
-  expect_gte(min(x$fitness), x$lower - 1e-12)
-  expect_lte(max(x$fitness), x$upper + 1e-12)
-})
-
-test_that("L1 GP landscape is reproducible by seed", {
-  x1 <- simulate_l1_gp_landscape(n_chr = 3, min_cn = 1, max_cn = 4, seed = 123)
-  x2 <- simulate_l1_gp_landscape(n_chr = 3, min_cn = 1, max_cn = 4, seed = 123)
-  x3 <- simulate_l1_gp_landscape(n_chr = 3, min_cn = 1, max_cn = 4, seed = 124)
-  expect_equal(x1$fitness, x2$fitness)
-  expect_false(isTRUE(all.equal(x1$fitness, x3$fitness)))
-})
-
-test_that("L1 GP landscape table is consistent", {
-  x <- simulate_l1_gp_landscape(n_chr = 3, min_cn = 1, max_cn = 4, seed = 1)
-  expect_equal(x$table$fitness, x$fitness)
-  expect_equal(x$table$label, x$labels)
-  chr_cols <- paste0("chr", seq_len(x$n_chr))
-  expect_equal(as.matrix(x$table[, chr_cols]), x$karyotypes)
-})
-
-test_that("L1 GP landscape can skip long table", {
-  x <- simulate_l1_gp_landscape(
-    n_chr = 3,
-    min_cn = 1,
-    max_cn = 4,
-    seed = 1,
-    include_table = FALSE
+  expect_s3_class(x, "alfak2_grf_landscape")
+  expect_equal(
+    predict_landscape_fitness(x, matrix(c(2, 2, 2), nrow = 1)),
+    1.1,
+    tolerance = 1e-12
   )
-  expect_null(x$table)
-  expect_equal(length(x$fitness), 4^3)
-  expect_equal(nrow(x$karyotypes), 4^3)
-  expect_equal(length(x$labels), 4^3)
 })
 
-test_that("L1 GP landscape is compatible with sparse simulator", {
-  land <- simulate_l1_gp_landscape(
-    n_chr = 3,
-    min_cn = 1,
-    max_cn = 3,
+test_that("lazy GRF sparse simulator returns valid observed truth", {
+  land <- simulate_grf_landscape(
+    n_chr = 22,
+    n_centroids = 8,
+    lambda = 0.8,
     seed = 1,
-    include_table = FALSE
+    max_cn = 4
   )
   sim <- simulate_sparse_counts(
     land,
+    beta = 0.001,
+    dt = 0.5,
     n0 = 50,
     n1 = 60,
-    dt = 0.2,
-    seed = 2
+    seed = 2,
+    initial_population = 200,
+    time_step = 0.25
   )
   expect_equal(ncol(sim$counts), 2)
   expect_true(all(sim$counts >= 0))
+  expect_equal(sum(sim$counts[, 1]), 50)
+  expect_equal(sum(sim$counts[, 2]), 60)
   expect_gt(sim$sparsity$observed_nodes, 0)
-})
 
-test_that("default L1 GP benchmark size is correct", {
-  skip_on_cran()
-  x <- simulate_l1_gp_landscape(seed = 1, include_table = FALSE)
-  expect_equal(length(x$fitness), 262144)
-  expect_equal(nrow(x$karyotypes), 262144)
+  truth <- predict_landscape_fitness(land, rownames(sim$counts))
+  expect_equal(sim$truth_observed, truth, tolerance = 1e-12)
 })

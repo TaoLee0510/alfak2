@@ -9,7 +9,10 @@ fit_local_posterior(
   graph = NULL,
   observation_model = c("multinomial", "dirichlet_multinomial"),
   dm_concentration = 200,
-  control = list(eval.max = 500, iter.max = 500)
+  control = list(eval.max = 500, iter.max = 500),
+  gradient_tolerance = 0.001,
+  retry_on_untrusted_covariance = TRUE,
+  retry_control = list(eval.max = 2000, iter.max = 2000)
 )
 }
 \arguments{
@@ -22,6 +25,15 @@ fit_local_posterior(
 \item{dm_concentration}{Dirichlet-multinomial concentration when requested.}
 
 \item{control}{List passed to \code{stats::nlminb}.}
+
+\item{gradient_tolerance}{Maximum absolute gradient tolerated before TMB
+covariance is marked untrusted.}
+
+\item{retry_on_untrusted_covariance}{Whether to retry with \code{retry_control}
+when the first optimizer pass does not yield trusted covariance.}
+
+\item{retry_control}{Optional larger \code{stats::nlminb} control list used for the
+retry pass.}
 }
 \value{
 An \code{alfak2_local_fit} object.

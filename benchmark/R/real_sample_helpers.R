@@ -169,7 +169,7 @@ build_real_count_matrix <- function(data_dir,
 
 landscape_from_alfak2_fit <- function(fit, patient_id) {
   s <- alfak2::summarize_alfak2(fit, layer = "global")
-  data.frame(
+  out <- data.frame(
     patient_id = patient_id,
     k = as.character(s$karyotype),
     mean = as.numeric(s$fitness_mean),
@@ -182,6 +182,17 @@ landscape_from_alfak2_fit <- function(fit, patient_id) {
     nn = as.character(s$support_tier) %in% c("local_borrowed", "weakly_supported"),
     stringsAsFactors = FALSE
   )
+  legacy_cols <- c(
+    "fitness_mean_alfakR_scale",
+    "fitness_sd_alfakR_scale",
+    "conf_low_alfakR_scale",
+    "conf_high_alfakR_scale",
+    "efflux_viability"
+  )
+  for (col in legacy_cols[legacy_cols %in% names(s)]) {
+    out[[col]] <- as.numeric(s[[col]])
+  }
+  out
 }
 
 xval_r2r <- function(obs, pred) {
@@ -313,6 +324,62 @@ attach_alfak2_xval <- function(fit, xval) {
   fit
 }
 
+real_fit_parameters <- function(min_total_count,
+                                drop_diploid,
+                                beta,
+                                min_cn,
+                                max_cn,
+                                local_shell_depth,
+                                global_extra_shell,
+                                max_nodes,
+                                input_depth,
+                                effective_depth,
+                                effective_depth_mode,
+                                observation_model,
+                                dm_concentration,
+                                alfakR_scale,
+                                legacy_n0,
+                                legacy_nb,
+                                correct_efflux,
+                                legacy_weight) {
+  list(
+    min_total_count = as.integer(min_total_count),
+    drop_diploid = isTRUE(drop_diploid),
+    beta = as.numeric(beta),
+    min_cn = as.integer(min_cn),
+    max_cn = as.integer(max_cn),
+    local_shell_depth = as.integer(local_shell_depth),
+    global_extra_shell = as.integer(global_extra_shell),
+    max_nodes = as.integer(max_nodes),
+    input_depth = as.character(input_depth)[1],
+    effective_depth = if (is.null(effective_depth)) NA_real_ else as.numeric(effective_depth),
+    effective_depth_mode = as.character(effective_depth_mode)[1],
+    observation_model = if (is.null(observation_model)) NA_character_ else as.character(observation_model)[1],
+    dm_concentration = if (is.null(dm_concentration)) NA_real_ else as.numeric(dm_concentration),
+    alfakR_scale = isTRUE(alfakR_scale),
+    legacy_n0 = if (is.null(legacy_n0)) NA_real_ else as.numeric(legacy_n0),
+    legacy_nb = if (is.null(legacy_nb)) NA_real_ else as.numeric(legacy_nb),
+    correct_efflux = isTRUE(correct_efflux),
+    legacy_weight = as.character(legacy_weight)[1]
+  )
+}
+
+fit_parameters_match <- function(bundle, expected) {
+  actual <- bundle$fit_parameters
+  if (is.null(actual)) return(FALSE)
+  keys <- names(expected)
+  if (!all(keys %in% names(actual))) return(FALSE)
+  all(vapply(keys, function(k) {
+    a <- actual[[k]]
+    b <- expected[[k]]
+    if (is.numeric(a) || is.numeric(b) || is.integer(a) || is.integer(b)) {
+      isTRUE(all.equal(as.numeric(a), as.numeric(b), tolerance = 1e-12))
+    } else {
+      identical(a, b)
+    }
+  }, logical(1)))
+}
+
 fit_real_patient_alfak2 <- function(repo_dir,
                                     patient_id,
                                     min_total_count = 20,
@@ -320,9 +387,19 @@ fit_real_patient_alfak2 <- function(repo_dir,
                                     beta = 0.00005,
                                     min_cn = 0,
                                     max_cn = 5,
-                                    local_shell_depth = 0,
+                                    local_shell_depth = 1,
                                     global_extra_shell = 1,
-                                    max_nodes = 4000,
+                                    max_nodes = 15000,
+                                    input_depth = "raw",
+                                    effective_depth = NULL,
+                                    effective_depth_mode = "min",
+                                    observation_model = NULL,
+                                    dm_concentration = NULL,
+                                    alfakR_scale = TRUE,
+                                    legacy_n0 = 1e5,
+                                    legacy_nb = 1e7,
+                                    correct_efflux = FALSE,
+                                    legacy_weight = "pi0",
                                     compute_xval = TRUE,
                                     xval_max_folds = Inf,
                                     xval_seed = 1,
@@ -338,34 +415,59 @@ fit_real_patient_alfak2 <- function(repo_dir,
   counts_path <- file.path(fit_dir, "counts.csv")
   xval_path <- file.path(fit_dir, "xval.Rds")
   xval_detail_path <- file.path(fit_dir, "xval_detail.csv")
+  fit_parameters <- real_fit_parameters(
+    min_total_count = min_total_count,
+    drop_diploid = drop_diploid,
+    beta = beta,
+    min_cn = min_cn,
+    max_cn = max_cn,
+    local_shell_depth = local_shell_depth,
+    global_extra_shell = global_extra_shell,
+    max_nodes = max_nodes,
+    input_depth = input_depth,
+    effective_depth = effective_depth,
+    effective_depth_mode = effective_depth_mode,
+    observation_model = observation_model,
+    dm_concentration = dm_concentration,
+    alfakR_scale = alfakR_scale,
+    legacy_n0 = legacy_n0,
+    legacy_nb = legacy_nb,
+    correct_efflux = correct_efflux,
+    legacy_weight = legacy_weight
+  )
 
   if (!force && file.exists(fit_path) && file.exists(landscape_path) && file.exists(bundle_path)) {
     bundle <- readRDS(bundle_path)
-    bundle$min_total_count <- min_total_count
-    bundle$output_subdir <- output_subdir
-    if (isTRUE(compute_xval) && !file.exists(xval_path)) {
-      xval <- alfak2_heldout_xval(bundle$fit, min_cn = min_cn, max_folds = xval_max_folds, seed = xval_seed)
-      saveRDS(xval$R2R, xval_path)
-      utils::write.csv(xval$detail, xval_detail_path, row.names = FALSE)
-      bundle$fit <- attach_alfak2_xval(bundle$fit, xval)
-      bundle$xval <- xval
-      bundle$paths$xval <- xval_path
-      bundle$paths$xval_detail <- xval_detail_path
-      saveRDS(bundle$fit, fit_path)
-      saveRDS(bundle, bundle_path)
-    } else if (file.exists(xval_path)) {
-      bundle$xval <- list(
-        R2R = readRDS(xval_path),
-        detail = if (file.exists(xval_detail_path)) utils::read.csv(xval_detail_path, stringsAsFactors = FALSE) else data.frame(),
-        status = "loaded"
-      )
-      bundle$fit <- attach_alfak2_xval(bundle$fit, bundle$xval)
-      bundle$paths$xval <- xval_path
-      bundle$paths$xval_detail <- xval_detail_path
-      saveRDS(bundle$fit, fit_path)
-      saveRDS(bundle, bundle_path)
+    if (!fit_parameters_match(bundle, fit_parameters)) {
+      force <- TRUE
+    } else {
+      bundle$min_total_count <- min_total_count
+      bundle$output_subdir <- output_subdir
+      bundle$fit_parameters <- fit_parameters
+      if (isTRUE(compute_xval) && !file.exists(xval_path)) {
+        xval <- alfak2_heldout_xval(bundle$fit, min_cn = min_cn, max_folds = xval_max_folds, seed = xval_seed)
+        saveRDS(xval$R2R, xval_path)
+        utils::write.csv(xval$detail, xval_detail_path, row.names = FALSE)
+        bundle$fit <- attach_alfak2_xval(bundle$fit, xval)
+        bundle$xval <- xval
+        bundle$paths$xval <- xval_path
+        bundle$paths$xval_detail <- xval_detail_path
+        saveRDS(bundle$fit, fit_path)
+        saveRDS(bundle, bundle_path)
+      } else if (file.exists(xval_path)) {
+        bundle$xval <- list(
+          R2R = readRDS(xval_path),
+          detail = if (file.exists(xval_detail_path)) utils::read.csv(xval_detail_path, stringsAsFactors = FALSE) else data.frame(),
+          status = "loaded"
+        )
+        bundle$fit <- attach_alfak2_xval(bundle$fit, bundle$xval)
+        bundle$paths$xval <- xval_path
+        bundle$paths$xval_detail <- xval_detail_path
+        saveRDS(bundle$fit, fit_path)
+        saveRDS(bundle, bundle_path)
+      }
+      return(bundle)
     }
-    return(bundle)
   }
 
   built <- build_real_count_matrix(
@@ -388,6 +490,16 @@ fit_real_patient_alfak2 <- function(repo_dir,
     local_shell_depth = local_shell_depth,
     global_extra_shell = global_extra_shell,
     max_nodes = max_nodes,
+    input_depth = input_depth,
+    effective_depth = effective_depth,
+    effective_depth_mode = effective_depth_mode,
+    observation_model = observation_model,
+    dm_concentration = dm_concentration,
+    alfakR_scale = alfakR_scale,
+    n0 = legacy_n0,
+    nb = legacy_nb,
+    correct_efflux = correct_efflux,
+    legacy_weight = legacy_weight,
     control = control
   )
   landscape <- landscape_from_alfak2_fit(fit, patient_id)
@@ -408,6 +520,7 @@ fit_real_patient_alfak2 <- function(repo_dir,
     patient_id = patient_id,
     min_total_count = min_total_count,
     output_subdir = output_subdir,
+    fit_parameters = fit_parameters,
     input = built,
     fit = fit,
     landscape = landscape,

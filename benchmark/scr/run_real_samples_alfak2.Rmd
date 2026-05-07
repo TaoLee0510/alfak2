@@ -16,9 +16,15 @@ params:
   beta: 0.00005
   min_cn: 0
   max_cn: 5
-  local_shell_depth: 0
+  local_shell_depth: 1
   global_extra_shell: 1
-  max_nodes: 4000
+  max_nodes: 15000
+  input_depth: "raw"
+  effective_depth: null
+  effective_depth_mode: "min"
+  observation_model: null
+  dm_concentration: null
+  output_root: "real_samples"
   parallel_workers: Inf
   compute_xval: true
   xval_max_folds: Inf
@@ -50,13 +56,12 @@ patient and each requested minimum-observation threshold, fits `alfak2`, saves
 the posterior landscape, and then summarizes one-step copy-number moves from
 directly informed states.
 
-The default settings keep the local TMB fit on directly observed nodes and add
-one global shell for graph-borrowed one-step neighbors. Each
+The default settings fit directly observed nodes plus one-step neighbors in the
+local TMB layer, then add one global shell for graph-borrowed two-step
+neighbors. Each
 `patient_id x min_total_count` task is scheduled in parallel, while each
 individual `alfak2` fit is run serially. `parallel_workers: Inf` means one
-worker per task; lower it to a fixed integer if memory pressure is high. Set
-`local_shell_depth: 1` if you want the local hierarchical layer itself to
-include one-step borrowed nodes; that is slower for 22-chromosome real samples.
+worker per task; lower it to a fixed integer if memory pressure is high.
 
 ```{r input-patients}
 data_dir <- file.path(repo_dir, "benchmark", "data")
@@ -77,6 +82,12 @@ bundle_list <- run_real_sample_landscape_grid(
   local_shell_depth = params$local_shell_depth,
   global_extra_shell = params$global_extra_shell,
   max_nodes = params$max_nodes,
+  input_depth = params$input_depth,
+  effective_depth = if (is.null(params$effective_depth)) NULL else as.numeric(params$effective_depth),
+  effective_depth_mode = params$effective_depth_mode,
+  observation_model = if (is.null(params$observation_model)) NULL else params$observation_model,
+  dm_concentration = if (is.null(params$dm_concentration)) NULL else as.numeric(params$dm_concentration),
+  output_root = params$output_root,
   parallel_workers = params$parallel_workers,
   compute_xval = isTRUE(params$compute_xval),
   xval_max_folds = as.numeric(params$xval_max_folds),
@@ -113,6 +124,8 @@ fit_summary <- do.call(rbind, lapply(bundle_list, function(x) {
     patient_id = x$patient_id,
     min_total_count = x$min_total_count,
     output_subdir = x$output_subdir,
+    local_shell_depth = x$fit_parameters$local_shell_depth,
+    global_extra_shell = x$fit_parameters$global_extra_shell,
     observed_karyotypes = nrow(x$input$counts),
     t0_cells = sum(x$input$counts[, 1]),
     t1_cells = sum(x$input$counts[, 2]),
