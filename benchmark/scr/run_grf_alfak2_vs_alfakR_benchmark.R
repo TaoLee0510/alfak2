@@ -8,9 +8,14 @@ usage <- function() {
     "Usage:\n",
     "  Rscript benchmark/scr/run_grf_alfak2_vs_alfakR_benchmark.R [options]\n\n",
     "Core options:\n",
+    "  --mode=all|prepare|fit-task|summarize\n",
+    "  --task-index=1                 # 1-based row from task_table.tsv for --mode=fit-task\n",
     "  --alfak2-repo=/share/lab_crd/lab_crd/taoli/Project/alfak2\n",
     "  --alfakR-repo=/share/lab_crd/lab_crd/taoli/Project/alfakR\n",
     "  --output-dir=benchmark/results/grf_alfak2_vs_alfakR\n",
+    "  --source-input-dir=benchmark/results/grf_alfak2_vs_alfakR_shared_inputs  # optional prepared input reuse\n",
+    "  --path-map=/old/root=/new/root  # optional comma-separated runtime path remapping\n",
+    "  --write-node-accuracy=true      # set false for memory-light final summary tables\n",
     "  --methods=none,empirical,empirical_censored,empirical_censored_weighted,empirical_two_step\n",
     "  --minobs=5,10,20\n",
     "  --n-sim=1\n",
@@ -22,7 +27,8 @@ usage <- function() {
     "  --n-cores=1\n\n",
     "GRF/ABM options matching the alfakR GRF benchmark:\n",
     "  --seed=424242\n",
-    "  --pm=5e-05\n",
+    "  --pm=5e-05                    # data-generating beta used in the ABM simulation\n",
+    "  --beta-levels=1e-05,5e-05,1e-04,1e-03,1e-02  # fitted beta grid\n",
     "  --k-dim=22\n",
     "  --n-centroids=64\n",
     "  --time-max=360\n",
@@ -42,6 +48,7 @@ usage <- function() {
     "  --force-refit=false\n",
     "  --force-sim=false\n",
     "  --reuse-dirty-cache=false\n",
+    "  --recompile-dll=false          # force native-code rebuild before loading source trees\n",
     sep = ""
   )
 }
@@ -142,6 +149,89 @@ write_tsv <- function(x, path) {
   invisible(path)
 }
 
+read_tsv <- function(path) {
+  if (!file.exists(path)) stop("Missing TSV file: ", path, call. = FALSE)
+  utils::read.table(
+    path,
+    sep = "\t",
+    header = TRUE,
+    stringsAsFactors = FALSE,
+    check.names = FALSE,
+    quote = "",
+    comment.char = "",
+    fill = TRUE
+  )
+}
+
+parse_path_map <- function(args) {
+  value <- arg_value(args, "path_map", Sys.getenv("ALFAK_BENCH_PATH_MAP", ""))
+  if (is.null(value) || !nzchar(as.character(value))) {
+    return(data.frame(from = character(), to = character(), stringsAsFactors = FALSE))
+  }
+  entries <- trimws(strsplit(as.character(value), ",", fixed = TRUE)[[1L]])
+  entries <- entries[nzchar(entries)]
+  if (!length(entries)) {
+    return(data.frame(from = character(), to = character(), stringsAsFactors = FALSE))
+  }
+  rows <- lapply(entries, function(entry) {
+    eq <- regexpr("=", entry, fixed = TRUE)[[1L]]
+    if (eq < 2L) stop("Invalid --path-map entry: ", entry, call. = FALSE)
+    data.frame(
+      from = substr(entry, 1L, eq - 1L),
+      to = substr(entry, eq + 1L, nchar(entry)),
+      stringsAsFactors = FALSE
+    )
+  })
+  out <- do.call(rbind, rows)
+  out[order(nchar(out$from), decreasing = TRUE), , drop = FALSE]
+}
+
+apply_path_map_chr <- function(x, path_map) {
+  if (is.null(path_map) || !nrow(path_map) || !length(x)) return(x)
+  out <- as.character(x)
+  na <- is.na(out)
+  out[na] <- ""
+  for (i in seq_len(nrow(path_map))) {
+    from <- path_map$from[[i]]
+    to <- path_map$to[[i]]
+    hit <- startsWith(out, from)
+    out[hit] <- paste0(to, substring(out[hit], nchar(from) + 1L))
+  }
+  out[na] <- NA_character_
+  out
+}
+
+path_columns <- function(x) {
+  intersect(
+    c(
+      "repo_dir", "alfak2_repo", "alfakR_repo", "output_dir", "source_input_dir",
+      "outdir", "grf_rds", "input_rds", "fit_path", "landscape_path",
+      "bootstrap_path", "posterior_path", "xval_path"
+    ),
+    names(x)
+  )
+}
+
+apply_path_map_df <- function(x, path_map) {
+  if (is.null(x) || !length(x) || is.null(path_map) || !nrow(path_map)) return(x)
+  for (nm in path_columns(x)) {
+    if (is.character(x[[nm]]) || is.factor(x[[nm]])) {
+      x[[nm]] <- apply_path_map_chr(x[[nm]], path_map)
+    }
+  }
+  x
+}
+
+apply_path_map_list <- function(x, path_map) {
+  if (is.null(x) || !length(x) || is.null(path_map) || !nrow(path_map)) return(x)
+  for (nm in path_columns(x)) {
+    if (is.character(x[[nm]]) && length(x[[nm]]) == 1L) {
+      x[[nm]] <- apply_path_map_chr(x[[nm]], path_map)
+    }
+  }
+  x
+}
+
 read_rds_if_exists <- function(path) {
   if (!file.exists(path)) return(NULL)
   tryCatch(readRDS(path), error = function(e) NULL)
@@ -152,6 +242,22 @@ scalar_or_na <- function(x, default = NA_real_) {
   x[[1L]]
 }
 
+row_field <- function(row, name, default = NA) {
+  if (!name %in% names(row)) return(default)
+  value <- row[[name]]
+  if (is.null(value) || !length(value)) return(default)
+  value[[1L]]
+}
+
+validate_beta_grid <- function(x, name = "beta_levels") {
+  x <- sort(unique(as.numeric(x)))
+  x <- x[is.finite(x)]
+  if (!length(x) || any(x < 0 | x > 1)) {
+    stop("`", name, "` must contain values in [0, 1].", call. = FALSE)
+  }
+  x
+}
+
 system_text <- function(cmd, args, cwd = NULL) {
   old <- NULL
   if (!is.null(cwd)) {
@@ -160,7 +266,7 @@ system_text <- function(cmd, args, cwd = NULL) {
     setwd(cwd)
   }
   out <- tryCatch(
-    system2(cmd, args, stdout = TRUE, stderr = TRUE),
+    suppressWarnings(system2(cmd, args, stdout = TRUE, stderr = TRUE)),
     error = function(e) character(0)
   )
   paste(out, collapse = "\n")
@@ -182,12 +288,27 @@ repo_state <- function(repo_dir, package) {
   )
 }
 
-load_current_repos <- function(alfakR_repo, alfak2_repo) {
+compile_repo_dll <- function(repo_dir, package) {
+  if (!requireNamespace("pkgbuild", quietly = TRUE)) {
+    stop("Package `pkgbuild` is required to recompile native code for ", package, ".", call. = FALSE)
+  }
+  if (!pkgbuild::pkg_has_src(repo_dir)) return(invisible(FALSE))
+  message("Recompiling native code for ", package, " on this machine.")
+  pkgbuild::clean_dll(repo_dir)
+  pkgbuild::compile_dll(repo_dir, force = TRUE, quiet = TRUE)
+  invisible(TRUE)
+}
+
+load_current_repos <- function(alfakR_repo, alfak2_repo, recompile_dll = FALSE) {
   if (!requireNamespace("pkgload", quietly = TRUE)) {
     stop("Package `pkgload` is required so benchmark uses current source trees.", call. = FALSE)
   }
-  pkgload::load_all(alfakR_repo, quiet = TRUE)
-  pkgload::load_all(alfak2_repo, quiet = TRUE)
+  if (isTRUE(recompile_dll)) {
+    compile_repo_dll(alfakR_repo, "alfakR")
+    compile_repo_dll(alfak2_repo, "alfak2")
+  }
+  pkgload::load_all(alfakR_repo, quiet = TRUE, compile = FALSE, recompile = FALSE)
+  pkgload::load_all(alfak2_repo, quiet = TRUE, compile = FALSE, recompile = FALSE)
   invisible(TRUE)
 }
 
@@ -489,6 +610,9 @@ coerce_alfakR_landscape_nodes <- function(landscape,
     time_gap = fit_row$time_gap,
     time_delta = fit_row$time_delta,
     minobs = fit_row$minobs,
+    sim_pm = row_field(fit_row, "sim_pm", NA_real_),
+    pm = row_field(fit_row, "pm", NA_real_),
+    fit_beta_label = row_field(fit_row, "fit_beta_label", NA_character_),
     method = method,
     engine = "alfakR",
     input_policy = "alfakR_minobs_internal",
@@ -504,14 +628,13 @@ coerce_alfakR_landscape_nodes <- function(landscape,
   )
 }
 
-coerce_alfak2_nodes <- function(fit,
-                                method,
-                                input_policy,
-                                fit_row,
-                                centroids,
-                                lambda,
-                                use_legacy_scale = TRUE) {
-  s <- alfak2::summarize_alfak2(fit, layer = "global")
+coerce_alfak2_summary_nodes <- function(s,
+                                        method,
+                                        input_policy,
+                                        fit_row,
+                                        centroids,
+                                        lambda,
+                                        use_legacy_scale = TRUE) {
   est_col <- if (isTRUE(use_legacy_scale) && "fitness_mean_alfakR_scale" %in% names(s)) {
     "fitness_mean_alfakR_scale"
   } else {
@@ -532,6 +655,9 @@ coerce_alfak2_nodes <- function(fit,
     time_gap = fit_row$time_gap,
     time_delta = fit_row$time_delta,
     minobs = fit_row$minobs,
+    sim_pm = row_field(fit_row, "sim_pm", NA_real_),
+    pm = row_field(fit_row, "pm", NA_real_),
+    fit_beta_label = row_field(fit_row, "fit_beta_label", NA_character_),
     method = method,
     engine = "alfak2",
     input_policy = input_policy,
@@ -547,11 +673,32 @@ coerce_alfak2_nodes <- function(fit,
   )
 }
 
+coerce_alfak2_nodes <- function(fit,
+                                method,
+                                input_policy,
+                                fit_row,
+                                centroids,
+                                lambda,
+                                use_legacy_scale = TRUE) {
+  s <- alfak2::summarize_alfak2(fit, layer = "global")
+  coerce_alfak2_summary_nodes(
+    s = s,
+    method = method,
+    input_policy = input_policy,
+    fit_row = fit_row,
+    centroids = centroids,
+    lambda = lambda,
+    use_legacy_scale = use_legacy_scale
+  )
+}
+
 summarize_accuracy <- function(node_tbl) {
   if (is.null(node_tbl) || !nrow(node_tbl)) return(data.frame())
   group_cols <- c(
     "lambda", "lambda_label", "time_start", "time_gap", "time_delta",
-    "minobs", "method", "engine", "input_policy", "nn_prior"
+    "minobs",
+    intersect(c("sim_pm", "pm", "fit_beta_label"), names(node_tbl)),
+    "method", "engine", "input_policy", "nn_prior"
   )
   scopes <- c("all", "direct", "nn", "other")
   rows <- list()
@@ -599,7 +746,11 @@ make_delta_vs_alfakR <- function(summary_tbl) {
   alfak2_rows <- summary_tbl[summary_tbl$engine == "alfak2", , drop = FALSE]
   alfakR_rows <- summary_tbl[summary_tbl$engine == "alfakR", , drop = FALSE]
   if (!nrow(alfak2_rows) || !nrow(alfakR_rows)) return(data.frame())
-  keys <- c("lambda", "lambda_label", "time_start", "time_gap", "time_delta", "minobs", "support_scope")
+  keys <- c(
+    "lambda", "lambda_label", "time_start", "time_gap", "time_delta", "minobs",
+    intersect(c("sim_pm", "pm", "fit_beta_label"), names(summary_tbl)),
+    "support_scope"
+  )
   rows <- list()
   idx <- 0L
   for (i in seq_len(nrow(alfak2_rows))) {
@@ -630,6 +781,215 @@ make_delta_vs_alfakR <- function(summary_tbl) {
     }
   }
   do.call(rbind, rows)
+}
+
+empty_node_accuracy_table <- function() {
+  data.frame(
+    simulation_id = integer(),
+    lambda = numeric(),
+    lambda_label = character(),
+    time_start = numeric(),
+    time_gap = numeric(),
+    time_delta = numeric(),
+    minobs = integer(),
+    sim_pm = numeric(),
+    pm = numeric(),
+    fit_beta_label = character(),
+    method = character(),
+    engine = character(),
+    input_policy = character(),
+    nn_prior = character(),
+    k = character(),
+    estimated_fitness = numeric(),
+    estimated_sd = numeric(),
+    true_fitness = numeric(),
+    support_tier = character(),
+    support_scope = character(),
+    status = character(),
+    estimation_error = numeric(),
+    stringsAsFactors = FALSE
+  )
+}
+
+new_accuracy_scope_accumulator <- function() {
+  list(
+    n_nodes = 0L,
+    n_scored = 0L,
+    n_direct = 0L,
+    estimated = list(),
+    truth = list(),
+    sd_sum = 0,
+    sd_n = 0L
+  )
+}
+
+new_accuracy_group_accumulator <- function(base, scopes) {
+  scope_acc <- stats::setNames(vector("list", length(scopes)), scopes)
+  for (scope in scopes) scope_acc[[scope]] <- new_accuracy_scope_accumulator()
+  list(base = base, scopes = scope_acc)
+}
+
+append_accuracy_scope <- function(scope_acc, df) {
+  n <- nrow(df)
+  scope_acc$n_nodes <- scope_acc$n_nodes + n
+  if (!n) return(scope_acc)
+  ok <- is.finite(df$estimated_fitness) & is.finite(df$true_fitness)
+  scope_acc$n_scored <- scope_acc$n_scored + sum(ok)
+  scope_acc$n_direct <- scope_acc$n_direct + sum(df$support_scope == "direct", na.rm = TRUE)
+  if (any(ok)) {
+    idx <- length(scope_acc$estimated) + 1L
+    scope_acc$estimated[[idx]] <- df$estimated_fitness[ok]
+    scope_acc$truth[[idx]] <- df$true_fitness[ok]
+  }
+  sd_ok <- is.finite(df$estimated_sd)
+  if (any(sd_ok)) {
+    scope_acc$sd_sum <- scope_acc$sd_sum + sum(df$estimated_sd[sd_ok])
+    scope_acc$sd_n <- scope_acc$sd_n + sum(sd_ok)
+  }
+  scope_acc
+}
+
+accuracy_group_key <- function(base) {
+  paste(vapply(base, function(x) as.character(x[[1L]]), character(1)), collapse = "\r")
+}
+
+accumulate_accuracy_nodes <- function(acc, node_tbl) {
+  if (is.null(node_tbl) || !nrow(node_tbl)) return(acc)
+  group_cols <- c(
+    "lambda", "lambda_label", "time_start", "time_gap", "time_delta",
+    "minobs",
+    intersect(c("sim_pm", "pm", "fit_beta_label"), names(node_tbl)),
+    "method", "engine", "input_policy", "nn_prior"
+  )
+  scopes <- c("all", "direct", "nn", "other")
+  split_key <- interaction(node_tbl[group_cols], drop = TRUE, lex.order = TRUE)
+  for (key in levels(split_key)) {
+    df0 <- node_tbl[split_key == key, , drop = FALSE]
+    if (!nrow(df0)) next
+    base <- df0[1L, group_cols, drop = FALSE]
+    group_key <- accuracy_group_key(base)
+    if (is.null(acc[[group_key]])) {
+      acc[[group_key]] <- new_accuracy_group_accumulator(base, scopes)
+    }
+    for (scope in scopes) {
+      df <- if (identical(scope, "all")) df0 else df0[df0$support_scope == scope, , drop = FALSE]
+      acc[[group_key]]$scopes[[scope]] <- append_accuracy_scope(acc[[group_key]]$scopes[[scope]], df)
+    }
+  }
+  acc
+}
+
+accuracy_accumulators_to_summary <- function(acc) {
+  if (!length(acc)) return(data.frame())
+  scopes <- c("all", "direct", "nn", "other")
+  rows <- list()
+  idx <- 0L
+  for (group_key in names(acc)) {
+    group <- acc[[group_key]]
+    for (scope in scopes) {
+      s <- group$scopes[[scope]]
+      estimated <- unlist(s$estimated, use.names = FALSE)
+      truth <- unlist(s$truth, use.names = FALSE)
+      err <- estimated - truth
+      pred_c <- estimated - mean(estimated)
+      truth_c <- truth - mean(truth)
+      centered_err <- pred_c - truth_c
+      idx <- idx + 1L
+      rows[[idx]] <- data.frame(
+        group$base,
+        support_scope = scope,
+        n_nodes = s$n_nodes,
+        n_scored = s$n_scored,
+        observed_node_fraction = if (s$n_nodes) s$n_direct / s$n_nodes else NaN,
+        pearson = safe_cor(estimated, truth, "pearson"),
+        spearman = safe_cor(estimated, truth, "spearman"),
+        rmse = if (length(err)) sqrt(mean(err^2)) else NA_real_,
+        mae = if (length(err)) mean(abs(err)) else NA_real_,
+        signed_bias = if (length(err)) mean(err) else NA_real_,
+        centered_rmse = if (length(centered_err)) sqrt(mean(centered_err^2)) else NA_real_,
+        centered_mae = if (length(centered_err)) mean(abs(centered_err)) else NA_real_,
+        centered_r2 = safe_centered_r2(estimated, truth),
+        sign_accuracy = if (length(centered_err)) mean(sign(pred_c) == sign(truth_c), na.rm = TRUE) else NA_real_,
+        false_high_rate = if (length(centered_err)) mean(pred_c > 0 & truth_c <= 0, na.rm = TRUE) else NA_real_,
+        mean_estimated_sd = if (s$sd_n) s$sd_sum / s$sd_n else NaN,
+        stringsAsFactors = FALSE,
+        check.names = FALSE
+      )
+    }
+  }
+  do.call(rbind, rows)
+}
+
+read_grf_sim_cached <- function(path, grf_cache = NULL) {
+  path <- as.character(path)
+  if (!nzchar(path) || !file.exists(path)) return(NULL)
+  if (is.environment(grf_cache)) {
+    key <- path
+    if (exists(key, envir = grf_cache, inherits = FALSE)) {
+      return(get(key, envir = grf_cache, inherits = FALSE))
+    }
+    value <- readRDS(path)
+    assign(key, value, envir = grf_cache)
+    return(value)
+  }
+  readRDS(path)
+}
+
+read_nodes_for_fit_row <- function(fr, grf_cache = NULL) {
+  grf_path <- as.character(fr$grf_rds[[1]])
+  grf_sim <- read_grf_sim_cached(grf_path, grf_cache = grf_cache)
+  if (is.null(grf_sim)) return(data.frame())
+  if (identical(as.character(fr$engine[[1]]), "alfakR")) {
+    landscape <- read_rds_if_exists(as.character(fr$landscape_path[[1]]))
+    if (is.null(landscape)) return(data.frame())
+    coerce_alfakR_landscape_nodes(
+      landscape = landscape,
+      method = as.character(fr$method[[1]]),
+      nn_prior = as.character(fr$nn_prior[[1]]),
+      fit_row = fr,
+      centroids = grf_sim$centroids,
+      lambda = as.numeric(fr$lambda[[1]])
+    )
+  } else {
+    summary <- read_rds_if_exists(as.character(fr$landscape_path[[1]]))
+    if (is.data.frame(summary) && "karyotype" %in% names(summary)) {
+      return(coerce_alfak2_summary_nodes(
+        s = summary,
+        method = as.character(fr$method[[1]]),
+        input_policy = as.character(fr$input_policy[[1]]),
+        fit_row = fr,
+        centroids = grf_sim$centroids,
+        lambda = as.numeric(fr$lambda[[1]]),
+        use_legacy_scale = TRUE
+      ))
+    }
+    fit <- read_rds_if_exists(as.character(fr$fit_path[[1]]))
+    if (is.null(fit)) return(data.frame())
+    coerce_alfak2_nodes(
+      fit = fit,
+      method = as.character(fr$method[[1]]),
+      input_policy = as.character(fr$input_policy[[1]]),
+      fit_row = fr,
+      centroids = grf_sim$centroids,
+      lambda = as.numeric(fr$lambda[[1]]),
+      use_legacy_scale = TRUE
+    )
+  }
+}
+
+summarize_fit_results_streaming <- function(fit_tbl) {
+  acc <- list()
+  grf_cache <- new.env(parent = emptyenv())
+  for (i in seq_len(nrow(fit_tbl))) {
+    fr <- fit_tbl[i, , drop = FALSE]
+    if (!identical(as.character(fr$status[[1]]), "ok")) next
+    if (i %% 25L == 0L) {
+      message("  processed fit rows: ", i, " / ", nrow(fit_tbl))
+    }
+    nodes <- read_nodes_for_fit_row(fr, grf_cache = grf_cache)
+    acc <- accumulate_accuracy_nodes(acc, nodes)
+  }
+  accuracy_accumulators_to_summary(acc)
 }
 
 capture_warnings <- function(expr) {
@@ -672,6 +1032,7 @@ run_alfakR_fit <- function(task, cfg, repo_versions) {
   started <- Sys.time()
   res <- tryCatch({
     set.seed(task$benchmark_seed)
+    fit_beta <- as.numeric(row_field(task, "pm", cfg$pm))
     cap <- capture_warnings(
       alfakR::alfak(
         yi = yi,
@@ -681,7 +1042,7 @@ run_alfakR_fit <- function(task, cfg, repo_versions) {
         nboot = cfg$nboot,
         n0 = cfg$n0,
         nb = cfg$nb,
-        pm = cfg$pm,
+        pm = fit_beta,
         correct_efflux = cfg$correct_efflux,
         nn_prior = task$nn_prior,
         nn_prior_grid_n = cfg$grid_n,
@@ -764,10 +1125,11 @@ run_alfak2_fit <- function(task, cfg, repo_versions) {
   }
   started <- Sys.time()
   res <- tryCatch({
+    fit_beta <- as.numeric(row_field(task, "pm", cfg$pm))
     fit <- alfak2::fit_alfak2(
       counts,
       dt = dt,
-      beta = cfg$pm,
+      beta = fit_beta,
       min_cn = cfg$alfak2_min_cn,
       max_cn = as.integer(max_cn),
       local_shell_depth = cfg$alfak2_local_shell_depth,
@@ -860,7 +1222,10 @@ list_to_data_frame <- function(x) {
 
 validate_task_shared_sources <- function(task_tbl) {
   if (is.null(task_tbl) || !nrow(task_tbl)) return(invisible(TRUE))
-  key_cols <- c("simulation_id", "lambda_label", "time_start", "time_gap", "time_delta", "minobs")
+  key_cols <- c(
+    "simulation_id", "lambda_label", "time_start", "time_gap", "time_delta",
+    "minobs", intersect(c("pm", "fit_beta_label"), names(task_tbl))
+  )
   group_key <- interaction(task_tbl[key_cols], drop = TRUE, lex.order = TRUE)
   groups <- split(task_tbl, group_key)
   bad_input <- names(groups)[vapply(groups, function(df) {
@@ -908,6 +1273,10 @@ build_config <- function(args, repo_dir) {
     alfak2_repo = normalizePath(arg_value(args, "alfak2_repo", repo_dir), winslash = "/", mustWork = FALSE),
     alfakR_repo = normalizePath(arg_value(args, "alfakR_repo", "/share/lab_crd/lab_crd/taoli/Project/alfakR"), winslash = "/", mustWork = FALSE),
     output_dir = normalize_output_dir(repo_dir, arg_value(args, "output_dir", "benchmark/results/grf_alfak2_vs_alfakR")),
+    source_input_dir = {
+      x <- arg_value(args, "source_input_dir", NULL)
+      if (is.null(x)) NULL else normalize_output_dir(repo_dir, x)
+    },
     methods = methods,
     minobs = sort(unique(arg_integer_vec(args, "minobs", c(5L, 10L, 20L)))),
     n_sim = arg_integer(args, "n_sim", 1L),
@@ -919,6 +1288,7 @@ build_config <- function(args, repo_dir) {
     n_cores = arg_integer(args, "n_cores", 1L),
     seed = arg_integer(args, "seed", 424242L),
     pm = arg_numeric(args, "pm", 5e-05),
+    beta_levels = validate_beta_grid(arg_numeric_vec(args, "beta_levels", c(1e-05, 5e-05, 1e-04, 1e-03, 1e-02))),
     n0 = arg_numeric(args, "n0", 100000),
     nb = arg_numeric(args, "nb", 10000000),
     correct_efflux = arg_logical(args, "correct_efflux", TRUE),
@@ -987,7 +1357,8 @@ build_config <- function(args, repo_dir) {
     alfak2_legacy_weight = as.character(arg_value(args, "alfak2_legacy_weight", "pi0")),
     alfak2_eval_max = arg_integer(args, "alfak2_eval_max", 500L),
     alfak2_iter_max = arg_integer(args, "alfak2_iter_max", 500L),
-    alfak2_retry_max = arg_integer(args, "alfak2_retry_max", 2000L)
+    alfak2_retry_max = arg_integer(args, "alfak2_retry_max", 2000L),
+    write_node_accuracy = arg_logical(args, "write_node_accuracy", TRUE)
   )
 }
 
@@ -996,35 +1367,187 @@ build_dirs <- function(output_dir) {
     root = output_dir,
     cache = file.path(output_dir, "cache"),
     fits = file.path(output_dir, "fits"),
-    tables = file.path(output_dir, "tables")
+    tables = file.path(output_dir, "tables"),
+    fit_parts = file.path(output_dir, "tables", "fit_results_parts")
   )
   for (path in dirs) dir.create(path, recursive = TRUE, showWarnings = FALSE)
   dirs
 }
 
-main <- function() {
-  args <- parse_cli_args(commandArgs(trailingOnly = TRUE))
-  if (isTRUE(args$help)) {
-    usage()
-    return(invisible(NULL))
-  }
-  repo_dir <- normalizePath(arg_value(args, "repo_dir", resolve_repo_dir()), winslash = "/", mustWork = FALSE)
-  cfg <- build_config(args, repo_dir)
-  dirs <- build_dirs(cfg$output_dir)
+numeric_in <- function(x, values, tol = 1e-8) {
+  x <- as.numeric(x)
+  values <- as.numeric(values)
+  vapply(x, function(xx) any(abs(xx - values) <= tol), logical(1))
+}
 
-  repo_versions <- rbind(
-    repo_state(cfg$alfakR_repo, "alfakR"),
-    repo_state(cfg$alfak2_repo, "alfak2")
+resolve_source_cache_path <- function(path, source_dir) {
+  path <- as.character(path)
+  if (!length(path) || !nzchar(path[[1L]])) return(NA_character_)
+  if (file.exists(path)) return(normalizePath(path, winslash = "/", mustWork = TRUE))
+  fallback <- file.path(source_dir, "cache", basename(path))
+  if (file.exists(fallback)) return(normalizePath(fallback, winslash = "/", mustWork = TRUE))
+  path
+}
+
+filter_source_input_table <- function(source_tbl, cfg) {
+  needed <- c(
+    "simulation_id", "lambda", "lambda_label", "time_start", "time_gap", "time_delta",
+    "patient_id", "grf_key", "grf_rds", "input_rds", "input_md5", "minobs"
   )
-  write_tsv(repo_versions, file.path(dirs$tables, "repo_versions.tsv"))
+  missing <- setdiff(needed, names(source_tbl))
+  if (length(missing)) {
+    stop("Source input table is missing columns: ", paste(missing, collapse = ", "), call. = FALSE)
+  }
+  source_tbl$simulation_id <- as.integer(source_tbl$simulation_id)
+  source_tbl$lambda <- as.numeric(source_tbl$lambda)
+  source_tbl$time_start <- as.numeric(source_tbl$time_start)
+  source_tbl$time_gap <- as.numeric(source_tbl$time_gap)
+  source_tbl$time_delta <- as.numeric(source_tbl$time_delta)
+  source_tbl$minobs <- as.integer(source_tbl$minobs)
+  if ("sim_pm" %in% names(source_tbl)) source_tbl$sim_pm <- as.numeric(source_tbl$sim_pm)
+  keep <- source_tbl$simulation_id %in% seq_len(cfg$n_sim) &
+    numeric_in(source_tbl$lambda, cfg$lambdas) &
+    numeric_in(source_tbl$time_start, cfg$time_starts) &
+    numeric_in(source_tbl$time_gap, cfg$time_gaps) &
+    source_tbl$minobs %in% cfg$minobs
+  if ("sim_pm" %in% names(source_tbl)) {
+    keep <- keep & numeric_in(source_tbl$sim_pm, cfg$pm)
+  }
+  out <- source_tbl[keep, , drop = FALSE]
+  out <- out[order(out$simulation_id, out$lambda, out$time_start, out$time_gap, out$minobs), , drop = FALSE]
+  if (!nrow(out)) {
+    stop(
+      "No rows in source input table match requested benchmark grid. ",
+      "Check --pm, --n-sim, --lambdas, --time-gaps, --time-starts, and --minobs.",
+      call. = FALSE
+    )
+  }
+  out
+}
 
-  message("Loading current source trees with pkgload::load_all().")
-  message("  alfakR: ", cfg$alfakR_repo)
-  message("  alfak2: ", cfg$alfak2_repo)
-  load_current_repos(cfg$alfakR_repo, cfg$alfak2_repo)
+prepare_benchmark_inputs_from_source <- function(cfg, dirs) {
+  source_dir <- normalizePath(cfg$source_input_dir, winslash = "/", mustWork = TRUE)
+  source_input_path <- file.path(source_dir, "tables", "input_table.tsv")
+  if (!file.exists(source_input_path)) {
+    stop("Missing source input table: ", source_input_path, call. = FALSE)
+  }
+  input_tbl <- filter_source_input_table(read_tsv(source_input_path), cfg)
+  input_tbl$source_input_dir <- source_dir
+  input_tbl$input_source <- "reused"
+  input_tbl$grf_rds <- vapply(input_tbl$grf_rds, resolve_source_cache_path, character(1), source_dir = source_dir)
+  input_tbl$input_rds <- vapply(input_tbl$input_rds, resolve_source_cache_path, character(1), source_dir = source_dir)
+  if ("input_csv" %in% names(input_tbl)) {
+    input_tbl$input_csv <- vapply(input_tbl$input_csv, resolve_source_cache_path, character(1), source_dir = source_dir)
+  }
+  missing_grf <- unique(input_tbl$grf_rds[!file.exists(input_tbl$grf_rds)])
+  missing_input <- unique(input_tbl$input_rds[!file.exists(input_tbl$input_rds)])
+  if (length(missing_grf) || length(missing_input)) {
+    msg <- c(
+      if (length(missing_grf)) paste0("missing grf_rds: ", paste(utils::head(missing_grf, 3), collapse = ", ")),
+      if (length(missing_input)) paste0("missing input_rds: ", paste(utils::head(missing_input, 3), collapse = ", "))
+    )
+    stop("Source input files are not available: ", paste(msg, collapse = " | "), call. = FALSE)
+  }
+  if (!"input_md5" %in% names(input_tbl)) input_tbl$input_md5 <- unname(tools::md5sum(input_tbl$input_rds))
 
-  if (any(repo_versions$dirty) && !isTRUE(cfg$reuse_dirty_cache)) {
-    message("At least one repo is dirty; fit caches will not be reused unless --reuse-dirty-cache=true.")
+  fit_tasks <- list()
+  task_idx <- 0L
+  for (i in seq_len(nrow(input_tbl))) {
+    row <- input_tbl[i, , drop = FALSE]
+    sim_pm <- as.numeric(row_field(row, "sim_pm", cfg$pm))
+    for (fit_beta in cfg$beta_levels) {
+      fit_beta_label <- pm_to_label(fit_beta)
+      for (policy in cfg$alfak2_input_policies) {
+        task_idx <- task_idx + 1L
+        method <- paste0("alfak2_", cfg$alfak2_input_depth, "_", policy)
+        fit_tasks[[task_idx]] <- data.frame(
+          engine = "alfak2",
+          method = method,
+          input_policy = policy,
+          nn_prior = NA_character_,
+          simulation_id = as.integer(row$simulation_id),
+          lambda = as.numeric(row$lambda),
+          lambda_label = as.character(row$lambda_label),
+          time_start = as.numeric(row$time_start),
+          time_gap = as.numeric(row$time_gap),
+          time_delta = as.numeric(row$time_delta),
+          sim_pm = sim_pm,
+          pm = fit_beta,
+          fit_beta_label = fit_beta_label,
+          patient_id = as.character(row$patient_id),
+          grf_key = as.character(row$grf_key),
+          grf_rds = as.character(row$grf_rds),
+          input_rds = as.character(row$input_rds),
+          input_md5 = as.character(row$input_md5),
+          minobs = as.integer(row$minobs),
+          benchmark_seed = as.integer(cfg$seed + as.integer(row$simulation_id) * 10000L +
+                                        round(as.numeric(row$time_gap) * 1000) +
+                                        as.integer(row$minobs) * 100L + 900L +
+                                        match(policy, cfg$alfak2_input_policies)),
+          outdir = file.path(dirs$fits, "alfak2", paste0("lambda_", row$lambda_label),
+                             paste0("gap_", path_token(row$time_gap)),
+                             paste0("beta_", fit_beta_label), paste0("MINOBS_", row$minobs),
+                             method, row$patient_id),
+          stringsAsFactors = FALSE
+        )
+      }
+      for (method in cfg$methods) {
+        task_idx <- task_idx + 1L
+        fit_tasks[[task_idx]] <- data.frame(
+          engine = "alfakR",
+          method = paste0("alfakR_", method),
+          input_policy = "alfakR_minobs_internal",
+          nn_prior = method,
+          simulation_id = as.integer(row$simulation_id),
+          lambda = as.numeric(row$lambda),
+          lambda_label = as.character(row$lambda_label),
+          time_start = as.numeric(row$time_start),
+          time_gap = as.numeric(row$time_gap),
+          time_delta = as.numeric(row$time_delta),
+          sim_pm = sim_pm,
+          pm = fit_beta,
+          fit_beta_label = fit_beta_label,
+          patient_id = as.character(row$patient_id),
+          grf_key = as.character(row$grf_key),
+          grf_rds = as.character(row$grf_rds),
+          input_rds = as.character(row$input_rds),
+          input_md5 = as.character(row$input_md5),
+          minobs = as.integer(row$minobs),
+          benchmark_seed = as.integer(cfg$seed + as.integer(row$simulation_id) * 10000L +
+                                        round(as.numeric(row$time_gap) * 1000) +
+                                        as.integer(row$minobs) * 100L +
+                                        match(method, cfg$methods)),
+          outdir = file.path(dirs$fits, "alfakR", paste0("lambda_", row$lambda_label),
+                             paste0("gap_", path_token(row$time_gap)),
+                             paste0("beta_", fit_beta_label), paste0("MINOBS_", row$minobs),
+                             paste0("nn_prior_", method), row$patient_id),
+          stringsAsFactors = FALSE
+        )
+      }
+    }
+  }
+
+  task_tbl <- do.call(rbind, fit_tasks)
+  task_tbl <- task_tbl[c(which(task_tbl$engine == "alfak2"), which(task_tbl$engine == "alfakR")), , drop = FALSE]
+  task_tbl$task_order <- seq_len(nrow(task_tbl))
+  validate_task_shared_sources(task_tbl)
+  write_tsv(input_tbl, file.path(dirs$tables, "input_table.tsv"))
+  write_tsv(task_tbl, file.path(dirs$tables, "task_table.tsv"))
+  saveRDS(cfg, file.path(dirs$root, "benchmark_config.rds"))
+  message(
+    "Prepared ", nrow(task_tbl), " fit tasks from source inputs: ",
+    nrow(input_tbl), " source input rows."
+  )
+  engine_counts <- table(task_tbl$engine)
+  for (engine in names(engine_counts)) {
+    message("  ", engine, " tasks: ", unname(engine_counts[[engine]]))
+  }
+  list(input_table = input_tbl, task_table = task_tbl, grf_lookup = list())
+}
+
+prepare_benchmark_inputs <- function(cfg, dirs, repo_versions) {
+  if (!is.null(cfg$source_input_dir)) {
+    return(prepare_benchmark_inputs_from_source(cfg, dirs))
   }
 
   input_rows <- list()
@@ -1033,13 +1556,14 @@ main <- function() {
   task_idx <- 0L
   grf_lookup <- list()
   time_axis_label <- paste0("tmax_", path_token(cfg$time_max), "_pint_", path_token(cfg$passage_interval))
+  sim_pm_label <- pm_to_label(cfg$pm)
 
   for (sim_idx in seq_len(cfg$n_sim)) {
     for (lambda_idx in seq_along(cfg$lambdas)) {
       lambda <- cfg$lambdas[[lambda_idx]]
       lambda_label <- format_grf_label(lambda)
       abm_seed <- cfg$seed + sim_idx * 10000L + lambda_idx * 100L
-      grf_key <- paste(sim_idx, lambda_label, time_axis_label, sep = "__")
+      grf_key <- paste(sim_idx, lambda_label, paste0("simpm_", sim_pm_label), time_axis_label, sep = "__")
       grf_path <- file.path(dirs$cache, paste0("grf_sim_", grf_key, ".rds"))
       grf_sim <- if (!isTRUE(cfg$force_sim) &&
                      file.exists(grf_path) &&
@@ -1067,7 +1591,7 @@ main <- function() {
 
       for (time_start in cfg$time_starts) {
         for (time_gap in cfg$time_gaps) {
-          patient_id <- paste0("grf_", sim_idx, "_lambda_", lambda_label, "_", time_axis_label, "_start_", path_token(time_start), "_gap_", path_token(time_gap))
+          patient_id <- paste0("grf_", sim_idx, "_lambda_", lambda_label, "_simpm_", sim_pm_label, "_", time_axis_label, "_start_", path_token(time_start), "_gap_", path_token(time_gap))
           input_rds <- file.path(dirs$cache, paste0("input_", patient_id, ".rds"))
           input_csv <- file.path(dirs$cache, paste0("input_", patient_id, ".csv"))
           input_seed <- abm_seed + as.integer(round(time_start * 10)) + as.integer(round(time_gap * 1000))
@@ -1097,6 +1621,7 @@ main <- function() {
               time_start = time_start,
               time_gap = time_gap,
               time_delta = as.numeric(yi$metadata$time_delta),
+              sim_pm = cfg$pm,
               patient_id = patient_id,
               grf_key = grf_key,
               grf_rds = grf_path,
@@ -1109,56 +1634,456 @@ main <- function() {
           }
 
           for (minobs in cfg$minobs) {
-            for (policy in cfg$alfak2_input_policies) {
-              task_idx <- task_idx + 1L
-              method <- paste0("alfak2_", cfg$alfak2_input_depth, "_", policy)
-              fit_tasks[[task_idx]] <- data.frame(
-                engine = "alfak2",
-                method = method,
-                input_policy = policy,
-                nn_prior = NA_character_,
-                simulation_id = sim_idx,
-                lambda = lambda,
-                lambda_label = lambda_label,
-                time_start = time_start,
-                time_gap = time_gap,
-                time_delta = as.numeric(yi$metadata$time_delta),
-                patient_id = patient_id,
-                grf_key = grf_key,
-                grf_rds = grf_path,
-                input_rds = input_rds,
-                input_md5 = input_md5,
-                minobs = as.integer(minobs),
-                pm = cfg$pm,
-                benchmark_seed = as.integer(abm_seed + time_gap * 1000L + minobs * 100L + 900L + match(policy, cfg$alfak2_input_policies)),
-                outdir = file.path(dirs$fits, "alfak2", paste0("lambda_", lambda_label), paste0("gap_", path_token(time_gap)), paste0("MINOBS_", minobs), method, patient_id),
-                stringsAsFactors = FALSE
-              )
+            for (fit_beta in cfg$beta_levels) {
+              fit_beta_label <- pm_to_label(fit_beta)
+              for (policy in cfg$alfak2_input_policies) {
+                task_idx <- task_idx + 1L
+                method <- paste0("alfak2_", cfg$alfak2_input_depth, "_", policy)
+                fit_tasks[[task_idx]] <- data.frame(
+                  engine = "alfak2",
+                  method = method,
+                  input_policy = policy,
+                  nn_prior = NA_character_,
+                  simulation_id = sim_idx,
+                  lambda = lambda,
+                  lambda_label = lambda_label,
+                  time_start = time_start,
+                  time_gap = time_gap,
+                  time_delta = as.numeric(yi$metadata$time_delta),
+                  sim_pm = cfg$pm,
+                  pm = fit_beta,
+                  fit_beta_label = fit_beta_label,
+                  patient_id = patient_id,
+                  grf_key = grf_key,
+                  grf_rds = grf_path,
+                  input_rds = input_rds,
+                  input_md5 = input_md5,
+                  minobs = as.integer(minobs),
+                  benchmark_seed = as.integer(abm_seed + time_gap * 1000L + minobs * 100L + 900L + match(policy, cfg$alfak2_input_policies)),
+                  outdir = file.path(dirs$fits, "alfak2", paste0("lambda_", lambda_label), paste0("gap_", path_token(time_gap)), paste0("beta_", fit_beta_label), paste0("MINOBS_", minobs), method, patient_id),
+                  stringsAsFactors = FALSE
+                )
+              }
+              for (method in cfg$methods) {
+                task_idx <- task_idx + 1L
+                fit_tasks[[task_idx]] <- data.frame(
+                  engine = "alfakR",
+                  method = paste0("alfakR_", method),
+                  input_policy = "alfakR_minobs_internal",
+                  nn_prior = method,
+                  simulation_id = sim_idx,
+                  lambda = lambda,
+                  lambda_label = lambda_label,
+                  time_start = time_start,
+                  time_gap = time_gap,
+                  time_delta = as.numeric(yi$metadata$time_delta),
+                  sim_pm = cfg$pm,
+                  pm = fit_beta,
+                  fit_beta_label = fit_beta_label,
+                  patient_id = patient_id,
+                  grf_key = grf_key,
+                  grf_rds = grf_path,
+                  input_rds = input_rds,
+                  input_md5 = input_md5,
+                  minobs = as.integer(minobs),
+                  benchmark_seed = as.integer(abm_seed + time_gap * 1000L + minobs * 100L + match(method, cfg$methods)),
+                  outdir = file.path(dirs$fits, "alfakR", paste0("lambda_", lambda_label), paste0("gap_", path_token(time_gap)), paste0("beta_", fit_beta_label), paste0("MINOBS_", minobs), paste0("nn_prior_", method), patient_id),
+                  stringsAsFactors = FALSE
+                )
+              }
             }
-            for (method in cfg$methods) {
-              task_idx <- task_idx + 1L
-              fit_tasks[[task_idx]] <- data.frame(
-                engine = "alfakR",
-                method = paste0("alfakR_", method),
-                input_policy = "alfakR_minobs_internal",
-                nn_prior = method,
-                simulation_id = sim_idx,
-                lambda = lambda,
-                lambda_label = lambda_label,
-                time_start = time_start,
-                time_gap = time_gap,
-                time_delta = as.numeric(yi$metadata$time_delta),
-                patient_id = patient_id,
-                grf_key = grf_key,
-                grf_rds = grf_path,
-                input_rds = input_rds,
-                input_md5 = input_md5,
-                minobs = as.integer(minobs),
-                pm = cfg$pm,
-                benchmark_seed = as.integer(abm_seed + time_gap * 1000L + minobs * 100L + match(method, cfg$methods)),
-                outdir = file.path(dirs$fits, "alfakR", paste0("lambda_", lambda_label), paste0("gap_", path_token(time_gap)), paste0("MINOBS_", minobs), paste0("nn_prior_", method), patient_id),
-                stringsAsFactors = FALSE
-              )
+          }
+        }
+      }
+    }
+  }
+
+  input_tbl <- do.call(rbind, input_rows)
+  task_tbl <- do.call(rbind, fit_tasks)
+  task_tbl <- task_tbl[c(which(task_tbl$engine == "alfak2"), which(task_tbl$engine == "alfakR")), , drop = FALSE]
+  task_tbl$task_order <- seq_len(nrow(task_tbl))
+  validate_task_shared_sources(task_tbl)
+  write_tsv(input_tbl, file.path(dirs$tables, "input_table.tsv"))
+  write_tsv(task_tbl, file.path(dirs$tables, "task_table.tsv"))
+  saveRDS(cfg, file.path(dirs$root, "benchmark_config.rds"))
+  message("Prepared ", nrow(task_tbl), " fit tasks.")
+  engine_counts <- table(task_tbl$engine)
+  for (engine in names(engine_counts)) {
+    message("  ", engine, " tasks: ", unname(engine_counts[[engine]]))
+  }
+  list(input_table = input_tbl, task_table = task_tbl, grf_lookup = grf_lookup)
+}
+
+load_prepared_config <- function(cfg, dirs) {
+  cfg_path <- file.path(dirs$root, "benchmark_config.rds")
+  if (file.exists(cfg_path)) readRDS(cfg_path) else cfg
+}
+
+apply_runtime_overrides <- function(cfg, args, repo_dir) {
+  if (!is.null(args$alfak2_repo)) {
+    cfg$alfak2_repo <- normalizePath(arg_value(args, "alfak2_repo", repo_dir), winslash = "/", mustWork = FALSE)
+  }
+  if (!is.null(args$alfakR_repo)) {
+    cfg$alfakR_repo <- normalizePath(arg_value(args, "alfakR_repo", cfg$alfakR_repo), winslash = "/", mustWork = FALSE)
+  }
+  if (!is.null(args$output_dir)) {
+    cfg$output_dir <- normalize_output_dir(repo_dir, arg_value(args, "output_dir", cfg$output_dir))
+  }
+  if (!is.null(args$source_input_dir)) {
+    cfg$source_input_dir <- normalize_output_dir(repo_dir, arg_value(args, "source_input_dir", cfg$source_input_dir))
+  }
+  if (!is.null(args$write_node_accuracy)) {
+    cfg$write_node_accuracy <- arg_logical(args, "write_node_accuracy", TRUE)
+  } else if (is.null(cfg$write_node_accuracy)) {
+    cfg$write_node_accuracy <- TRUE
+  }
+  cfg
+}
+
+select_task_row <- function(task_tbl, task_index) {
+  task_index <- as.integer(task_index)
+  if (!is.finite(task_index) || task_index < 1L) {
+    stop("`--task-index` must be a positive 1-based integer.", call. = FALSE)
+  }
+  if ("task_order" %in% names(task_tbl)) {
+    idx <- which(as.integer(task_tbl$task_order) == task_index)
+  } else {
+    idx <- task_index
+  }
+  if (!length(idx) || idx[[1]] < 1L || idx[[1]] > nrow(task_tbl)) {
+    stop("Task index ", task_index, " is outside the prepared task table.", call. = FALSE)
+  }
+  task_tbl[idx[[1]], , drop = FALSE]
+}
+
+run_one_prepared_task <- function(cfg, dirs, repo_versions, task_index) {
+  task_tbl <- read_tsv(file.path(dirs$tables, "task_table.tsv"))
+  task <- select_task_row(task_tbl, task_index)
+  task <- apply_path_map_df(task, cfg$path_map)
+  if (!file.exists(as.character(task$input_rds[[1]]))) {
+    stop("Prepared input_rds is missing: ", as.character(task$input_rds[[1]]), call. = FALSE)
+  }
+  if (!file.exists(as.character(task$grf_rds[[1]]))) {
+    stop("Prepared grf_rds is missing: ", as.character(task$grf_rds[[1]]), call. = FALSE)
+  }
+  actual_md5 <- unname(tools::md5sum(as.character(task$input_rds[[1]])))
+  expected_md5 <- as.character(task$input_md5[[1]])
+  if (nzchar(expected_md5) && !identical(actual_md5, expected_md5)) {
+    stop("Prepared input_rds md5 changed for task ", task_index, ".", call. = FALSE)
+  }
+  result <- run_fit_task(task, cfg, repo_versions)
+  fit_tbl <- list_to_data_frame(list(result))
+  part_path <- file.path(dirs$fit_parts, sprintf("task_%06d.tsv", as.integer(task_index)))
+  write_tsv(fit_tbl, part_path)
+  writeLines("ok", file.path(dirs$fit_parts, sprintf("task_%06d.done", as.integer(task_index))))
+  message("Wrote single-task fit result: ", part_path)
+  fit_tbl
+}
+
+read_fit_result_parts <- function(dirs) {
+  part_files <- list.files(dirs$fit_parts, pattern = "^task_[0-9]+\\.tsv$", full.names = TRUE)
+  if (!length(part_files)) {
+    fallback <- file.path(dirs$tables, "fit_results.tsv")
+    if (file.exists(fallback)) return(read_tsv(fallback))
+    return(data.frame())
+  }
+  parts <- lapply(sort(part_files), read_tsv)
+  nms <- unique(unlist(lapply(parts, names), use.names = FALSE))
+  parts <- lapply(parts, function(x) {
+    missing <- setdiff(nms, names(x))
+    for (nm in missing) x[[nm]] <- NA
+    x[, nms, drop = FALSE]
+  })
+  out <- do.call(rbind, parts)
+  if ("task_order" %in% names(out)) {
+    out <- out[order(as.integer(out$task_order)), , drop = FALSE]
+  }
+  out
+}
+
+summarize_prepared_results <- function(cfg, dirs) {
+  task_tbl <- apply_path_map_df(read_tsv(file.path(dirs$tables, "task_table.tsv")), cfg$path_map)
+  input_tbl <- apply_path_map_df(read_tsv(file.path(dirs$tables, "input_table.tsv")), cfg$path_map)
+  repo_versions <- if (file.exists(file.path(dirs$tables, "repo_versions.tsv"))) {
+    read_tsv(file.path(dirs$tables, "repo_versions.tsv"))
+  } else {
+    data.frame()
+  }
+  fit_tbl <- apply_path_map_df(read_fit_result_parts(dirs), cfg$path_map)
+  if ("task_order" %in% names(fit_tbl)) {
+    fit_tbl <- fit_tbl[order(as.integer(fit_tbl$task_order)), , drop = FALSE]
+  }
+  write_tsv(fit_tbl, file.path(dirs$tables, "fit_results.tsv"))
+
+  missing <- data.frame()
+  if (nrow(task_tbl)) {
+    completed <- unique(as.integer(fit_tbl$task_order))
+    missing <- task_tbl[!(as.integer(task_tbl$task_order) %in% completed), , drop = FALSE]
+  }
+  write_tsv(missing, file.path(dirs$tables, "missing_fit_tasks.tsv"))
+  if (nrow(missing)) {
+    message("Missing fit task results: ", nrow(missing), " / ", nrow(task_tbl))
+  }
+
+  write_node_accuracy <- is.null(cfg$write_node_accuracy) || isTRUE(cfg$write_node_accuracy)
+  if (write_node_accuracy) {
+    node_rows <- list()
+    node_idx <- 0L
+    for (i in seq_len(nrow(fit_tbl))) {
+      nodes <- read_nodes_for_fit_row(fit_tbl[i, , drop = FALSE])
+      if (nrow(nodes)) {
+        node_idx <- node_idx + 1L
+        node_rows[[node_idx]] <- nodes
+      }
+    }
+    node_tbl <- if (length(node_rows)) do.call(rbind, node_rows) else data.frame()
+    if (nrow(node_tbl)) {
+      node_tbl$estimation_error <- node_tbl$estimated_fitness - node_tbl$true_fitness
+    }
+    write_tsv(node_tbl, file.path(dirs$tables, "node_accuracy.tsv"))
+    summary_tbl <- summarize_accuracy(node_tbl)
+  } else {
+    message("Skipping node_accuracy.tsv; computing final summary tables in streaming mode.")
+    node_tbl <- empty_node_accuracy_table()
+    write_tsv(node_tbl, file.path(dirs$tables, "node_accuracy.tsv"))
+    summary_tbl <- summarize_fit_results_streaming(fit_tbl)
+  }
+  write_tsv(summary_tbl, file.path(dirs$tables, "summary_by_lambda_time_minobs_method.tsv"))
+  delta_tbl <- make_delta_vs_alfakR(summary_tbl)
+  write_tsv(delta_tbl, file.path(dirs$tables, "alfak2_delta_vs_alfakR.tsv"))
+
+  saveRDS(
+    list(
+      config = cfg,
+      repo_versions = repo_versions,
+      input_table = input_tbl,
+      task_table = task_tbl,
+      fit_results = fit_tbl,
+      node_accuracy = node_tbl,
+      summary = summary_tbl,
+      delta = delta_tbl,
+      missing_fit_tasks = missing
+    ),
+    file.path(dirs$root, "grf_alfak2_vs_alfakR_benchmark.rds")
+  )
+
+  message("Wrote benchmark outputs under: ", dirs$root)
+  message("  ", file.path(dirs$tables, "fit_results.tsv"))
+  message("  ", file.path(dirs$tables, "missing_fit_tasks.tsv"))
+  message("  ", file.path(dirs$tables, "node_accuracy.tsv"))
+  message("  ", file.path(dirs$tables, "summary_by_lambda_time_minobs_method.tsv"))
+  message("  ", file.path(dirs$tables, "alfak2_delta_vs_alfakR.tsv"))
+
+  invisible(list(
+    input_table = input_tbl,
+    task_table = task_tbl,
+    fit_results = fit_tbl,
+    node_accuracy = node_tbl,
+    summary = summary_tbl,
+    delta = delta_tbl,
+    missing_fit_tasks = missing
+  ))
+}
+
+main <- function() {
+  args <- parse_cli_args(commandArgs(trailingOnly = TRUE))
+  if (isTRUE(args$help)) {
+    usage()
+    return(invisible(NULL))
+  }
+  repo_dir <- normalizePath(arg_value(args, "repo_dir", resolve_repo_dir()), winslash = "/", mustWork = FALSE)
+  cfg <- build_config(args, repo_dir)
+  cfg$path_map <- parse_path_map(args)
+  dirs <- build_dirs(cfg$output_dir)
+  mode <- tolower(as.character(arg_value(args, "mode", "all")))
+  valid_modes <- c("all", "prepare", "fit-task", "fit_task", "summarize")
+  if (!mode %in% valid_modes) {
+    stop("Unsupported --mode=", mode, ". Use one of: all, prepare, fit-task, summarize.", call. = FALSE)
+  }
+  if (identical(mode, "fit_task")) mode <- "fit-task"
+  if (mode %in% c("fit-task", "summarize")) {
+    cfg <- load_prepared_config(cfg, dirs)
+    cfg <- apply_path_map_list(cfg, parse_path_map(args))
+    cfg <- apply_runtime_overrides(cfg, args, repo_dir)
+    cfg$path_map <- parse_path_map(args)
+    dirs <- build_dirs(cfg$output_dir)
+  }
+  recompile_dll <- if (!is.null(args$recompile_dll)) {
+    arg_logical(args, "recompile_dll", FALSE)
+  } else {
+    mode %in% c("all", "prepare")
+  }
+
+  repo_versions <- rbind(
+    repo_state(cfg$alfakR_repo, "alfakR"),
+    repo_state(cfg$alfak2_repo, "alfak2")
+  )
+  if (!identical(mode, "fit-task")) {
+    write_tsv(repo_versions, file.path(dirs$tables, "repo_versions.tsv"))
+  }
+
+  message("Loading current source trees with pkgload::load_all().")
+  message("  alfakR: ", cfg$alfakR_repo)
+  message("  alfak2: ", cfg$alfak2_repo)
+  load_current_repos(cfg$alfakR_repo, cfg$alfak2_repo, recompile_dll = recompile_dll)
+
+  if (any(repo_versions$dirty) && !isTRUE(cfg$reuse_dirty_cache)) {
+    message("At least one repo is dirty; fit caches will not be reused unless --reuse-dirty-cache=true.")
+  }
+
+  if (identical(mode, "prepare")) {
+    return(invisible(prepare_benchmark_inputs(cfg, dirs, repo_versions)))
+  }
+  if (identical(mode, "fit-task")) {
+    slurm_idx <- suppressWarnings(as.integer(Sys.getenv("SLURM_ARRAY_TASK_ID", NA_character_)))
+    task_index <- arg_integer(args, "task_index", if (is.finite(slurm_idx)) slurm_idx else 1L)
+    return(invisible(run_one_prepared_task(cfg, dirs, repo_versions, task_index)))
+  }
+  if (identical(mode, "summarize")) {
+    return(invisible(summarize_prepared_results(cfg, dirs)))
+  }
+
+  input_rows <- list()
+  fit_tasks <- list()
+  input_idx <- 0L
+  task_idx <- 0L
+  grf_lookup <- list()
+  time_axis_label <- paste0("tmax_", path_token(cfg$time_max), "_pint_", path_token(cfg$passage_interval))
+  sim_pm_label <- pm_to_label(cfg$pm)
+
+  for (sim_idx in seq_len(cfg$n_sim)) {
+    for (lambda_idx in seq_along(cfg$lambdas)) {
+      lambda <- cfg$lambdas[[lambda_idx]]
+      lambda_label <- format_grf_label(lambda)
+      abm_seed <- cfg$seed + sim_idx * 10000L + lambda_idx * 100L
+      grf_key <- paste(sim_idx, lambda_label, paste0("simpm_", sim_pm_label), time_axis_label, sep = "__")
+      grf_path <- file.path(dirs$cache, paste0("grf_sim_", grf_key, ".rds"))
+      grf_sim <- if (!isTRUE(cfg$force_sim) &&
+                     file.exists(grf_path) &&
+                     (isTRUE(cfg$reuse_dirty_cache) || !isTRUE(repo_versions$dirty[repo_versions$package == "alfakR"]))) {
+        readRDS(grf_path)
+      } else {
+        message("Simulating GRF ABM: sim=", sim_idx, " lambda=", lambda)
+        out <- simulate_nn_prior_grf_abm(
+          seed = abm_seed,
+          lambda = lambda,
+          p = cfg$pm,
+          k_dim = cfg$k_dim,
+          n_centroids = cfg$n_centroids,
+          time_max = cfg$time_max,
+          passage_interval = cfg$passage_interval,
+          abm_pop_size = cfg$abm_pop_size,
+          abm_delta_t = cfg$abm_delta_t,
+          abm_max_pop = cfg$abm_max_pop,
+          abm_culling_survival = cfg$abm_culling_survival
+        )
+        saveRDS(out, grf_path)
+        out
+      }
+      grf_lookup[[grf_key]] <- grf_sim
+
+      for (time_start in cfg$time_starts) {
+        for (time_gap in cfg$time_gaps) {
+          patient_id <- paste0("grf_", sim_idx, "_lambda_", lambda_label, "_simpm_", sim_pm_label, "_", time_axis_label, "_start_", path_token(time_start), "_gap_", path_token(time_gap))
+          input_rds <- file.path(dirs$cache, paste0("input_", patient_id, ".rds"))
+          input_csv <- file.path(dirs$cache, paste0("input_", patient_id, ".csv"))
+          input_seed <- abm_seed + as.integer(round(time_start * 10)) + as.integer(round(time_gap * 1000))
+          yi <- if (!file.exists(input_rds) || isTRUE(cfg$force_sim)) {
+            out <- build_two_timepoint_yi_from_abm(
+              sim_wide = grf_sim$sim_wide,
+              time_start = time_start,
+              time_gap = time_gap,
+              passage_interval = cfg$passage_interval,
+              sample_depth = cfg$sample_depth,
+              seed = input_seed
+            )
+            saveRDS(out, input_rds)
+            utils::write.csv(data.frame(karyotype = rownames(out$x), out$x, check.names = FALSE), input_csv, row.names = FALSE)
+            out
+          } else {
+            readRDS(input_rds)
+          }
+          input_md5 <- unname(tools::md5sum(input_rds))
+          input_summary <- summarize_input_rows(yi, cfg$minobs, drop_diploid = cfg$drop_diploid)
+          for (rr in seq_len(nrow(input_summary))) {
+            input_idx <- input_idx + 1L
+            input_rows[[input_idx]] <- data.frame(
+              simulation_id = sim_idx,
+              lambda = lambda,
+              lambda_label = lambda_label,
+              time_start = time_start,
+              time_gap = time_gap,
+              time_delta = as.numeric(yi$metadata$time_delta),
+              sim_pm = cfg$pm,
+              patient_id = patient_id,
+              grf_key = grf_key,
+              grf_rds = grf_path,
+              input_rds = input_rds,
+              input_csv = input_csv,
+              input_md5 = input_md5,
+              input_summary[rr, , drop = FALSE],
+              stringsAsFactors = FALSE
+            )
+          }
+
+          for (minobs in cfg$minobs) {
+            for (fit_beta in cfg$beta_levels) {
+              fit_beta_label <- pm_to_label(fit_beta)
+              for (policy in cfg$alfak2_input_policies) {
+                task_idx <- task_idx + 1L
+                method <- paste0("alfak2_", cfg$alfak2_input_depth, "_", policy)
+                fit_tasks[[task_idx]] <- data.frame(
+                  engine = "alfak2",
+                  method = method,
+                  input_policy = policy,
+                  nn_prior = NA_character_,
+                  simulation_id = sim_idx,
+                  lambda = lambda,
+                  lambda_label = lambda_label,
+                  time_start = time_start,
+                  time_gap = time_gap,
+                  time_delta = as.numeric(yi$metadata$time_delta),
+                  sim_pm = cfg$pm,
+                  pm = fit_beta,
+                  fit_beta_label = fit_beta_label,
+                  patient_id = patient_id,
+                  grf_key = grf_key,
+                  grf_rds = grf_path,
+                  input_rds = input_rds,
+                  input_md5 = input_md5,
+                  minobs = as.integer(minobs),
+                  benchmark_seed = as.integer(abm_seed + time_gap * 1000L + minobs * 100L + 900L + match(policy, cfg$alfak2_input_policies)),
+                  outdir = file.path(dirs$fits, "alfak2", paste0("lambda_", lambda_label), paste0("gap_", path_token(time_gap)), paste0("beta_", fit_beta_label), paste0("MINOBS_", minobs), method, patient_id),
+                  stringsAsFactors = FALSE
+                )
+              }
+              for (method in cfg$methods) {
+                task_idx <- task_idx + 1L
+                fit_tasks[[task_idx]] <- data.frame(
+                  engine = "alfakR",
+                  method = paste0("alfakR_", method),
+                  input_policy = "alfakR_minobs_internal",
+                  nn_prior = method,
+                  simulation_id = sim_idx,
+                  lambda = lambda,
+                  lambda_label = lambda_label,
+                  time_start = time_start,
+                  time_gap = time_gap,
+                  time_delta = as.numeric(yi$metadata$time_delta),
+                  sim_pm = cfg$pm,
+                  pm = fit_beta,
+                  fit_beta_label = fit_beta_label,
+                  patient_id = patient_id,
+                  grf_key = grf_key,
+                  grf_rds = grf_path,
+                  input_rds = input_rds,
+                  input_md5 = input_md5,
+                  minobs = as.integer(minobs),
+                  benchmark_seed = as.integer(abm_seed + time_gap * 1000L + minobs * 100L + match(method, cfg$methods)),
+                  outdir = file.path(dirs$fits, "alfakR", paste0("lambda_", lambda_label), paste0("gap_", path_token(time_gap)), paste0("beta_", fit_beta_label), paste0("MINOBS_", minobs), paste0("nn_prior_", method), patient_id),
+                  stringsAsFactors = FALSE
+                )
+              }
             }
           }
         }
