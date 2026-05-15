@@ -18,6 +18,7 @@ fit_graph_posterior(
     untrusted_sdreport_nonfinite = 4, unknown = 4),
   anchor_count_reference = NULL,
   anchor_count_power = 1,
+  anchor_min_effective_count = 0,
   anchor_exclude = character()
 )
 }
@@ -47,6 +48,10 @@ covariance statuses.}
 anchors are downweighted by increasing their variance.}
 
 \item{anchor_count_power}{Exponent used by count-based variance inflation.}
+
+\item{anchor_min_effective_count}{Minimum effective count required for a local
+posterior row to be used as a global anchor. Set to \code{NULL} to keep all
+finite local rows.}
 
 \item{anchor_exclude}{Optional karyotype labels to exclude from the anchor
 set, used for neighbor-holdout validation.}

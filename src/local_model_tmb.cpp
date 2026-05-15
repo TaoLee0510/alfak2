@@ -73,6 +73,8 @@ Type objective_function<Type>::operator() () {
   DATA_VECTOR(obs_weight0);
   DATA_VECTOR(obs_weight1);
   DATA_INTEGER(use_observation_weights);
+  DATA_VECTOR(eta_prior_mean);
+  DATA_VECTOR(eta_prior_sd);
   DATA_SCALAR(anchor_prior_scale);
   DATA_SCALAR(mu_prior_scale);
   DATA_SCALAR(scale_prior_scale);
@@ -176,7 +178,7 @@ Type objective_function<Type>::operator() () {
       if (support_distance(i) >= 2) sd_i *= Type(1.75);
       nll -= dnorm(f(i), mean_i, sd_i, true);
     }
-    nll -= dnorm(eta(i), Type(0.0), Type(5.0), true);
+    nll -= dnorm(eta(i), eta_prior_mean(i), eta_prior_sd(i), true);
   }
 
   ADREPORT(f);

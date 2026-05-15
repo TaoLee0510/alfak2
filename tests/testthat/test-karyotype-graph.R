@@ -13,6 +13,21 @@ test_that("shell neighbor graph contains expected nodes and edges", {
   expect_true(any(g$support_tier == "local_borrowed"))
 })
 
+test_that("exact transition kernel uses chromosome-level probabilities", {
+  g_exact <- build_karyotype_graph(c("2.2", "3.2"), beta = 0.1,
+                                   transition_kernel = "exact",
+                                   shell_depth = 0, min_cn = 1, max_cn = 3)
+  g_linear <- build_karyotype_graph(c("2.2", "3.2"), beta = 0.1,
+                                    transition_kernel = "linear",
+                                    shell_depth = 0, min_cn = 1, max_cn = 3)
+
+  expect_equal(g_exact$transition_kernel, "exact")
+  expect_equal(g_linear$transition_kernel, "linear")
+  expect_equal(g_exact$edge_weight[1], alfak2:::alfak2_pij_cpp(2, 3, 0.1) * alfak2:::alfak2_pij_cpp(2, 2, 0.1))
+  expect_lt(g_exact$edge_weight[1], g_linear$edge_weight[1])
+  expect_equal(as.numeric(tapply(g_exact$transition_weight, g_exact$transition_from0, sum)), c(1, 1))
+})
+
 test_that("zero-weight rows are retained as targets but not graph seeds", {
   counts <- matrix(
     c(10, 5,

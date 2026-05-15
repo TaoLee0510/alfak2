@@ -7,6 +7,7 @@
 build_karyotype_graph(
   x,
   beta = NULL,
+  transition_kernel = c("exact", "linear"),
   shell_depth = 2,
   min_cn = 0,
   max_cn = 5,
@@ -17,6 +18,10 @@ build_karyotype_graph(
 \item{x}{An \code{alfak2_data} object or character vector of observed karyotypes.}
 
 \item{beta}{Missegregation rate. Defaults to \code{x$beta} for data objects.}
+
+\item{transition_kernel}{Transition weighting used by graph edges and local
+transport. \code{"exact"} uses chromosome-level missegregation probabilities;
+\code{"linear"} preserves the historical first-order approximation.}
 
 \item{shell_depth}{Number of one-step copy-number shells to add.}
 

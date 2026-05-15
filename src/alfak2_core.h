@@ -79,12 +79,78 @@ inline Rcpp::CharacterVector matrix_to_labels(const Rcpp::IntegerMatrix& mat) {
   return labels;
 }
 
-inline double chromosome_step_weight(int parent_cn, int child_cn, double beta) {
+inline double choose_double(int n, int k) {
+  if (k < 0 || k > n) return 0.0;
+  if (k == 0 || k == n) return 1.0;
+  k = std::min(k, n - k);
+  double out = 1.0;
+  for (int i = 1; i <= k; ++i) {
+    out *= static_cast<double>(n - k + i) / i;
+  }
+  return out;
+}
+
+inline std::string normalize_transition_kernel(const std::string& transition_kernel) {
+  if (transition_kernel == "exact" || transition_kernel == "linear") return transition_kernel;
+  Rcpp::stop("`transition_kernel` must be \"exact\" or \"linear\".");
+}
+
+inline double chromosome_transition_probability(int parent_cn, int child_cn, double beta) {
+  if (parent_cn < 0 || child_cn < 0) return 0.0;
+  int diff = std::abs(parent_cn - child_cn);
+  if (diff > parent_cn) return 0.0;
+  double total = 0.0;
+  for (int m = diff; m <= parent_cn; m += 2) {
+    int lost_to_child = (m + parent_cn - child_cn) / 2;
+    if (lost_to_child < 0 || lost_to_child > m) continue;
+    total += choose_double(parent_cn, m) *
+      std::pow(beta, m) *
+      std::pow(1.0 - beta, parent_cn - m) *
+      std::pow(0.5, m) *
+      choose_double(m, lost_to_child);
+  }
+  return total;
+}
+
+inline double linear_step_weight(int parent_cn, int child_cn, double beta) {
   int d = std::abs(parent_cn - child_cn);
   if (d == 0) return 1.0;
   if (d != 1) return 0.0;
   double burden = std::max(1, parent_cn);
   return std::max(0.0, beta) * burden;
+}
+
+inline double state_transition_weight(const std::vector<int>& parent,
+                                      const std::vector<int>& child,
+                                      double beta,
+                                      const std::string& transition_kernel) {
+  if (transition_kernel == "linear") {
+    int changed = -1;
+    for (size_t c = 0; c < parent.size(); ++c) {
+      if (parent[c] != child[c]) {
+        if (changed >= 0) return 0.0;
+        changed = static_cast<int>(c);
+      }
+    }
+    if (changed < 0) return 1.0;
+    return linear_step_weight(parent[changed], child[changed], beta);
+  }
+  double out = 1.0;
+  for (size_t c = 0; c < parent.size(); ++c) {
+    out *= chromosome_transition_probability(parent[c], child[c], beta);
+  }
+  return out;
+}
+
+inline std::vector<double> state_self_weights(const std::vector< std::vector<int> >& nodes,
+                                              double beta,
+                                              const std::string& transition_kernel) {
+  std::vector<double> out(nodes.size(), 1.0);
+  if (transition_kernel == "linear") return out;
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    out[i] = state_transition_weight(nodes[i], nodes[i], beta, transition_kernel);
+  }
+  return out;
 }
 
 inline int ploidy_band(const std::vector<int>& x) {
@@ -106,7 +172,9 @@ struct Edge {
 
 inline std::vector<Edge> one_step_edges(const std::vector< std::vector<int> >& nodes,
                                         const std::unordered_map<std::string, int>& id,
-                                        double beta) {
+                                        double beta,
+                                        std::string transition_kernel = "exact") {
+  transition_kernel = normalize_transition_kernel(transition_kernel);
   std::vector<Edge> edges;
   int n = nodes.size();
   if (n == 0) return edges;
@@ -119,7 +187,7 @@ inline std::vector<Edge> one_step_edges(const std::vector< std::vector<int> >& n
         auto it = id.find(make_key(child));
         if (it == id.end()) continue;
         int j = it->second;
-        double w = chromosome_step_weight(nodes[i][c], child[c], beta);
+        double w = state_transition_weight(nodes[i], child, beta, transition_kernel);
         if (w > 0) edges.push_back({i, j, c, dir, w});
       }
     }
@@ -131,7 +199,8 @@ inline void add_row_stochastic_transition(const std::vector<Edge>& raw_edges,
                                           int n,
                                           std::vector<int>& from,
                                           std::vector<int>& to,
-                                          std::vector<double>& w) {
+                                          std::vector<double>& w,
+                                          const std::vector<double>& self_weight = std::vector<double>()) {
   std::vector<double> row_sum(n, 0.0);
   for (const auto& e : raw_edges) row_sum[e.from] += e.weight;
   from.clear(); to.clear(); w.clear();
@@ -139,15 +208,23 @@ inline void add_row_stochastic_transition(const std::vector<Edge>& raw_edges,
   to.reserve(raw_edges.size() + n);
   w.reserve(raw_edges.size() + n);
   for (const auto& e : raw_edges) {
-    double denom = 1.0 + row_sum[e.from];
+    double self = self_weight.size() == static_cast<size_t>(n) ? self_weight[e.from] : 1.0;
+    double denom = self + row_sum[e.from];
+    if (denom <= 0.0 || !std::isfinite(denom)) denom = 1.0;
     from.push_back(e.from);
     to.push_back(e.to);
     w.push_back(e.weight / denom);
   }
   for (int i = 0; i < n; ++i) {
+    double self = self_weight.size() == static_cast<size_t>(n) ? self_weight[i] : 1.0;
+    double denom = self + row_sum[i];
+    if (denom <= 0.0 || !std::isfinite(denom)) {
+      self = 1.0;
+      denom = 1.0;
+    }
     from.push_back(i);
     to.push_back(i);
-    w.push_back(1.0 / (1.0 + row_sum[i]));
+    w.push_back(self / denom);
   }
 }
 

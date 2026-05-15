@@ -12,7 +12,11 @@ fit_local_posterior(
   control = list(eval.max = 500, iter.max = 500),
   gradient_tolerance = 0.001,
   retry_on_untrusted_covariance = TRUE,
-  retry_control = list(eval.max = 2000, iter.max = 2000)
+  retry_control = list(eval.max = 2000, iter.max = 2000),
+  eta_prior_sd = 5,
+  eta_borrowed_prior_mean = -6,
+  eta_borrowed_prior_sd = 1.5,
+  eta_distance_penalty = 0.75
 )
 }
 \arguments{
@@ -34,6 +38,18 @@ when the first optimizer pass does not yield trusted covariance.}
 
 \item{retry_control}{Optional larger \code{stats::nlminb} control list used for the
 retry pass.}
+
+\item{eta_prior_sd}{Prior standard deviation for directly observed initial
+log-abundances.}
+
+\item{eta_borrowed_prior_mean}{Prior mean for unobserved graph-node initial
+log-abundances.}
+
+\item{eta_borrowed_prior_sd}{Prior standard deviation for unobserved graph-node
+initial log-abundances.}
+
+\item{eta_distance_penalty}{Additional negative prior-mean shift per support
+shell beyond the first borrowed shell.}
 }
 \value{
 An \code{alfak2_local_fit} object.

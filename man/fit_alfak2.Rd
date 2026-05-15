@@ -8,6 +8,7 @@ fit_alfak2(
   counts,
   dt = 1,
   beta = 5e-05,
+  transition_kernel = c("exact", "linear"),
   local_shell_depth = 2,
   global_extra_shell = 1,
   min_cn = 0,
@@ -24,6 +25,7 @@ fit_alfak2(
     untrusted_sdreport_nonfinite = 4, unknown = 4),
   anchor_count_reference = NULL,
   anchor_count_power = 1,
+  anchor_min_effective_count = 0,
   input_depth = c("raw", "effective"),
   effective_depth = NULL,
   effective_depth_mode = c("min", "cap", "fixed"),
@@ -43,6 +45,10 @@ fit_alfak2(
 \item{dt}{Time interval if \code{counts} is not already prepared.}
 
 \item{beta}{Missegregation rate.}
+
+\item{transition_kernel}{Transition weighting used by graph edges and local
+transport. \code{"exact"} uses chromosome-level missegregation probabilities;
+\code{"linear"} preserves the historical first-order approximation.}
 
 \item{local_shell_depth}{Local graph shell depth.}
 
@@ -70,6 +76,10 @@ covariance statuses.}
 global graph anchors.}
 
 \item{anchor_count_power}{Exponent for count-based anchor variance inflation.}
+
+\item{anchor_min_effective_count}{Minimum effective count required for local
+rows to be used as global anchors. Set to \code{NULL} to preserve legacy
+all-finite-row anchoring.}
 
 \item{input_depth}{\code{"raw"} uses the supplied count matrix directly. \code{"effective"}
 converts each timepoint to frequencies and re-counts them at a controlled

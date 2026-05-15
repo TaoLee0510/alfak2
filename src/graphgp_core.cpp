@@ -12,6 +12,67 @@ struct GraphSolveResult {
   std::string status;
 };
 
+struct CvScoreResult {
+  double score;
+  int evaluated;
+  int skipped;
+};
+
+static std::vector<int> graph_components(int n,
+                                         const Rcpp::IntegerVector& edge_from,
+                                         const Rcpp::IntegerVector& edge_to) {
+  std::vector< std::vector<int> > adj(n);
+  for (int e = 0; e < edge_from.size(); ++e) {
+    int i = edge_from[e] - 1;
+    int j = edge_to[e] - 1;
+    if (i < 0 || i >= n || j < 0 || j >= n || i == j) continue;
+    adj[i].push_back(j);
+    adj[j].push_back(i);
+  }
+  std::vector<int> component(n, -1);
+  int cid = 0;
+  for (int start = 0; start < n; ++start) {
+    if (component[start] >= 0) continue;
+    std::deque<int> queue;
+    queue.push_back(start);
+    component[start] = cid;
+    while (!queue.empty()) {
+      int cur = queue.front();
+      queue.pop_front();
+      for (int nb : adj[cur]) {
+        if (component[nb] >= 0) continue;
+        component[nb] = cid;
+        queue.push_back(nb);
+      }
+    }
+    ++cid;
+  }
+  return component;
+}
+
+static std::vector<int> anchor_component_counts(const std::vector<int>& anchor_index0,
+                                                const std::vector<int>& component) {
+  int n_component = 0;
+  for (int cid : component) n_component = std::max(n_component, cid + 1);
+  std::vector<int> counts(n_component, 0);
+  for (int idx : anchor_index0) {
+    int cid = component[idx];
+    if (cid >= 0) counts[cid] += 1;
+  }
+  return counts;
+}
+
+static int cv_evaluable_anchors(const std::vector<int>& anchor_index0,
+                                const std::vector<int>& component,
+                                const std::vector<int>& component_anchor_count) {
+  int out = 0;
+  for (int idx : anchor_index0) {
+    int cid = component[idx];
+    if (cid >= 0 && component_anchor_count[cid] >= 2) ++out;
+  }
+  return out;
+}
+
 static void add_penalty(std::vector< Triplet<double> >& triplets,
                         const std::vector< std::pair<int, double> >& coeff,
                         double scale) {
@@ -153,21 +214,30 @@ static GraphSolveResult solve_graph(const Rcpp::IntegerMatrix& karyotypes,
   return {mean, var, true, "ok"};
 }
 
-static double cv_score_grid(const Rcpp::IntegerMatrix& karyotypes,
-                            const Rcpp::IntegerVector& edge_from,
-                            const Rcpp::IntegerVector& edge_to,
-                            const Rcpp::NumericVector& edge_weight,
-                            const std::vector<int>& anchor_index0,
-                            const Rcpp::NumericVector& anchor_mean,
-                            const Rcpp::NumericVector& anchor_var,
-                            double lambda_l,
-                            double lambda_e,
-                            double sigma_obs,
-                            double eps) {
+static CvScoreResult cv_score_grid(const Rcpp::IntegerMatrix& karyotypes,
+                                   const Rcpp::IntegerVector& edge_from,
+                                   const Rcpp::IntegerVector& edge_to,
+                                   const Rcpp::NumericVector& edge_weight,
+                                   const std::vector<int>& anchor_index0,
+                                   const Rcpp::NumericVector& anchor_mean,
+                                   const Rcpp::NumericVector& anchor_var,
+                                   const std::vector<int>& component,
+                                   const std::vector<int>& component_anchor_count,
+                                   double lambda_l,
+                                   double lambda_e,
+                                   double sigma_obs,
+                                   double eps) {
   int m = anchor_index0.size();
-  if (m < 3) return 0.0;
+  if (m < 3) return {NA_REAL, 0, m};
   double rss = 0.0;
+  int evaluated = 0;
+  int skipped = 0;
   for (int hold = 0; hold < m; ++hold) {
+    int cid = component[anchor_index0[hold]];
+    if (cid < 0 || component_anchor_count[cid] < 2) {
+      ++skipped;
+      continue;
+    }
     std::vector<int> idx;
     Rcpp::NumericVector mean(m - 1), var(m - 1);
     idx.reserve(m - 1);
@@ -182,12 +252,14 @@ static double cv_score_grid(const Rcpp::IntegerMatrix& karyotypes,
     GraphSolveResult res = solve_graph(karyotypes, edge_from, edge_to, edge_weight,
                                        idx, mean, var, lambda_l, lambda_e,
                                        sigma_obs, eps, false);
-    if (!res.ok) return std::numeric_limits<double>::infinity();
+    if (!res.ok) return {std::numeric_limits<double>::infinity(), evaluated, skipped};
     double pred = res.mean(anchor_index0[hold]);
     double err = pred - anchor_mean[hold];
     rss += err * err / std::max(1e-10, anchor_var[hold] + sigma_obs * sigma_obs);
+    ++evaluated;
   }
-  return rss / m;
+  if (evaluated == 0) return {NA_REAL, evaluated, skipped};
+  return {rss / evaluated, evaluated, skipped};
 }
 
 static double middle_grid_value(Rcpp::NumericVector grid, double fallback) {
@@ -229,8 +301,21 @@ Rcpp::List alfak2_graph_posterior_cpp(Rcpp::IntegerMatrix karyotypes,
   if (lambda_e_grid.size() == 0) lambda_e_grid = Rcpp::NumericVector::create(0.25);
   if (sigma_obs_grid.size() == 0) sigma_obs_grid = Rcpp::NumericVector::create(0.05);
 
-  bool tune_by_cv = anchor0.size() >= 3;
-  std::string cv_status = tune_by_cv ? "ok" : "insufficient_anchors";
+  std::vector<int> component = graph_components(karyotypes.nrow(), edge_from, edge_to);
+  std::vector<int> component_anchor_count = anchor_component_counts(anchor0, component);
+  int cv_evaluable = cv_evaluable_anchors(anchor0, component, component_anchor_count);
+  bool tune_by_cv = anchor0.size() >= 3 && cv_evaluable >= 3;
+  int cv_skipped = anchor0.size() - cv_evaluable;
+  std::string cv_status;
+  if (anchor0.size() < 3) {
+    cv_status = "insufficient_anchors";
+  } else if (cv_evaluable < 3) {
+    cv_status = "insufficient_component_anchors";
+  } else if (cv_skipped > 0) {
+    cv_status = "partial_components";
+  } else {
+    cv_status = "ok";
+  }
   double best_score = tune_by_cv ? std::numeric_limits<double>::infinity() : NA_REAL;
   double best_l = tune_by_cv ? lambda_l_grid[0] : middle_grid_value(lambda_l_grid, 1.0);
   double best_e = tune_by_cv ? lambda_e_grid[0] : middle_grid_value(lambda_e_grid, 0.25);
@@ -240,13 +325,15 @@ Rcpp::List alfak2_graph_posterior_cpp(Rcpp::IntegerMatrix karyotypes,
   for (double l : lambda_l_grid) {
     for (double e : lambda_e_grid) {
       for (double s : sigma_obs_grid) {
-        double sc = tune_by_cv ?
+        CvScoreResult cv = tune_by_cv ?
           cv_score_grid(karyotypes, edge_from, edge_to, edge_weight,
                         anchor0, anchor_mean, anchor_var,
+                        component, component_anchor_count,
                         l, e, s, eps) :
-          NA_REAL;
+          CvScoreResult{NA_REAL, 0, cv_skipped};
+        double sc = cv.score;
         gl.push_back(l); ge.push_back(e); gs.push_back(s); score.push_back(sc);
-        if (tune_by_cv && sc < best_score) {
+        if (tune_by_cv && R_finite(sc) && sc < best_score) {
           best_score = sc;
           best_l = l; best_e = e; best_s = s;
         }
@@ -272,6 +359,8 @@ Rcpp::List alfak2_graph_posterior_cpp(Rcpp::IntegerMatrix karyotypes,
     Rcpp::Named("sigma_obs") = best_s,
     Rcpp::Named("cv_score") = best_score,
     Rcpp::Named("cv_status") = cv_status,
+    Rcpp::Named("cv_evaluated") = cv_evaluable,
+    Rcpp::Named("cv_skipped") = cv_skipped,
     Rcpp::Named("grid") = Rcpp::DataFrame::create(
       Rcpp::Named("lambda_l") = gl,
       Rcpp::Named("lambda_e") = ge,

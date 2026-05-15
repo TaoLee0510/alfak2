@@ -2,6 +2,9 @@
 #'
 #' @param x An `alfak2_data` object or character vector of observed karyotypes.
 #' @param beta Missegregation rate. Defaults to `x$beta` for data objects.
+#' @param transition_kernel Transition weighting used by graph edges and local
+#'   transport. `"exact"` uses chromosome-level missegregation probabilities;
+#'   `"linear"` preserves the historical first-order approximation.
 #' @param shell_depth Number of one-step copy-number shells to add.
 #' @param min_cn,max_cn Copy-number bounds.
 #' @param max_nodes Hard bound on graph expansion.
@@ -10,10 +13,12 @@
 #' @export
 build_karyotype_graph <- function(x,
                                   beta = NULL,
+                                  transition_kernel = c("exact", "linear"),
                                   shell_depth = 2,
                                   min_cn = 0,
                                   max_cn = 5,
                                   max_nodes = 5000) {
+  transition_kernel <- match.arg(transition_kernel)
   if (inherits(x, "alfak2_data")) {
     labels <- x$labels
     y0 <- x$counts[, 1]
@@ -55,6 +60,7 @@ build_karyotype_graph <- function(x,
     y0 = as.integer(y0),
     y1 = as.integer(y1),
     beta = beta,
+    transition_kernel = transition_kernel,
     shell_depth = as.integer(shell_depth),
     min_cn = as.integer(min_cn),
     max_cn = as.integer(max_cn),

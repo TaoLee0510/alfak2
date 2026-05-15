@@ -49,8 +49,12 @@ test_that("local TMB fit smoke test returns finite intervals and tiers", {
   expect_true(all(is.finite(fit$summary$fitness_sd)))
   expect_true(all(is.finite(fit$summary$conf_low)))
   expect_true(all(c("count_t0", "count_t1", "count_total", "covariance_status") %in% names(fit$summary)))
-  expect_true(all(c("observation_weight_t0", "observation_weight_t1", "effective_count_total") %in% names(fit$summary)))
+  expect_true(all(c("observation_weight_t0", "observation_weight_t1", "effective_count_total",
+                    "eta_prior_mean", "eta_prior_sd", "pi0", "pi1") %in% names(fit$summary)))
   expect_true("directly_informed" %in% fit$summary$support_tier)
+  expect_lt(sum(fit$summary$pi0[fit$summary$support_distance > 0]), 0.05)
+  expect_lt(sum(fit$summary$pi1[fit$summary$support_distance > 0]), 0.1)
+  expect_gt(fit$diagnostics$eta_prior$n_borrowed_shrunk, 0)
   expect_true(fit$diagnostics$covariance_status %in% c(
     "TMB_sdreport",
     "untrusted_nonconverged",
@@ -68,7 +72,8 @@ test_that("graph posterior and end-to-end fit smoke tests work", {
   expect_true(all(is.finite(gp$summary$fitness_mean)))
   expect_true(all(is.finite(gp$summary$fitness_sd)))
   expect_true(all(c("variance_base", "variance_multiplier", "covariance_status", "count_total") %in% names(gp$anchors)))
-  expect_equal(nrow(gp$anchors), nrow(local$summary))
+  expect_equal(nrow(gp$anchors), sum(local$summary$effective_count_total > 0))
+  expect_gt(gp$diagnostics$anchor_count_excluded, 0)
 
   full <- fit_alfak2(dat, local_shell_depth = 1, global_extra_shell = 0,
                      min_cn = 1, max_cn = 3, max_nodes = 200,
@@ -79,6 +84,7 @@ test_that("graph posterior and end-to-end fit smoke tests work", {
   expect_s3_class(full, "alfak2_fit")
   expect_gt(nrow(summarize_alfak2(full)), 0)
   expect_equal(full$diagnostics$graph_edge_weight, "unit")
+  expect_equal(full$diagnostics$transition_kernel, "exact")
   expect_equal(full$diagnostics$anchor_support_tiers, "all")
   expect_equal(full$diagnostics$anchor_exclude, "1.2.2")
   expect_false("1.2.2" %in% as.character(full$global$anchors$karyotype))
@@ -104,6 +110,20 @@ test_that("observation weights downweight low-support rows in the local likeliho
                             anchor_count_reference = 20)
   anchor <- gp$anchors[gp$anchors$karyotype == "1.2.2", , drop = FALSE]
   expect_equal(anchor$anchor_count_for_weight, row$effective_count_total)
+})
+
+test_that("zero-effective-count local rows are not global anchors by default", {
+  counts <- stable_counts_input()
+  weights <- matrix(1, nrow = nrow(counts), ncol = 2L, dimnames = list(rownames(counts), c("t0", "t1")))
+  weights["1.2.2", ] <- 0
+  attr(counts, "observation_weights") <- weights
+  dat <- prepare_alfak2_data(counts, dt = 1, beta = 0.01)
+  graph <- build_karyotype_graph(dat, shell_depth = 1, min_cn = 1, max_cn = 3, max_nodes = 200)
+  fit <- fit_local_posterior(dat, graph, control = list(eval.max = 120, iter.max = 120))
+  gp <- fit_graph_posterior(fit, graph, lambda_l_grid = 1, lambda_e_grid = 0.1, sigma_obs_grid = 0.05)
+
+  expect_equal(fit$summary$effective_count_total[fit$summary$karyotype == "1.2.2"], 0)
+  expect_false("1.2.2" %in% as.character(gp$anchors$karyotype))
 })
 
 test_that("dirichlet-multinomial uses explicit weighted likelihood when observation weights are present", {
@@ -142,6 +162,46 @@ test_that("global tuning records insufficient-anchor fallback", {
   expect_equal(gp$hyperparameters$lambda_e, 0.25)
   expect_equal(gp$hyperparameters$sigma_obs, 0.05)
   expect_true(all(is.na(gp$tuning_grid$score)))
+})
+
+test_that("global tuning skips heldout anchors without component support", {
+  graph <- build_karyotype_graph(
+    c("1.1", "1.2", "1.3", "3.3"),
+    beta = 0.01,
+    transition_kernel = "linear",
+    shell_depth = 0,
+    min_cn = 1,
+    max_cn = 3
+  )
+  local <- structure(
+    list(
+      summary = data.frame(
+        karyotype = as.character(graph$labels),
+        support_tier = as.character(graph$support_tier),
+        fitness_mean = c(0, 0.1, 0.2, 1),
+        fitness_sd = rep(0.1, 4),
+        count_total = rep(10, 4),
+        effective_count_total = rep(10, 4),
+        covariance_status = "TMB_sdreport",
+        stringsAsFactors = FALSE
+      ),
+      diagnostics = list(covariance_status = "TMB_sdreport"),
+      graph = graph
+    ),
+    class = "alfak2_local_fit"
+  )
+  gp <- fit_graph_posterior(
+    local,
+    graph,
+    lambda_l_grid = c(0.2, 1),
+    lambda_e_grid = 0.1,
+    sigma_obs_grid = 0.05
+  )
+
+  expect_equal(gp$diagnostics$cv_status, "partial_components")
+  expect_equal(gp$diagnostics$cv_evaluated, 3)
+  expect_equal(gp$diagnostics$cv_skipped, 1)
+  expect_true(all(is.finite(gp$tuning_grid$score)))
 })
 
 test_that("untrusted local covariance uses finite fallback uncertainty", {

@@ -83,6 +83,9 @@ resolve_anchor_tiers <- function(anchor_support_tiers) {
 #' @param anchor_count_reference Optional count total below which observed
 #'   anchors are downweighted by increasing their variance.
 #' @param anchor_count_power Exponent used by count-based variance inflation.
+#' @param anchor_min_effective_count Minimum effective count required for a local
+#'   posterior row to be used as a global anchor. Set to `NULL` to keep all
+#'   finite local rows.
 #' @param anchor_exclude Optional karyotype labels to exclude from the anchor
 #'   set, used for neighbor-holdout validation.
 #'
@@ -106,6 +109,7 @@ fit_graph_posterior <- function(local_fit,
                                 ),
                                 anchor_count_reference = NULL,
                                 anchor_count_power = 1,
+                                anchor_min_effective_count = 0,
                                 anchor_exclude = character()) {
   if (!inherits(local_fit, "alfak2_local_fit")) {
     stop("`local_fit` must be an alfak2_local_fit object.", call. = FALSE)
@@ -114,16 +118,31 @@ fit_graph_posterior <- function(local_fit,
   if (!inherits(graph, "alfak2_graph")) stop("`graph` must be an alfak2_graph object.", call. = FALSE)
   graph_edge_weight <- match.arg(graph_edge_weight)
   anchor_tiers <- resolve_anchor_tiers(anchor_support_tiers)
+  if (!is.null(anchor_min_effective_count)) {
+    validate_scalar(as.numeric(anchor_min_effective_count), "anchor_min_effective_count", lower = 0)
+    anchor_min_effective_count <- as.numeric(anchor_min_effective_count)
+  }
 
   anchor_match <- match(local_fit$summary$karyotype, as.character(graph$labels))
   tier_ok <- rep(TRUE, nrow(local_fit$summary))
+  anchor_count_all <- if ("effective_count_total" %in% names(local_fit$summary)) {
+    as.numeric(local_fit$summary$effective_count_total)
+  } else if ("count_total" %in% names(local_fit$summary)) {
+    as.numeric(local_fit$summary$count_total)
+  } else {
+    rep(NA_real_, nrow(local_fit$summary))
+  }
+  count_ok <- rep(TRUE, nrow(local_fit$summary))
+  if (!is.null(anchor_min_effective_count) && any(is.finite(anchor_count_all))) {
+    count_ok <- is.finite(anchor_count_all) & anchor_count_all > anchor_min_effective_count
+  }
   if (!is.null(anchor_tiers)) {
     tier_ok <- as.character(local_fit$summary$support_tier) %in% anchor_tiers
   }
   if (!is.null(anchor_exclude) && length(anchor_exclude)) {
     tier_ok <- tier_ok & !(as.character(local_fit$summary$karyotype) %in% as.character(anchor_exclude))
   }
-  keep <- which(!is.na(anchor_match) & is.finite(local_fit$summary$fitness_mean) & tier_ok)
+  keep <- which(!is.na(anchor_match) & is.finite(local_fit$summary$fitness_mean) & tier_ok & count_ok)
   if (!length(keep)) stop("No local posterior anchors are present in the global graph.", call. = FALSE)
   anchor_var_base <- local_fit$summary$fitness_sd[keep]^2
   anchor_var <- anchor_var_base
@@ -139,13 +158,7 @@ fit_graph_posterior <- function(local_fit,
     rep(as.character(status[[1L]]), length(keep))
   }
   covariance_mult <- anchor_covariance_multiplier(covariance_status, anchor_covariance_inflation)
-  anchor_count_for_weight <- if ("effective_count_total" %in% names(local_fit$summary)) {
-    local_fit$summary$effective_count_total[keep]
-  } else if ("count_total" %in% names(local_fit$summary)) {
-    local_fit$summary$count_total[keep]
-  } else {
-    rep(NA_real_, length(keep))
-  }
+  anchor_count_for_weight <- anchor_count_all[keep]
   count_mult <- if (any(is.finite(anchor_count_for_weight))) {
     count_anchor_multiplier(anchor_count_for_weight, anchor_count_reference, anchor_count_power)
   } else {
@@ -207,19 +220,26 @@ fit_graph_posterior <- function(local_fit,
       sigma_obs = res$sigma_obs,
       cv_score = res$cv_score,
       cv_status = res$cv_status,
+      cv_evaluated = res$cv_evaluated,
+      cv_skipped = res$cv_skipped,
       graph_edge_weight = graph_edge_weight,
       anchor_support_tiers = if (is.null(anchor_tiers)) "all" else paste(anchor_tiers, collapse = ","),
       anchor_count_reference = anchor_count_reference,
       anchor_count_power = anchor_count_power,
+      anchor_min_effective_count = anchor_min_effective_count,
       anchor_excluded = length(anchor_exclude)
     ),
     tuning_grid = res$grid,
     diagnostics = list(
       factorization_status = res$factorization_status,
       cv_status = res$cv_status,
+      cv_evaluated = res$cv_evaluated,
+      cv_skipped = res$cv_skipped,
       graph_edge_weight = graph_edge_weight,
       anchor_support_tiers = if (is.null(anchor_tiers)) "all" else anchor_tiers,
       anchor_excluded = as.character(anchor_exclude),
+      anchor_count_excluded = sum(!count_ok & !is.na(anchor_match) & is.finite(local_fit$summary$fitness_mean) & tier_ok),
+      anchor_min_effective_count = anchor_min_effective_count,
       anchor_variance_multiplier_summary = summary(anchor_var_multiplier)
     )
   )

@@ -13,8 +13,8 @@ alfak2_stringify_karyotypes_cpp <- function(karyotypes) {
     .Call(`_alfak2_alfak2_stringify_karyotypes_cpp`, karyotypes)
 }
 
-alfak2_build_graph_cpp <- function(labels, y0, y1, beta = 0.00005, shell_depth = 2L, min_cn = 0L, max_cn = 5L, max_nodes = 5000L) {
-    .Call(`_alfak2_alfak2_build_graph_cpp`, labels, y0, y1, beta, shell_depth, min_cn, max_cn, max_nodes)
+alfak2_build_graph_cpp <- function(labels, y0, y1, beta = 0.00005, transition_kernel = "exact", shell_depth = 2L, min_cn = 0L, max_cn = 5L, max_nodes = 5000L) {
+    .Call(`_alfak2_alfak2_build_graph_cpp`, labels, y0, y1, beta, transition_kernel, shell_depth, min_cn, max_cn, max_nodes)
 }
 
 alfak2_simulate_counts_cpp <- function(karyotypes, labels, fitness, beta = 0.00005, dt = 1.0, n0 = 500L, n1 = 500L, detection_threshold = 1L, dropout_prob = 0.0, seed = 1L, init_concentration = 1.5, overdispersion = 0.0) {
@@ -25,7 +25,7 @@ alfak2_pij_cpp <- function(parent_cn, child_cn, beta) {
     .Call(`_alfak2_alfak2_pij_cpp`, parent_cn, child_cn, beta)
 }
 
-alfak2_transition_operator_cpp <- function(karyotypes, beta = 0.00005) {
-    .Call(`_alfak2_alfak2_transition_operator_cpp`, karyotypes, beta)
+alfak2_transition_operator_cpp <- function(karyotypes, beta = 0.00005, transition_kernel = "exact") {
+    .Call(`_alfak2_alfak2_transition_operator_cpp`, karyotypes, beta, transition_kernel)
 }
 

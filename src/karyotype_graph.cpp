@@ -18,12 +18,14 @@ Rcpp::List alfak2_build_graph_cpp(Rcpp::CharacterVector labels,
                                   Rcpp::IntegerVector y0,
                                   Rcpp::IntegerVector y1,
                                   double beta = 0.00005,
+                                  std::string transition_kernel = "exact",
                                   int shell_depth = 2,
                                   int min_cn = 0,
                                   int max_cn = 5,
                                   int max_nodes = 5000) {
   if (shell_depth < 0) Rcpp::stop("`shell_depth` must be non-negative.");
   if (min_cn > max_cn) Rcpp::stop("`min_cn` must be <= `max_cn`.");
+  transition_kernel = alfak2::normalize_transition_kernel(transition_kernel);
   Rcpp::IntegerMatrix observed_mat = alfak2::labels_to_matrix(labels);
   int n_obs = observed_mat.nrow();
   int p = observed_mat.ncol();
@@ -91,10 +93,11 @@ Rcpp::List alfak2_build_graph_cpp(Rcpp::CharacterVector labels,
   }
   Rcpp::CharacterVector node_labels = alfak2::matrix_to_labels(node_mat);
 
-  std::vector<alfak2::Edge> raw_edges = alfak2::one_step_edges(nodes, id, beta);
+  std::vector<alfak2::Edge> raw_edges = alfak2::one_step_edges(nodes, id, beta, transition_kernel);
+  std::vector<double> self_weight = alfak2::state_self_weights(nodes, beta, transition_kernel);
   std::vector<int> tr_from, tr_to;
   std::vector<double> tr_weight;
-  alfak2::add_row_stochastic_transition(raw_edges, n, tr_from, tr_to, tr_weight);
+  alfak2::add_row_stochastic_transition(raw_edges, n, tr_from, tr_to, tr_weight, self_weight);
 
   Rcpp::IntegerVector edge_from(raw_edges.size()), edge_to(raw_edges.size()), edge_chr(raw_edges.size());
   Rcpp::IntegerVector edge_direction(raw_edges.size());
@@ -178,6 +181,7 @@ Rcpp::List alfak2_build_graph_cpp(Rcpp::CharacterVector labels,
     Rcpp::Named("context_group0") = Rcpp::wrap(ctx_group),
     Rcpp::Named("n_chr") = p,
     Rcpp::Named("beta") = beta,
+    Rcpp::Named("transition_kernel") = transition_kernel,
     Rcpp::Named("shell_depth") = shell_depth,
     Rcpp::Named("min_cn") = min_cn,
     Rcpp::Named("max_cn") = max_cn

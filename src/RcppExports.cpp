@@ -56,8 +56,8 @@ BEGIN_RCPP
 END_RCPP
 }
 // alfak2_build_graph_cpp
-Rcpp::List alfak2_build_graph_cpp(Rcpp::CharacterVector labels, Rcpp::IntegerVector y0, Rcpp::IntegerVector y1, double beta, int shell_depth, int min_cn, int max_cn, int max_nodes);
-RcppExport SEXP _alfak2_alfak2_build_graph_cpp(SEXP labelsSEXP, SEXP y0SEXP, SEXP y1SEXP, SEXP betaSEXP, SEXP shell_depthSEXP, SEXP min_cnSEXP, SEXP max_cnSEXP, SEXP max_nodesSEXP) {
+Rcpp::List alfak2_build_graph_cpp(Rcpp::CharacterVector labels, Rcpp::IntegerVector y0, Rcpp::IntegerVector y1, double beta, std::string transition_kernel, int shell_depth, int min_cn, int max_cn, int max_nodes);
+RcppExport SEXP _alfak2_alfak2_build_graph_cpp(SEXP labelsSEXP, SEXP y0SEXP, SEXP y1SEXP, SEXP betaSEXP, SEXP transition_kernelSEXP, SEXP shell_depthSEXP, SEXP min_cnSEXP, SEXP max_cnSEXP, SEXP max_nodesSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -65,11 +65,12 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type y0(y0SEXP);
     Rcpp::traits::input_parameter< Rcpp::IntegerVector >::type y1(y1SEXP);
     Rcpp::traits::input_parameter< double >::type beta(betaSEXP);
+    Rcpp::traits::input_parameter< std::string >::type transition_kernel(transition_kernelSEXP);
     Rcpp::traits::input_parameter< int >::type shell_depth(shell_depthSEXP);
     Rcpp::traits::input_parameter< int >::type min_cn(min_cnSEXP);
     Rcpp::traits::input_parameter< int >::type max_cn(max_cnSEXP);
     Rcpp::traits::input_parameter< int >::type max_nodes(max_nodesSEXP);
-    rcpp_result_gen = Rcpp::wrap(alfak2_build_graph_cpp(labels, y0, y1, beta, shell_depth, min_cn, max_cn, max_nodes));
+    rcpp_result_gen = Rcpp::wrap(alfak2_build_graph_cpp(labels, y0, y1, beta, transition_kernel, shell_depth, min_cn, max_cn, max_nodes));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -109,14 +110,15 @@ BEGIN_RCPP
 END_RCPP
 }
 // alfak2_transition_operator_cpp
-Rcpp::List alfak2_transition_operator_cpp(Rcpp::IntegerMatrix karyotypes, double beta);
-RcppExport SEXP _alfak2_alfak2_transition_operator_cpp(SEXP karyotypesSEXP, SEXP betaSEXP) {
+Rcpp::List alfak2_transition_operator_cpp(Rcpp::IntegerMatrix karyotypes, double beta, std::string transition_kernel);
+RcppExport SEXP _alfak2_alfak2_transition_operator_cpp(SEXP karyotypesSEXP, SEXP betaSEXP, SEXP transition_kernelSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< Rcpp::IntegerMatrix >::type karyotypes(karyotypesSEXP);
     Rcpp::traits::input_parameter< double >::type beta(betaSEXP);
-    rcpp_result_gen = Rcpp::wrap(alfak2_transition_operator_cpp(karyotypes, beta));
+    Rcpp::traits::input_parameter< std::string >::type transition_kernel(transition_kernelSEXP);
+    rcpp_result_gen = Rcpp::wrap(alfak2_transition_operator_cpp(karyotypes, beta, transition_kernel));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -125,10 +127,10 @@ static const R_CallMethodDef CallEntries[] = {
     {"_alfak2_alfak2_graph_posterior_cpp", (DL_FUNC) &_alfak2_alfak2_graph_posterior_cpp, 11},
     {"_alfak2_alfak2_parse_karyotypes_cpp", (DL_FUNC) &_alfak2_alfak2_parse_karyotypes_cpp, 1},
     {"_alfak2_alfak2_stringify_karyotypes_cpp", (DL_FUNC) &_alfak2_alfak2_stringify_karyotypes_cpp, 1},
-    {"_alfak2_alfak2_build_graph_cpp", (DL_FUNC) &_alfak2_alfak2_build_graph_cpp, 8},
+    {"_alfak2_alfak2_build_graph_cpp", (DL_FUNC) &_alfak2_alfak2_build_graph_cpp, 9},
     {"_alfak2_alfak2_simulate_counts_cpp", (DL_FUNC) &_alfak2_alfak2_simulate_counts_cpp, 12},
     {"_alfak2_alfak2_pij_cpp", (DL_FUNC) &_alfak2_alfak2_pij_cpp, 3},
-    {"_alfak2_alfak2_transition_operator_cpp", (DL_FUNC) &_alfak2_alfak2_transition_operator_cpp, 2},
+    {"_alfak2_alfak2_transition_operator_cpp", (DL_FUNC) &_alfak2_alfak2_transition_operator_cpp, 3},
     {NULL, NULL, 0}
 };
 

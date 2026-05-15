@@ -6,6 +6,9 @@
 #' @param counts Two-column count matrix or an `alfak2_data` object.
 #' @param dt Time interval if `counts` is not already prepared.
 #' @param beta Missegregation rate.
+#' @param transition_kernel Transition weighting used by graph edges and local
+#'   transport. `"exact"` uses chromosome-level missegregation probabilities;
+#'   `"linear"` preserves the historical first-order approximation.
 #' @param local_shell_depth Local graph shell depth.
 #' @param global_extra_shell Additional bounded shell depth for graph borrowing.
 #' @param min_cn,max_cn Copy-number bounds.
@@ -22,6 +25,9 @@
 #' @param anchor_count_reference Optional low-count downweighting reference for
 #'   global graph anchors.
 #' @param anchor_count_power Exponent for count-based anchor variance inflation.
+#' @param anchor_min_effective_count Minimum effective count required for local
+#'   rows to be used as global anchors. Set to `NULL` to preserve legacy
+#'   all-finite-row anchoring.
 #' @param input_depth `"raw"` uses the supplied count matrix directly. `"effective"`
 #'   converts each timepoint to frequencies and re-counts them at a controlled
 #'   effective depth before fitting.
@@ -53,6 +59,7 @@
 fit_alfak2 <- function(counts,
                        dt = 1,
                        beta = 0.00005,
+                       transition_kernel = c("exact", "linear"),
                        local_shell_depth = 2,
                        global_extra_shell = 1,
                        min_cn = 0,
@@ -74,6 +81,7 @@ fit_alfak2 <- function(counts,
                        ),
                        anchor_count_reference = NULL,
                        anchor_count_power = 1,
+                       anchor_min_effective_count = 0,
                        input_depth = c("raw", "effective"),
                        effective_depth = NULL,
                        effective_depth_mode = c("min", "cap", "fixed"),
@@ -92,6 +100,7 @@ fit_alfak2 <- function(counts,
   input_depth <- modes$input_depth
   effective_depth_mode <- modes$effective_depth_mode
   graph_edge_weight <- match.arg(graph_edge_weight)
+  transition_kernel <- match.arg(transition_kernel)
   obs_controls <- resolve_fit_observation_controls(input_depth, observation_model, dm_concentration)
   legacy_weight <- match.arg(legacy_weight)
 
@@ -105,6 +114,7 @@ fit_alfak2 <- function(counts,
   )
   local_graph <- build_karyotype_graph(
     data,
+    transition_kernel = transition_kernel,
     shell_depth = local_shell_depth,
     min_cn = min_cn,
     max_cn = max_cn,
@@ -119,6 +129,7 @@ fit_alfak2 <- function(counts,
   )
   global_graph <- build_karyotype_graph(
     data,
+    transition_kernel = transition_kernel,
     shell_depth = local_shell_depth + global_extra_shell,
     min_cn = min_cn,
     max_cn = max_cn,
@@ -135,7 +146,8 @@ fit_alfak2 <- function(counts,
     anchor_exclude = anchor_exclude,
     anchor_covariance_inflation = anchor_covariance_inflation,
     anchor_count_reference = anchor_count_reference,
-    anchor_count_power = anchor_count_power
+    anchor_count_power = anchor_count_power,
+    anchor_min_effective_count = anchor_min_effective_count
   )
   input_depth_diag <- data$metadata$input_depth
   if (is.null(input_depth_diag)) input_depth_diag <- list(input_depth = "raw")
@@ -150,11 +162,13 @@ fit_alfak2 <- function(counts,
       input_depth = input_depth_diag,
       observation_model = obs_controls$observation_model,
       dm_concentration = obs_controls$dm_concentration,
+      transition_kernel = transition_kernel,
       graph_edge_weight = graph_edge_weight,
       anchor_support_tiers = anchor_support_tiers,
       anchor_exclude = as.character(anchor_exclude),
       anchor_count_reference = anchor_count_reference,
-      anchor_count_power = anchor_count_power
+      anchor_count_power = anchor_count_power,
+      anchor_min_effective_count = anchor_min_effective_count
     )
   )
   if (isTRUE(alfakR_scale)) {

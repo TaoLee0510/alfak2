@@ -67,6 +67,16 @@ local_attempt_diagnostics <- function(attempt, covariance_status) {
   )
 }
 
+support_mass_by_tier <- function(values, support_tier) {
+  values <- as.numeric(values)
+  support_tier <- as.character(support_tier)
+  values[!is.finite(values)] <- 0
+  out <- rowsum(values, group = support_tier, reorder = FALSE)[, 1]
+  total <- sum(out)
+  if (is.finite(total) && total > 0) out <- out / total
+  out
+}
+
 #' Fit the local hierarchical posterior
 #'
 #' The likelihood and hierarchical prior objective are implemented in TMB. This
@@ -84,6 +94,14 @@ local_attempt_diagnostics <- function(attempt, covariance_status) {
 #'   when the first optimizer pass does not yield trusted covariance.
 #' @param retry_control Optional larger `stats::nlminb` control list used for the
 #'   retry pass.
+#' @param eta_prior_sd Prior standard deviation for directly observed initial
+#'   log-abundances.
+#' @param eta_borrowed_prior_mean Prior mean for unobserved graph-node initial
+#'   log-abundances.
+#' @param eta_borrowed_prior_sd Prior standard deviation for unobserved graph-node
+#'   initial log-abundances.
+#' @param eta_distance_penalty Additional negative prior-mean shift per support
+#'   shell beyond the first borrowed shell.
 #'
 #' @return An `alfak2_local_fit` object.
 #' @export
@@ -94,7 +112,11 @@ fit_local_posterior <- function(data,
                                 control = list(eval.max = 500, iter.max = 500),
                                 gradient_tolerance = 1e-3,
                                 retry_on_untrusted_covariance = TRUE,
-                                retry_control = list(eval.max = 2000, iter.max = 2000)) {
+                                retry_control = list(eval.max = 2000, iter.max = 2000),
+                                eta_prior_sd = 5,
+                                eta_borrowed_prior_mean = -6,
+                                eta_borrowed_prior_sd = 1.5,
+                                eta_distance_penalty = 0.75) {
   if (!inherits(data, "alfak2_data")) {
     stop("`data` must be an alfak2_data object.", call. = FALSE)
   }
@@ -108,6 +130,10 @@ fit_local_posterior <- function(data,
       is.na(retry_on_untrusted_covariance)) {
     stop("`retry_on_untrusted_covariance` must be TRUE or FALSE.", call. = FALSE)
   }
+  validate_scalar(eta_prior_sd, "eta_prior_sd", lower = .Machine$double.eps)
+  validate_scalar(eta_borrowed_prior_mean, "eta_borrowed_prior_mean")
+  validate_scalar(eta_borrowed_prior_sd, "eta_borrowed_prior_sd", lower = .Machine$double.eps)
+  validate_scalar(eta_distance_penalty, "eta_distance_penalty", lower = 0)
   if (is.null(graph)) graph <- build_karyotype_graph(data, shell_depth = 2)
   if (!inherits(graph, "alfak2_graph")) {
     stop("`graph` must be an alfak2_graph object.", call. = FALSE)
@@ -145,6 +171,13 @@ fit_local_posterior <- function(data,
 
   y0_init <- y0 * obs_weight0
   y1_init <- y1 * obs_weight1
+  effective_count_total <- y0_init + y1_init
+  borrowed_eta <- effective_count_total <= 0 & graph$support_distance > 0L
+  eta_prior_mean <- rep(0, n)
+  eta_prior_sd_vec <- rep(as.numeric(eta_prior_sd), n)
+  eta_prior_mean[borrowed_eta] <- as.numeric(eta_borrowed_prior_mean) -
+    as.numeric(eta_distance_penalty) * pmax(0, as.integer(graph$support_distance[borrowed_eta]) - 1L)
+  eta_prior_sd_vec[borrowed_eta] <- as.numeric(eta_borrowed_prior_sd)
   p0 <- (y0_init + 0.5) / sum(y0_init + 0.5)
   p1 <- (y1_init + 0.5) / sum(y1_init + 0.5)
   f0 <- log(p1) - log(p0)
@@ -177,6 +210,8 @@ fit_local_posterior <- function(data,
     obs_weight0 = as.numeric(obs_weight0),
     obs_weight1 = as.numeric(obs_weight1),
     use_observation_weights = as.integer(use_observation_weights),
+    eta_prior_mean = as.numeric(eta_prior_mean),
+    eta_prior_sd = as.numeric(eta_prior_sd_vec),
     anchor_prior_scale = 1.0,
     mu_prior_scale = 0.5,
     scale_prior_scale = 1.0,
@@ -206,6 +241,8 @@ fit_local_posterior <- function(data,
   plist <- obj$env$parList(opt$par)
   f_mean <- as.numeric(plist$f)
   report <- try(obj$report(opt$par), silent = TRUE)
+  pi0_report <- if (inherits(report, "try-error") || is.null(report$pi0)) rep(NA_real_, n) else as.numeric(report$pi0)
+  pi1_report <- if (inherits(report, "try-error") || is.null(report$pi1)) rep(NA_real_, n) else as.numeric(report$pi1)
   covariance_fallback <- !identical(covariance_status, "TMB_sdreport")
   f_sd <- if (!covariance_fallback && !is.null(attempt$frep)) {
     as.numeric(attempt$frep$sd)
@@ -232,7 +269,11 @@ fit_local_posterior <- function(data,
     count_total = as.integer(y0 + y1),
     observation_weight_t0 = as.numeric(obs_weight0),
     observation_weight_t1 = as.numeric(obs_weight1),
-    effective_count_total = as.numeric(y0 * obs_weight0 + y1 * obs_weight1),
+    effective_count_total = as.numeric(effective_count_total),
+    eta_prior_mean = as.numeric(eta_prior_mean),
+    eta_prior_sd = as.numeric(eta_prior_sd_vec),
+    pi0 = as.numeric(pi0_report),
+    pi1 = as.numeric(pi1_report),
     is_observed = as.logical((y0 + y1) > 0),
     fitness_mean = f_mean,
     fitness_sd = f_sd,
@@ -255,7 +296,16 @@ fit_local_posterior <- function(data,
     observation_model = observation_model,
     likelihood_model = likelihood_model,
     use_observation_weights = use_observation_weights,
-    observation_weight_summary = summary(c(obs_weight0[observed_index], obs_weight1[observed_index]))
+    observation_weight_summary = summary(c(obs_weight0[observed_index], obs_weight1[observed_index])),
+    eta_prior = list(
+      direct_sd = as.numeric(eta_prior_sd),
+      borrowed_mean = as.numeric(eta_borrowed_prior_mean),
+      borrowed_sd = as.numeric(eta_borrowed_prior_sd),
+      distance_penalty = as.numeric(eta_distance_penalty),
+      n_borrowed_shrunk = sum(borrowed_eta)
+    ),
+    pi0_support_mass = support_mass_by_tier(pi0_report, graph$support_tier),
+    pi1_support_mass = support_mass_by_tier(pi1_report, graph$support_tier)
   )
   new_alfak2_local_fit(list(
     data = data,
