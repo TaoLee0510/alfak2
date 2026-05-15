@@ -12,3 +12,21 @@ test_that("shell neighbor graph contains expected nodes and edges", {
   expect_gt(length(g$edge_from), 0)
   expect_true(any(g$support_tier == "local_borrowed"))
 })
+
+test_that("zero-weight rows are retained as targets but not graph seeds", {
+  counts <- matrix(
+    c(10, 5,
+      4, 6),
+    nrow = 2,
+    byrow = TRUE,
+    dimnames = list(c("2.2", "2.3"), c("t0", "t1"))
+  )
+  weights <- matrix(1, nrow = 2, ncol = 2, dimnames = dimnames(counts))
+  weights["2.3", ] <- 0
+  attr(counts, "observation_weights") <- weights
+  dat <- prepare_alfak2_data(counts, beta = 0.01)
+  g <- build_karyotype_graph(dat, shell_depth = 1, min_cn = 1, max_cn = 3)
+
+  expect_equal(g$support_tier[match("2.3", g$labels)], "local_borrowed")
+  expect_false("3.3" %in% g$labels)
+})

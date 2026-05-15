@@ -190,6 +190,17 @@ static double cv_score_grid(const Rcpp::IntegerMatrix& karyotypes,
   return rss / m;
 }
 
+static double middle_grid_value(Rcpp::NumericVector grid, double fallback) {
+  std::vector<double> values;
+  values.reserve(grid.size());
+  for (double x : grid) {
+    if (R_finite(x)) values.push_back(x);
+  }
+  if (values.empty()) return fallback;
+  std::sort(values.begin(), values.end());
+  return values[values.size() / 2];
+}
+
 // [[Rcpp::export]]
 Rcpp::List alfak2_graph_posterior_cpp(Rcpp::IntegerMatrix karyotypes,
                                       Rcpp::IntegerVector edge_from,
@@ -218,18 +229,24 @@ Rcpp::List alfak2_graph_posterior_cpp(Rcpp::IntegerMatrix karyotypes,
   if (lambda_e_grid.size() == 0) lambda_e_grid = Rcpp::NumericVector::create(0.25);
   if (sigma_obs_grid.size() == 0) sigma_obs_grid = Rcpp::NumericVector::create(0.05);
 
-  double best_score = std::numeric_limits<double>::infinity();
-  double best_l = lambda_l_grid[0], best_e = lambda_e_grid[0], best_s = sigma_obs_grid[0];
+  bool tune_by_cv = anchor0.size() >= 3;
+  std::string cv_status = tune_by_cv ? "ok" : "insufficient_anchors";
+  double best_score = tune_by_cv ? std::numeric_limits<double>::infinity() : NA_REAL;
+  double best_l = tune_by_cv ? lambda_l_grid[0] : middle_grid_value(lambda_l_grid, 1.0);
+  double best_e = tune_by_cv ? lambda_e_grid[0] : middle_grid_value(lambda_e_grid, 0.25);
+  double best_s = tune_by_cv ? sigma_obs_grid[0] : middle_grid_value(sigma_obs_grid, 0.05);
   Rcpp::DataFrame grid = Rcpp::DataFrame::create();
   std::vector<double> gl, ge, gs, score;
   for (double l : lambda_l_grid) {
     for (double e : lambda_e_grid) {
       for (double s : sigma_obs_grid) {
-        double sc = cv_score_grid(karyotypes, edge_from, edge_to, edge_weight,
-                                  anchor0, anchor_mean, anchor_var,
-                                  l, e, s, eps);
+        double sc = tune_by_cv ?
+          cv_score_grid(karyotypes, edge_from, edge_to, edge_weight,
+                        anchor0, anchor_mean, anchor_var,
+                        l, e, s, eps) :
+          NA_REAL;
         gl.push_back(l); ge.push_back(e); gs.push_back(s); score.push_back(sc);
-        if (sc < best_score) {
+        if (tune_by_cv && sc < best_score) {
           best_score = sc;
           best_l = l; best_e = e; best_s = s;
         }
@@ -254,6 +271,7 @@ Rcpp::List alfak2_graph_posterior_cpp(Rcpp::IntegerMatrix karyotypes,
     Rcpp::Named("lambda_e") = best_e,
     Rcpp::Named("sigma_obs") = best_s,
     Rcpp::Named("cv_score") = best_score,
+    Rcpp::Named("cv_status") = cv_status,
     Rcpp::Named("grid") = Rcpp::DataFrame::create(
       Rcpp::Named("lambda_l") = gl,
       Rcpp::Named("lambda_e") = ge,

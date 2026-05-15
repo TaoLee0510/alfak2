@@ -97,6 +97,13 @@ test_that("observation weights downweight low-support rows in the local likeliho
   expect_equal(row$effective_count_total, sum(counts["1.2.2", ]) * 0.25)
   expect_true(fit$diagnostics$use_observation_weights)
   expect_equal(fit$diagnostics$likelihood_model, "weighted_multinomial")
+
+  gp <- fit_graph_posterior(local_fit = fit, graph = graph,
+                            lambda_l_grid = 1, lambda_e_grid = 0.1,
+                            sigma_obs_grid = 0.05,
+                            anchor_count_reference = 20)
+  anchor <- gp$anchors[gp$anchors$karyotype == "1.2.2", , drop = FALSE]
+  expect_equal(anchor$anchor_count_for_weight, row$effective_count_total)
 })
 
 test_that("dirichlet-multinomial uses explicit weighted likelihood when observation weights are present", {
@@ -115,6 +122,26 @@ test_that("dirichlet-multinomial uses explicit weighted likelihood when observat
   )
   expect_equal(fit$diagnostics$observation_model, "dirichlet_multinomial")
   expect_equal(fit$diagnostics$likelihood_model, "weighted_dirichlet_multinomial")
+})
+
+test_that("global tuning records insufficient-anchor fallback", {
+  counts <- stable_counts_input()[1:2, , drop = FALSE]
+  dat <- prepare_alfak2_data(counts, dt = 1, beta = 0.01)
+  graph <- build_karyotype_graph(dat, shell_depth = 0, min_cn = 1, max_cn = 3, max_nodes = 20)
+  local <- fit_local_posterior(dat, graph, control = list(eval.max = 120, iter.max = 120))
+  gp <- fit_graph_posterior(
+    local,
+    graph,
+    lambda_l_grid = c(0.2, 1, 5),
+    lambda_e_grid = c(0.05, 0.25, 1),
+    sigma_obs_grid = c(0.02, 0.05, 0.1)
+  )
+
+  expect_equal(gp$diagnostics$cv_status, "insufficient_anchors")
+  expect_equal(gp$hyperparameters$lambda_l, 1)
+  expect_equal(gp$hyperparameters$lambda_e, 0.25)
+  expect_equal(gp$hyperparameters$sigma_obs, 0.05)
+  expect_true(all(is.na(gp$tuning_grid$score)))
 })
 
 test_that("untrusted local covariance uses finite fallback uncertainty", {

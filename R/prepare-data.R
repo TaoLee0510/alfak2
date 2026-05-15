@@ -47,6 +47,7 @@ subset_observation_weights <- function(weights, labels) {
 prepare_alfak2_data <- function(counts, dt = 1, beta = 0.00005, metadata = list()) {
   observation_weights <- attr(counts, "observation_weights", exact = TRUE)
   soft_minobs <- attr(counts, "soft_minobs", exact = TRUE)
+  holdout_mode <- attr(counts, "holdout_mode", exact = TRUE)
   counts <- validate_count_matrix(counts)
   colnames(counts) <- c("t0", "t1")
   validate_scalar(dt, "dt", lower = .Machine$double.eps)
@@ -59,6 +60,7 @@ prepare_alfak2_data <- function(counts, dt = 1, beta = 0.00005, metadata = list(
     metadata$observation_weights <- validate_observation_weights(metadata$observation_weights, counts)
   }
   if (!is.null(soft_minobs)) metadata$soft_minobs <- soft_minobs
+  if (!is.null(holdout_mode)) metadata$holdout_mode <- holdout_mode
   parse_karyotypes(rownames(counts))
   new_alfak2_data(counts = counts, dt = dt, beta = beta, metadata = metadata)
 }

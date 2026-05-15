@@ -49,8 +49,9 @@ Rcpp::List alfak2_build_graph_cpp(Rcpp::CharacterVector labels,
     int new_id = nodes.size();
     id[key] = new_id;
     nodes.push_back(x);
-    support_distance.push_back((y0[i] + y1[i]) > 0 ? 0 : shell_depth + 1);
-    queue.push_back(new_id);
+    bool is_seed = (y0[i] + y1[i]) > 0;
+    support_distance.push_back(is_seed ? 0 : shell_depth + 1);
+    if (is_seed) queue.push_back(new_id);
   }
 
   std::vector<int> bfs_depth(nodes.size(), 0);

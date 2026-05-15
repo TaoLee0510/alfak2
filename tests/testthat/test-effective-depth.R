@@ -34,6 +34,35 @@ test_that("effective-depth preprocessing preserves observation weights", {
   expect_equal(out_weights[rownames(out), , drop = FALSE], weights[rownames(out), , drop = FALSE])
 })
 
+test_that("effective-depth preprocessing preserves zero-weight holdout targets", {
+  counts <- matrix(
+    c(99, 99,
+      1, 1),
+    nrow = 2,
+    byrow = TRUE,
+    dimnames = list(c("1.1", "3.3"), c("t0", "t1"))
+  )
+  weights <- matrix(1, nrow = 2, ncol = 2, dimnames = dimnames(counts))
+  weights["3.3", ] <- 0
+  attr(counts, "observation_weights") <- weights
+  attr(counts, "holdout_mode") <- list(mode = "zero_observation_weight", labels = "3.3")
+
+  dat <- prepare_counts_for_input_depth(
+    counts,
+    dt = 1,
+    beta = 0.01,
+    input_depth = "effective",
+    effective_depth = 1,
+    effective_depth_mode = "fixed"
+  )
+  graph <- build_karyotype_graph(dat, shell_depth = 1, min_cn = 1, max_cn = 3)
+
+  expect_false("3.3" %in% dat$labels)
+  expect_equal(dat$metadata$holdout_mode$labels, "3.3")
+  expect_equal(graph$support_tier[match("3.3", graph$labels)], "weakly_supported")
+  expect_false("2.3" %in% graph$labels)
+})
+
 test_that("effective-depth fit defaults to dirichlet-multinomial controls", {
   counts <- matrix(
     c(30, 20,

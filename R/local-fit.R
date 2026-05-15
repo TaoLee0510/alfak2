@@ -114,10 +114,15 @@ fit_local_posterior <- function(data,
   }
 
   n <- length(graph$labels)
+  observed_index <- match(data$labels, as.character(graph$labels))
+  if (anyNA(observed_index)) {
+    missing <- data$labels[is.na(observed_index)]
+    stop("Graph is missing observed karyotypes: ", paste(utils::head(missing, 5), collapse = ", "), call. = FALSE)
+  }
   y0 <- numeric(n)
   y1 <- numeric(n)
-  y0[graph$observed_index] <- data$counts[, 1]
-  y1[graph$observed_index] <- data$counts[, 2]
+  y0[observed_index] <- data$counts[, 1]
+  y1[observed_index] <- data$counts[, 2]
   observation_weights <- data$metadata$observation_weights
   if (is.null(observation_weights)) {
     observation_weights <- matrix(1, nrow = nrow(data$counts), ncol = 2L,
@@ -127,9 +132,9 @@ fit_local_posterior <- function(data,
   }
   obs_weight0 <- rep(1, n)
   obs_weight1 <- rep(1, n)
-  obs_weight0[graph$observed_index] <- observation_weights[, 1]
-  obs_weight1[graph$observed_index] <- observation_weights[, 2]
-  use_observation_weights <- any(abs(c(obs_weight0[graph$observed_index], obs_weight1[graph$observed_index]) - 1) > 1e-12)
+  obs_weight0[observed_index] <- observation_weights[, 1]
+  obs_weight1[observed_index] <- observation_weights[, 2]
+  use_observation_weights <- any(abs(c(obs_weight0[observed_index], obs_weight1[observed_index]) - 1) > 1e-12)
   likelihood_model <- if (isTRUE(use_observation_weights) && identical(observation_model, "dirichlet_multinomial")) {
     "weighted_dirichlet_multinomial"
   } else if (isTRUE(use_observation_weights)) {
@@ -138,8 +143,10 @@ fit_local_posterior <- function(data,
     observation_model
   }
 
-  p0 <- (y0 + 0.5) / sum(y0 + 0.5)
-  p1 <- (y1 + 0.5) / sum(y1 + 0.5)
+  y0_init <- y0 * obs_weight0
+  y1_init <- y1 * obs_weight1
+  p0 <- (y0_init + 0.5) / sum(y0_init + 0.5)
+  p1 <- (y1_init + 0.5) / sum(y1_init + 0.5)
   f0 <- log(p1) - log(p0)
   f0 <- f0 - mean(f0)
   n_context <- length(graph$context_label)
@@ -248,7 +255,7 @@ fit_local_posterior <- function(data,
     observation_model = observation_model,
     likelihood_model = likelihood_model,
     use_observation_weights = use_observation_weights,
-    observation_weight_summary = summary(c(obs_weight0[graph$observed_index], obs_weight1[graph$observed_index]))
+    observation_weight_summary = summary(c(obs_weight0[observed_index], obs_weight1[observed_index]))
   )
   new_alfak2_local_fit(list(
     data = data,

@@ -18,6 +18,29 @@ build_karyotype_graph <- function(x,
     labels <- x$labels
     y0 <- x$counts[, 1]
     y1 <- x$counts[, 2]
+    holdout_labels <- if (!is.null(x$metadata$holdout_mode$labels)) {
+      as.character(x$metadata$holdout_mode$labels)
+    } else {
+      character()
+    }
+    holdout_labels <- holdout_labels[nzchar(holdout_labels)]
+    extra_labels <- setdiff(holdout_labels, labels)
+    if (length(extra_labels)) {
+      labels <- c(labels, extra_labels)
+      y0 <- c(y0, stats::setNames(rep(0, length(extra_labels)), extra_labels))
+      y1 <- c(y1, stats::setNames(rep(0, length(extra_labels)), extra_labels))
+    }
+    observation_weights <- x$metadata$observation_weights
+    if (!is.null(observation_weights)) {
+      weights <- matrix(0, nrow = length(labels), ncol = 2L,
+                        dimnames = list(labels, c("t0", "t1")))
+      observation_weights <- validate_observation_weights(observation_weights, x$counts)
+      weights[rownames(observation_weights), ] <- observation_weights
+      seed_mass <- as.numeric(y0) * weights[, 1] + as.numeric(y1) * weights[, 2]
+      y0 <- as.integer(is.finite(seed_mass) & seed_mass > 0)
+      y1 <- rep.int(0L, length(labels))
+      names(y0) <- names(y1) <- labels
+    }
     if (is.null(beta)) beta <- x$beta
   } else {
     labels <- as.character(x)

@@ -139,8 +139,15 @@ fit_graph_posterior <- function(local_fit,
     rep(as.character(status[[1L]]), length(keep))
   }
   covariance_mult <- anchor_covariance_multiplier(covariance_status, anchor_covariance_inflation)
-  count_mult <- if ("count_total" %in% names(local_fit$summary)) {
-    count_anchor_multiplier(local_fit$summary$count_total[keep], anchor_count_reference, anchor_count_power)
+  anchor_count_for_weight <- if ("effective_count_total" %in% names(local_fit$summary)) {
+    local_fit$summary$effective_count_total[keep]
+  } else if ("count_total" %in% names(local_fit$summary)) {
+    local_fit$summary$count_total[keep]
+  } else {
+    rep(NA_real_, length(keep))
+  }
+  count_mult <- if (any(is.finite(anchor_count_for_weight))) {
+    count_anchor_multiplier(anchor_count_for_weight, anchor_count_reference, anchor_count_power)
   } else {
     rep(1, length(keep))
   }
@@ -190,6 +197,8 @@ fit_graph_posterior <- function(local_fit,
       variance_multiplier = anchor_var_multiplier,
       covariance_status = covariance_status,
       count_total = if ("count_total" %in% names(local_fit$summary)) local_fit$summary$count_total[keep] else NA_integer_,
+      effective_count_total = if ("effective_count_total" %in% names(local_fit$summary)) local_fit$summary$effective_count_total[keep] else NA_real_,
+      anchor_count_for_weight = anchor_count_for_weight,
       stringsAsFactors = FALSE
     ),
     hyperparameters = list(
@@ -197,6 +206,7 @@ fit_graph_posterior <- function(local_fit,
       lambda_e = res$lambda_e,
       sigma_obs = res$sigma_obs,
       cv_score = res$cv_score,
+      cv_status = res$cv_status,
       graph_edge_weight = graph_edge_weight,
       anchor_support_tiers = if (is.null(anchor_tiers)) "all" else paste(anchor_tiers, collapse = ","),
       anchor_count_reference = anchor_count_reference,
@@ -206,6 +216,7 @@ fit_graph_posterior <- function(local_fit,
     tuning_grid = res$grid,
     diagnostics = list(
       factorization_status = res$factorization_status,
+      cv_status = res$cv_status,
       graph_edge_weight = graph_edge_weight,
       anchor_support_tiers = if (is.null(anchor_tiers)) "all" else anchor_tiers,
       anchor_excluded = as.character(anchor_exclude),
