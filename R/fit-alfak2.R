@@ -12,6 +12,14 @@
 #' @param max_nodes Hard graph-size bound.
 #' @param lambda_l_grid,lambda_e_grid,sigma_obs_grid Hyperparameter grids passed
 #'   to the compiled graph posterior.
+#' @param graph_edge_weight Edge weighting used by the global graph prior.
+#' @param anchor_support_tiers Local support tiers used as global graph anchors;
+#'   defaults to `"all"` to preserve the legacy public API behavior.
+#' @param anchor_covariance_inflation Named variance multipliers for local
+#'   covariance statuses.
+#' @param anchor_count_reference Optional low-count downweighting reference for
+#'   global graph anchors.
+#' @param anchor_count_power Exponent for count-based anchor variance inflation.
 #' @param input_depth `"raw"` uses the supplied count matrix directly. `"effective"`
 #'   converts each timepoint to frequencies and re-counts them at a controlled
 #'   effective depth before fitting.
@@ -51,6 +59,18 @@ fit_alfak2 <- function(counts,
                        lambda_l_grid = c(0.2, 1, 5),
                        lambda_e_grid = c(0.05, 0.25, 1),
                        sigma_obs_grid = c(0.02, 0.05, 0.1),
+                       graph_edge_weight = c("mutation", "unit", "normalized"),
+                       anchor_support_tiers = "all",
+                       anchor_covariance_inflation = c(
+                         TMB_sdreport = 1,
+                         untrusted_gradient = 4,
+                         untrusted_nonconverged = 9,
+                         untrusted_sdreport_missing = 4,
+                         untrusted_sdreport_nonfinite = 4,
+                         unknown = 4
+                       ),
+                       anchor_count_reference = NULL,
+                       anchor_count_power = 1,
                        input_depth = c("raw", "effective"),
                        effective_depth = NULL,
                        effective_depth_mode = c("min", "cap", "fixed"),
@@ -68,6 +88,7 @@ fit_alfak2 <- function(counts,
   modes <- validate_effective_depth_mode(input_depth, effective_depth_mode)
   input_depth <- modes$input_depth
   effective_depth_mode <- modes$effective_depth_mode
+  graph_edge_weight <- match.arg(graph_edge_weight)
   obs_controls <- resolve_fit_observation_controls(input_depth, observation_model, dm_concentration)
   legacy_weight <- match.arg(legacy_weight)
 
@@ -105,7 +126,12 @@ fit_alfak2 <- function(counts,
     global_graph,
     lambda_l_grid = lambda_l_grid,
     lambda_e_grid = lambda_e_grid,
-    sigma_obs_grid = sigma_obs_grid
+    sigma_obs_grid = sigma_obs_grid,
+    graph_edge_weight = graph_edge_weight,
+    anchor_support_tiers = anchor_support_tiers,
+    anchor_covariance_inflation = anchor_covariance_inflation,
+    anchor_count_reference = anchor_count_reference,
+    anchor_count_power = anchor_count_power
   )
   input_depth_diag <- data$metadata$input_depth
   if (is.null(input_depth_diag)) input_depth_diag <- list(input_depth = "raw")
@@ -119,7 +145,11 @@ fit_alfak2 <- function(counts,
       backend = c(local = "TMB", global = "RcppEigen"),
       input_depth = input_depth_diag,
       observation_model = obs_controls$observation_model,
-      dm_concentration = obs_controls$dm_concentration
+      dm_concentration = obs_controls$dm_concentration,
+      graph_edge_weight = graph_edge_weight,
+      anchor_support_tiers = anchor_support_tiers,
+      anchor_count_reference = anchor_count_reference,
+      anchor_count_power = anchor_count_power
     )
   )
   if (isTRUE(alfakR_scale)) {

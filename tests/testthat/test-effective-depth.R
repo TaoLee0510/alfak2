@@ -16,6 +16,24 @@ test_that("effective-depth preprocessing preserves controlled column totals", {
   expect_true(all(rowSums(out) > 0))
 })
 
+test_that("effective-depth preprocessing preserves observation weights", {
+  counts <- matrix(
+    c(90, 9,
+      10, 1,
+      0, 90),
+    nrow = 3,
+    byrow = TRUE,
+    dimnames = list(c("2.2", "2.3", "3.3"), c("t0", "t1"))
+  )
+  weights <- matrix(c(1, 1, 0.2, 0.2, 1, 1), nrow = 3, byrow = TRUE,
+                    dimnames = list(rownames(counts), c("t0", "t1")))
+  attr(counts, "observation_weights") <- weights
+  out <- apply_effective_depth_counts(counts, effective_depth = 20, effective_depth_mode = "fixed")
+  out_weights <- attr(out, "observation_weights")
+
+  expect_equal(out_weights[rownames(out), , drop = FALSE], weights[rownames(out), , drop = FALSE])
+})
+
 test_that("effective-depth fit defaults to dirichlet-multinomial controls", {
   counts <- matrix(
     c(30, 20,

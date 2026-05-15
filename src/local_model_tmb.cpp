@@ -48,6 +48,8 @@ Type objective_function<Type>::operator() () {
   DATA_IVECTOR(parent_context);
   DATA_IVECTOR(context_group);
   DATA_SCALAR(dt);
+  DATA_VECTOR(obs_weight0);
+  DATA_VECTOR(obs_weight1);
   DATA_SCALAR(anchor_prior_scale);
   DATA_SCALAR(mu_prior_scale);
   DATA_SCALAR(scale_prior_scale);
@@ -89,13 +91,20 @@ Type objective_function<Type>::operator() () {
   vector<Type> pi1(n_nodes);
   for (int i = 0; i < n_nodes; ++i) pi1(i) = transported(i) / z1;
 
+  vector<Type> y0_lik(n_nodes);
+  vector<Type> y1_lik(n_nodes);
+  for (int i = 0; i < n_nodes; ++i) {
+    y0_lik(i) = y0(i) * obs_weight0(i);
+    y1_lik(i) = y1(i) * obs_weight1(i);
+  }
+
   if (observation_model == 1) {
     Type phi = dm_concentration;
-    nll -= dirichlet_multinomial_loglik(pi0, y0, phi);
-    nll -= dirichlet_multinomial_loglik(pi1, y1, phi);
+    nll -= dirichlet_multinomial_loglik(pi0, y0_lik, phi);
+    nll -= dirichlet_multinomial_loglik(pi1, y1_lik, phi);
   } else {
-    nll -= multinomial_loglik(pi0, y0);
-    nll -= multinomial_loglik(pi1, y1);
+    nll -= multinomial_loglik(pi0, y0_lik);
+    nll -= multinomial_loglik(pi1, y1_lik);
   }
 
   Type sigma_neighbor = softplus_floor(log_sigma_neighbor, Type(1e-5));

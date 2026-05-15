@@ -44,10 +44,15 @@ usage <- function() {
     "  --local-shell-depths=0\n",
     "  --global-extra-shells=1\n\n",
     "Ranking options:\n",
-    "  --objective-scope=nn\n",
-    "  --objective-metric=mae\n",
+    "  --objective-scope=nn|direct|all|holdout\n",
+    "  --objective-metric=sparse_composite\n",
     "  --direct-weight=0.25\n",
+    "  --holdout-weight=0.15\n",
+    "  --holdout-fraction=0.25\n",
+    "  --holdout-min-direct=6\n",
     "  --bias-weight=0.10\n",
+    "  --spearman-weight=0.10\n",
+    "  --false-high-weight=0.10\n",
     sep = ""
   )
 }
@@ -90,19 +95,24 @@ build_calibration_config <- function(args, repo_dir) {
   bad_weights <- setdiff(legacy_weights, c("pi0", "directly_informed", "uniform"))
   if (length(bad_weights)) stop("Unsupported legacy weights: ", paste(bad_weights, collapse = ", "), call. = FALSE)
 
-  objective_metric <- as.character(arg_value(args, "objective_metric", "mae"))
+  objective_metric <- as.character(arg_value(args, "objective_metric", "sparse_composite"))
   objective_metric <- match.arg(
     objective_metric,
-    c("mae", "rmse", "centered_mae", "centered_rmse", "median_abs_error")
+    c("mae", "rmse", "centered_mae", "centered_rmse", "median_abs_error", "sparse_composite")
   )
   objective_scope <- as.character(arg_value(args, "objective_scope", "nn"))
-  objective_scope <- match.arg(objective_scope, c("nn", "direct", "all"))
+  objective_scope <- match.arg(objective_scope, c("nn", "direct", "all", "holdout"))
   input_policy <- as.character(arg_value(args, "input_policy", "minobs_matched"))
-  input_policy <- match.arg(input_policy, c("minobs_matched", "full"))
+  input_policy <- match.arg(input_policy, c("minobs_matched", "full", "soft_minobs"))
   input_depth <- as.character(arg_value(args, "alfak2_input_depth", "effective"))
   input_depth <- match.arg(input_depth, c("raw", "effective"))
   observation_model <- as.character(arg_value(args, "alfak2_observation_model", "dirichlet_multinomial"))
   if (!nzchar(observation_model)) observation_model <- NULL
+  graph_edge_weights <- arg_character_vec(args, "graph_edge_weights", "mutation")
+  bad_graph_weights <- setdiff(graph_edge_weights, c("mutation", "unit", "normalized"))
+  if (length(bad_graph_weights)) {
+    stop("Unsupported graph edge weights: ", paste(bad_graph_weights, collapse = ", "), call. = FALSE)
+  }
 
   list(
     repo_dir = repo_dir,
@@ -161,6 +171,9 @@ build_calibration_config <- function(args, repo_dir) {
     lambda_l_values = arg_numeric_vec(args, "lambda_l_values", c(0.2, 1, 5)),
     lambda_e_values = arg_numeric_vec(args, "lambda_e_values", c(0.05, 0.25, 1)),
     sigma_obs_values = arg_numeric_vec(args, "sigma_obs_values", c(0.02, 0.05, 0.1)),
+    graph_edge_weights = graph_edge_weights,
+    alfak2_anchor_count_reference = arg_anchor_count_reference(args),
+    alfak2_anchor_count_power = arg_numeric(args, "alfak2_anchor_count_power", 1),
     legacy_weights = legacy_weights,
     correct_efflux_values = arg_logical_vec(args, "correct_efflux_values", c(TRUE, FALSE)),
     eval_max = arg_integer(args, "alfak2_eval_max", 500L),
@@ -169,7 +182,13 @@ build_calibration_config <- function(args, repo_dir) {
     objective_scope = objective_scope,
     objective_metric = objective_metric,
     direct_weight = arg_numeric(args, "direct_weight", 0.25),
+    holdout_weight = arg_numeric(args, "holdout_weight", 0.15),
+    holdout_fraction = arg_numeric(args, "holdout_fraction", 0.25),
+    holdout_min_direct = arg_integer(args, "holdout_min_direct", 6L),
+    holdout_seed = arg_integer(args, "holdout_seed", 71011L),
     bias_weight = arg_numeric(args, "bias_weight", 0.10),
+    spearman_weight = arg_numeric(args, "spearman_weight", 0.10),
+    false_high_weight = arg_numeric(args, "false_high_weight", 0.10),
     write_node_table = arg_logical(args, "write_node_table", FALSE)
   )
 }
@@ -181,6 +200,7 @@ make_param_grid <- function(cfg) {
     lambda_l = cfg$lambda_l_values,
     lambda_e = cfg$lambda_e_values,
     sigma_obs = cfg$sigma_obs_values,
+    graph_edge_weight = cfg$graph_edge_weights,
     dm_concentration = cfg$dm_concentrations,
     effective_depth_mode = cfg$effective_depth_modes,
     local_shell_depth = cfg$local_shell_depths,
@@ -502,6 +522,7 @@ run_calibration_fit_task <- function(task, cfg, repo_versions) {
     k_mat <- parse_karyotype_ids_base(rownames(counts))
     max_cn <- max(k_mat, na.rm = TRUE) + as.integer(task$local_shell_depth) + as.integer(task$global_extra_shell)
   }
+  anchor_count_reference <- resolve_anchor_count_reference(cfg, task)
 
   started <- Sys.time()
   res <- tryCatch({
@@ -518,6 +539,10 @@ run_calibration_fit_task <- function(task, cfg, repo_versions) {
       lambda_l_grid = as.numeric(task$lambda_l),
       lambda_e_grid = as.numeric(task$lambda_e),
       sigma_obs_grid = as.numeric(task$sigma_obs),
+      graph_edge_weight = as.character(row_field(task, "graph_edge_weight", "mutation")),
+      anchor_support_tiers = "directly_informed",
+      anchor_count_reference = anchor_count_reference,
+      anchor_count_power = cfg$alfak2_anchor_count_power,
       input_depth = cfg$alfak2_input_depth,
       effective_depth = cfg$alfak2_effective_depth,
       effective_depth_mode = as.character(task$effective_depth_mode),
@@ -544,6 +569,9 @@ run_calibration_fit_task <- function(task, cfg, repo_versions) {
         elapsed_sec = as.numeric(difftime(Sys.time(), started, units = "secs")),
         fit_path = fit_path,
         landscape_path = summary_path,
+        graph_edge_weight = as.character(row_field(task, "graph_edge_weight", "mutation")),
+        anchor_count_reference = if (is.null(anchor_count_reference)) NA_real_ else as.numeric(anchor_count_reference),
+        anchor_count_power = cfg$alfak2_anchor_count_power,
         local_convergence = fit$local$diagnostics$convergence,
         local_gradient_norm = fit$local$diagnostics$gradient_norm,
         local_covariance_status = fit$local$diagnostics$covariance_status,
@@ -563,6 +591,9 @@ run_calibration_fit_task <- function(task, cfg, repo_versions) {
         elapsed_sec = as.numeric(difftime(Sys.time(), started, units = "secs")),
         fit_path = file.path(outdir, "alfak2_fit.rds"),
         landscape_path = file.path(outdir, "landscape.rds"),
+        graph_edge_weight = as.character(row_field(task, "graph_edge_weight", "mutation")),
+        anchor_count_reference = if (is.null(anchor_count_reference)) NA_real_ else as.numeric(anchor_count_reference),
+        anchor_count_power = cfg$alfak2_anchor_count_power,
         local_convergence = NA_integer_,
         local_gradient_norm = NA_real_,
         local_covariance_status = NA_character_,
@@ -624,6 +655,101 @@ read_calibration_fit_parts <- function(dirs) {
   out
 }
 
+accuracy_metric_row <- function(task_order, param_id, support_scope, est, tru, n_nodes) {
+  ok <- is.finite(est) & is.finite(tru)
+  if (!sum(ok)) {
+    return(data.frame(
+      task_order = as.integer(task_order),
+      param_id = as.integer(param_id),
+      support_scope = support_scope,
+      n_nodes = as.integer(n_nodes),
+      n_scored = 0L,
+      mae = NA_real_,
+      rmse = NA_real_,
+      median_abs_error = NA_real_,
+      signed_bias = NA_real_,
+      centered_mae = NA_real_,
+      centered_rmse = NA_real_,
+      pearson = NA_real_,
+      spearman = NA_real_,
+      sign_accuracy = NA_real_,
+      false_high_rate = NA_real_,
+      stringsAsFactors = FALSE
+    ))
+  }
+  est <- est[ok]
+  tru <- tru[ok]
+  err <- est - tru
+  est_c <- est - mean(est)
+  tru_c <- tru - mean(tru)
+  centered_err <- est_c - tru_c
+  data.frame(
+    task_order = as.integer(task_order),
+    param_id = as.integer(param_id),
+    support_scope = support_scope,
+    n_nodes = as.integer(n_nodes),
+    n_scored = as.integer(sum(ok)),
+    mae = mean(abs(err)),
+    rmse = sqrt(mean(err^2)),
+    median_abs_error = stats::median(abs(err)),
+    signed_bias = mean(err),
+    centered_mae = mean(abs(centered_err)),
+    centered_rmse = sqrt(mean(centered_err^2)),
+    pearson = safe_cor(est, tru, method = "pearson"),
+    spearman = safe_cor(est, tru, method = "spearman"),
+    sign_accuracy = mean(sign(est_c) == sign(tru_c), na.rm = TRUE),
+    false_high_rate = mean(est_c > 0 & tru_c <= 0, na.rm = TRUE),
+    stringsAsFactors = FALSE
+  )
+}
+
+score_graph_holdout <- function(fit, grf_sim, fr, cfg) {
+  direct <- fit$local$summary[
+    as.character(fit$local$summary$support_tier) == "directly_informed" &
+      is.finite(fit$local$summary$fitness_mean),
+    ,
+    drop = FALSE
+  ]
+  labels <- intersect(as.character(direct$karyotype), as.character(fit$global$summary$karyotype))
+  truth <- compute_grf_fitness_truth(labels, grf_sim$centroids, as.numeric(fr$lambda[[1L]]))
+  labels <- labels[is.finite(truth[labels])]
+  min_direct <- max(3L, as.integer(cfg$holdout_min_direct))
+  if (length(labels) < min_direct) {
+    return(accuracy_metric_row(fr$task_order[[1L]], fr$param_id[[1L]], "holdout", numeric(0), numeric(0), length(labels)))
+  }
+  set.seed(as.integer(cfg$holdout_seed) + as.integer(fr$task_order[[1L]]) * 1009L + as.integer(fr$param_id[[1L]]))
+  n_holdout <- max(1L, as.integer(round(length(labels) * as.numeric(cfg$holdout_fraction))))
+  n_holdout <- min(n_holdout, length(labels) - 3L)
+  if (n_holdout < 1L) {
+    return(accuracy_metric_row(fr$task_order[[1L]], fr$param_id[[1L]], "holdout", numeric(0), numeric(0), length(labels)))
+  }
+  holdout <- sample(labels, n_holdout)
+  hp <- fit$global$hyperparameters
+  graph_edge_weight <- if (is.null(hp$graph_edge_weight)) "mutation" else as.character(hp$graph_edge_weight)
+  anchor_count_power <- if (is.null(hp$anchor_count_power) || !is.finite(as.numeric(hp$anchor_count_power))) 1 else as.numeric(hp$anchor_count_power)
+  gp <- try(
+    alfak2::fit_graph_posterior(
+      fit$local,
+      fit$global$graph,
+      lambda_l_grid = as.numeric(hp$lambda_l),
+      lambda_e_grid = as.numeric(hp$lambda_e),
+      sigma_obs_grid = as.numeric(hp$sigma_obs),
+      graph_edge_weight = graph_edge_weight,
+      anchor_support_tiers = "directly_informed",
+      anchor_count_reference = hp$anchor_count_reference,
+      anchor_count_power = anchor_count_power,
+      anchor_exclude = holdout
+    ),
+    silent = TRUE
+  )
+  if (inherits(gp, "try-error")) {
+    return(accuracy_metric_row(fr$task_order[[1L]], fr$param_id[[1L]], "holdout", numeric(0), numeric(0), length(holdout)))
+  }
+  pred <- gp$summary$fitness_mean[match(holdout, as.character(gp$summary$karyotype))]
+  tru <- as.numeric(truth[holdout])
+  accuracy_metric_row(fr$task_order[[1L]], fr$param_id[[1L]], "holdout", as.numeric(pred), tru, length(holdout))
+}
+
 score_one_fit <- function(fr, cfg) {
   fit <- read_rds_if_exists(as.character(fr$fit_path[[1L]]))
   grf_sim <- read_rds_if_exists(as.character(fr$grf_rds[[1L]]))
@@ -655,54 +781,23 @@ score_one_fit <- function(fr, cfg) {
   scopes <- c("all", "direct", "nn")
   metrics <- lapply(scopes, function(scope) {
     x <- if (identical(scope, "all")) node_tbl else node_tbl[node_tbl$support_scope == scope, , drop = FALSE]
-    ok <- is.finite(x$estimated_fitness) & is.finite(x$true_fitness)
-    if (!sum(ok)) {
-      return(data.frame(
-        task_order = as.integer(fr$task_order[[1L]]),
-        param_id = as.integer(fr$param_id[[1L]]),
-        support_scope = scope,
-        n_nodes = nrow(x),
-        n_scored = 0L,
-        mae = NA_real_,
-        rmse = NA_real_,
-        median_abs_error = NA_real_,
-        signed_bias = NA_real_,
-        centered_mae = NA_real_,
-        centered_rmse = NA_real_,
-        pearson = NA_real_,
-        spearman = NA_real_,
-        stringsAsFactors = FALSE
-      ))
-    }
-    est <- x$estimated_fitness[ok]
-    tru <- x$true_fitness[ok]
-    err <- est - tru
-    est_c <- est - mean(est)
-    tru_c <- tru - mean(tru)
-    centered_err <- est_c - tru_c
-    data.frame(
-      task_order = as.integer(fr$task_order[[1L]]),
-      param_id = as.integer(fr$param_id[[1L]]),
-      support_scope = scope,
-      n_nodes = nrow(x),
-      n_scored = sum(ok),
-      mae = mean(abs(err)),
-      rmse = sqrt(mean(err^2)),
-      median_abs_error = stats::median(abs(err)),
-      signed_bias = mean(err),
-      centered_mae = mean(abs(centered_err)),
-      centered_rmse = sqrt(mean(centered_err^2)),
-      pearson = safe_cor(est, tru, method = "pearson"),
-      spearman = safe_cor(est, tru, method = "spearman"),
-      stringsAsFactors = FALSE
+    accuracy_metric_row(
+      fr$task_order[[1L]],
+      fr$param_id[[1L]],
+      scope,
+      as.numeric(x$estimated_fitness),
+      as.numeric(x$true_fitness),
+      nrow(x)
     )
   })
   metrics <- do.call(rbind, metrics)
+  metrics <- rbind(metrics, score_graph_holdout(fit, grf_sim, fr, cfg))
   meta_cols <- c(
     "simulation_id", "lambda", "lambda_label", "time_start", "time_gap", "time_delta",
     "minobs", "param_id", "legacy_weight", "correct_efflux", "lambda_l", "lambda_e",
-    "sigma_obs", "dm_concentration", "effective_depth_mode", "local_shell_depth",
-    "global_extra_shell", "local_covariance_status", "global_factorization_status"
+    "sigma_obs", "graph_edge_weight", "anchor_count_reference", "anchor_count_power",
+    "dm_concentration", "effective_depth_mode", "local_shell_depth", "global_extra_shell",
+    "local_covariance_status", "global_factorization_status"
   )
   meta <- fr[rep(1L, nrow(metrics)), intersect(meta_cols, names(fr)), drop = FALSE]
   metrics <- cbind(meta, metrics[setdiff(names(metrics), names(meta))])
@@ -746,7 +841,7 @@ summarize_calibration_results <- function(cfg, dirs) {
 
 rank_calibration_parameters <- function(metric_tbl, fit_tbl, cfg) {
   if (!nrow(metric_tbl)) return(data.frame())
-  metric_names <- c("mae", "rmse", "centered_mae", "centered_rmse", "median_abs_error", "signed_bias")
+  metric_names <- c("mae", "rmse", "centered_mae", "centered_rmse", "median_abs_error", "signed_bias", "false_high_rate", "sign_accuracy", "spearman")
   for (nm in intersect(metric_names, names(metric_tbl))) metric_tbl[[nm]] <- to_num(metric_tbl[[nm]])
   metric_tbl$param_id <- as.integer(metric_tbl$param_id)
   fit_tbl$param_id <- as.integer(fit_tbl$param_id)
@@ -754,7 +849,8 @@ rank_calibration_parameters <- function(metric_tbl, fit_tbl, cfg) {
   param_cols <- c(
     "param_id", "input_policy", "alfak2_input_depth", "alfak2_effective_depth",
     "alfak2_observation_model", "legacy_weight", "correct_efflux", "lambda_l", "lambda_e", "sigma_obs",
-    "dm_concentration", "effective_depth_mode", "local_shell_depth", "global_extra_shell"
+    "graph_edge_weight", "anchor_count_reference", "anchor_count_power", "dm_concentration",
+    "effective_depth_mode", "local_shell_depth", "global_extra_shell"
   )
   param_tbl <- unique(fit_tbl[, intersect(param_cols, names(fit_tbl)), drop = FALSE])
   status_tbl <- aggregate(
@@ -776,10 +872,14 @@ rank_calibration_parameters <- function(metric_tbl, fit_tbl, cfg) {
         param_id = as.integer(z$param_id[[1L]]),
         setNames(list(nrow(z)), paste0(prefix, "_n_conditions")),
         setNames(list(sum(z$n_scored, na.rm = TRUE)), paste0(prefix, "_total_scored")),
-        setNames(list(median(z[[cfg$objective_metric]], na.rm = TRUE)), paste0(prefix, "_median_", cfg$objective_metric)),
-        setNames(list(stats::quantile(z[[cfg$objective_metric]], 0.75, na.rm = TRUE, names = FALSE)), paste0(prefix, "_q75_", cfg$objective_metric)),
+        setNames(list(if (cfg$objective_metric == "sparse_composite") NA_real_ else median(z[[cfg$objective_metric]], na.rm = TRUE)), paste0(prefix, "_median_", cfg$objective_metric)),
+        setNames(list(if (cfg$objective_metric == "sparse_composite") NA_real_ else stats::quantile(z[[cfg$objective_metric]], 0.75, na.rm = TRUE, names = FALSE)), paste0(prefix, "_q75_", cfg$objective_metric)),
+        setNames(list(median(z$centered_rmse, na.rm = TRUE)), paste0(prefix, "_median_centered_rmse")),
+        setNames(list(median(z$centered_mae, na.rm = TRUE)), paste0(prefix, "_median_centered_mae")),
         setNames(list(median(abs(z$signed_bias), na.rm = TRUE)), paste0(prefix, "_median_abs_bias")),
         setNames(list(median(z$spearman, na.rm = TRUE)), paste0(prefix, "_median_spearman")),
+        setNames(list(median(z$false_high_rate, na.rm = TRUE)), paste0(prefix, "_median_false_high_rate")),
+        setNames(list(median(z$sign_accuracy, na.rm = TRUE)), paste0(prefix, "_median_sign_accuracy")),
         check.names = FALSE
       )
     })
@@ -788,10 +888,12 @@ rank_calibration_parameters <- function(metric_tbl, fit_tbl, cfg) {
 
   objective_tbl <- summarize_scope(cfg$objective_scope, "objective")
   direct_tbl <- summarize_scope("direct", "direct")
+  holdout_tbl <- summarize_scope("holdout", "holdout")
   all_tbl <- summarize_scope("all", "all")
   out <- merge(param_tbl, status_tbl, by = "param_id", all.x = TRUE)
   out <- merge(out, objective_tbl, by = "param_id", all.x = TRUE)
   out <- merge(out, direct_tbl, by = "param_id", all.x = TRUE)
+  out <- merge(out, holdout_tbl, by = "param_id", all.x = TRUE)
   out <- merge(out, all_tbl, by = "param_id", all.x = TRUE)
 
   objective_col <- paste0("objective_median_", cfg$objective_metric)
@@ -800,14 +902,36 @@ rank_calibration_parameters <- function(metric_tbl, fit_tbl, cfg) {
   if (!objective_col %in% names(out)) out[[objective_col]] <- NA_real_
   if (!direct_col %in% names(out)) out[[direct_col]] <- NA_real_
   if (!bias_col %in% names(out)) out[[bias_col]] <- NA_real_
-  out$calibration_score <- out[[objective_col]] +
-    cfg$direct_weight * ifelse(is.finite(out[[direct_col]]), out[[direct_col]], 0) +
-    cfg$bias_weight * ifelse(is.finite(out[[bias_col]]), out[[bias_col]], 0)
+  for (nm in c(
+    "objective_median_centered_rmse", "direct_median_centered_rmse",
+    "holdout_median_centered_rmse",
+    "objective_median_spearman", "objective_median_false_high_rate"
+  )) {
+    if (!nm %in% names(out)) out[[nm]] <- NA_real_
+  }
+  if (cfg$objective_metric == "sparse_composite") {
+    out$calibration_score <- out$objective_median_centered_rmse +
+      cfg$direct_weight * ifelse(is.finite(out$direct_median_centered_rmse), out$direct_median_centered_rmse, 0) +
+      cfg$holdout_weight * ifelse(is.finite(out$holdout_median_centered_rmse), out$holdout_median_centered_rmse, 0) +
+      cfg$bias_weight * ifelse(is.finite(out[[bias_col]]), out[[bias_col]], 0) -
+      cfg$spearman_weight * ifelse(is.finite(out$objective_median_spearman), out$objective_median_spearman, 0) +
+      cfg$false_high_weight * ifelse(is.finite(out$objective_median_false_high_rate), out$objective_median_false_high_rate, 0)
+    objective_order_col <- "objective_median_centered_rmse"
+  } else {
+    out$calibration_score <- out[[objective_col]] +
+      cfg$direct_weight * ifelse(is.finite(out[[direct_col]]), out[[direct_col]], 0) +
+      cfg$holdout_weight * ifelse(is.finite(out$holdout_median_centered_rmse), out$holdout_median_centered_rmse, 0) +
+      cfg$bias_weight * ifelse(is.finite(out[[bias_col]]), out[[bias_col]], 0)
+    objective_order_col <- objective_col
+  }
   out$objective_scope <- cfg$objective_scope
   out$objective_metric <- cfg$objective_metric
   out$direct_weight <- cfg$direct_weight
+  out$holdout_weight <- cfg$holdout_weight
   out$bias_weight <- cfg$bias_weight
-  out <- out[order(out$calibration_score, out[[objective_col]], out$param_id), , drop = FALSE]
+  out$spearman_weight <- cfg$spearman_weight
+  out$false_high_weight <- cfg$false_high_weight
+  out <- out[order(out$calibration_score, out[[objective_order_col]], out$param_id), , drop = FALSE]
   out$rank <- seq_len(nrow(out))
   out
 }
@@ -823,6 +947,7 @@ best_param_cli <- function(best) {
     sprintf("--alfak2-lambda-l-grid=%s", b$lambda_l),
     sprintf("--alfak2-lambda-e-grid=%s", b$lambda_e),
     sprintf("--alfak2-sigma-obs-grid=%s", b$sigma_obs),
+    sprintf("--alfak2-graph-edge-weight=%s", b$graph_edge_weight),
     sprintf("--alfak2-dm-concentration=%s", b$dm_concentration),
     sprintf("--alfak2-effective-depth-mode=%s", b$effective_depth_mode),
     sprintf("--alfak2-local-shell-depth=%s", b$local_shell_depth),
@@ -833,6 +958,10 @@ best_param_cli <- function(best) {
   }
   if ("alfak2_effective_depth" %in% names(b) && is.finite(suppressWarnings(as.numeric(b$alfak2_effective_depth)))) {
     args <- c(args, sprintf("--alfak2-effective-depth=%s", b$alfak2_effective_depth))
+  }
+  if ("anchor_count_reference" %in% names(b) && is.finite(suppressWarnings(as.numeric(b$anchor_count_reference)))) {
+    args <- c(args, sprintf("--alfak2-anchor-count-reference=%s", b$anchor_count_reference))
+    args <- c(args, sprintf("--alfak2-anchor-count-power=%s", b$anchor_count_power))
   }
   paste(args, collapse = "\n")
 }

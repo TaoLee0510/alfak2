@@ -42,6 +42,8 @@ apply_effective_depth_counts <- function(counts,
                                          effective_depth = NULL,
                                          effective_depth_mode = c("min", "cap", "fixed")) {
   effective_depth_mode <- match.arg(effective_depth_mode)
+  observation_weights <- attr(counts, "observation_weights", exact = TRUE)
+  soft_minobs <- attr(counts, "soft_minobs", exact = TRUE)
   counts <- validate_count_matrix(counts)
   raw_depth <- colSums(counts)
   target_depth <- resolve_effective_depth(raw_depth, effective_depth, effective_depth_mode)
@@ -64,6 +66,10 @@ apply_effective_depth_counts <- function(counts,
     retained_karyotypes = nrow(out),
     dropped_karyotypes = sum(!keep)
   )
+  if (!is.null(observation_weights)) {
+    attr(out, "observation_weights") <- subset_observation_weights(observation_weights, rownames(out))
+  }
+  if (!is.null(soft_minobs)) attr(out, "soft_minobs") <- soft_minobs
   out
 }
 
@@ -79,6 +85,12 @@ prepare_counts_for_input_depth <- function(counts,
   if (inherits(counts, "alfak2_data")) {
     data <- counts
     if (input_depth == "raw") return(data)
+    if (!is.null(data$metadata$observation_weights)) {
+      attr(data$counts, "observation_weights") <- data$metadata$observation_weights
+    }
+    if (!is.null(data$metadata$soft_minobs)) {
+      attr(data$counts, "soft_minobs") <- data$metadata$soft_minobs
+    }
     eff_counts <- apply_effective_depth_counts(data$counts, effective_depth, effective_depth_mode)
     info <- attr(eff_counts, "effective_depth_info")
     metadata <- data$metadata

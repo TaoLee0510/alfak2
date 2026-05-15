@@ -54,6 +54,7 @@ method_label <- function(x) {
   map <- c(
     alfak2_effective_full = "alfak2 full",
     alfak2_effective_minobs_matched = "alfak2 minobs-matched",
+    alfak2_effective_soft_minobs = "alfak2 soft-minobs",
     alfakR_none = "alfakR none",
     alfakR_empirical = "alfakR empirical",
     alfakR_empirical_censored = "alfakR censored",
@@ -69,6 +70,7 @@ policy_label <- function(x) {
   out <- as.character(x)
   out[out == "full"] <- "full"
   out[out == "minobs_matched"] <- "minobs-matched"
+  out[out == "soft_minobs"] <- "soft-minobs"
   out
 }
 
@@ -299,6 +301,7 @@ main <- function() {
   ggplot2::theme_set(ggplot2::theme_bw(base_size = 11))
   method_colors <- c(
     "alfak2 minobs-matched" = "#0072B2",
+    "alfak2 soft-minobs" = "#56B4E9",
     "alfak2 full" = "#009E73",
     "alfakR none" = "#D55E00",
     "alfakR empirical" = "#CC79A7",
@@ -320,7 +323,7 @@ main <- function() {
   save_plot(p1, file.path(figures_dir, "01_input_nodes_by_minobs.png"), width = 7, height = 4.8)
 
   x2 <- summary_tbl[
-    summary_tbl$method %in% c("alfak2_effective_minobs_matched", "alfak2_effective_full") &
+    summary_tbl$method %in% c("alfak2_effective_minobs_matched", "alfak2_effective_soft_minobs", "alfak2_effective_full") &
       summary_tbl$support_scope %in% c("direct", "all"),
     , drop = FALSE
   ]
@@ -370,7 +373,7 @@ main <- function() {
   save_plot(p4, file.path(figures_dir, "04_alfak2_minobs_diagnostics.png"), width = 7.5, height = 4.8)
 
   methods_keep <- c(
-    "alfak2_effective_minobs_matched", "alfak2_effective_full", "alfakR_none",
+    "alfak2_effective_minobs_matched", "alfak2_effective_full", "alfak2_effective_soft_minobs", "alfakR_none",
     "alfakR_empirical", "alfakR_empirical_censored",
     "alfakR_empirical_censored_weighted", "alfakR_empirical_two_step"
   )
@@ -381,7 +384,7 @@ main <- function() {
   ]
   x5_sum <- summarize_metric(x5, c("method_label", "support_scope"), "centered_rmse")
   x5_sum$method_label <- factor(x5_sum$method_label, levels = c(
-    "alfak2 minobs-matched", "alfak2 full", "alfakR none", "alfakR empirical",
+    "alfak2 minobs-matched", "alfak2 soft-minobs", "alfak2 full", "alfakR none", "alfakR empirical",
     "alfakR censored", "alfakR censored weighted", "alfakR two-step"
   ))
   p5 <- ggplot2::ggplot(x5_sum, ggplot2::aes(x = method_label, y = median, color = method_label)) +
@@ -409,7 +412,7 @@ main <- function() {
     "alfakR none", "alfakR empirical", "alfakR censored",
     "alfakR censored weighted", "alfakR two-step"
   ))
-  x6_sum$alfak2_policy_label <- factor(x6_sum$alfak2_policy_label, levels = c("minobs-matched", "full"))
+  x6_sum$alfak2_policy_label <- factor(x6_sum$alfak2_policy_label, levels = c("minobs-matched", "soft-minobs", "full"))
   p6 <- ggplot2::ggplot(
     x6_sum,
     ggplot2::aes(x = alfakR_label, y = alfak2_policy_label, fill = median_delta_rmse)

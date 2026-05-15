@@ -110,6 +110,7 @@ compute_grf_fitness_truth <- function(karyotypes, centroids, lambda) {
 method_label <- function(x) {
   out <- x
   out[x == "alfak2_effective_minobs_matched"] <- "alfak2 minobs-matched"
+  out[x == "alfak2_effective_soft_minobs"] <- "alfak2 soft-minobs"
   out[x == "alfakR_none"] <- "alfakR none"
   out[x == "alfakR_empirical"] <- "alfakR empirical"
   out[x == "alfakR_empirical_censored"] <- "alfakR censored"

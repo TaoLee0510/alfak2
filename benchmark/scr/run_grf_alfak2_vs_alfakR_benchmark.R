@@ -38,9 +38,11 @@ usage <- function() {
     "  --abm-max-pop=2000000\n",
     "  --abm-culling-survival=0.01\n\n",
     "alfak2 options:\n",
-    "  --alfak2-input-policies=full,minobs_matched\n",
+    "  --alfak2-input-policies=full,minobs_matched,soft_minobs\n",
     "  --alfak2-input-depth=effective\n",
     "  --alfak2-effective-depth-mode=min\n",
+    "  --alfak2-graph-edge-weight=mutation|unit|normalized\n",
+    "  --alfak2-anchor-count-reference=minobs|none|<number>\n",
     "  --alfak2-local-shell-depth=0\n",
     "  --alfak2-global-extra-shell=1\n",
     "  --alfak2-max-nodes=150000\n\n",
@@ -240,6 +242,29 @@ read_rds_if_exists <- function(path) {
 scalar_or_na <- function(x, default = NA_real_) {
   if (is.null(x) || !length(x)) return(default)
   x[[1L]]
+}
+
+arg_anchor_count_reference <- function(args, name = "alfak2_anchor_count_reference", default = "minobs") {
+  value <- arg_value(args, name, default)
+  if (is.null(value)) return(NULL)
+  value <- trimws(as.character(value))
+  if (!nzchar(value) || tolower(value) %in% c("none", "null", "na", "false")) return(NULL)
+  if (tolower(value) %in% c("minobs", "auto")) return("minobs")
+  numeric_value <- suppressWarnings(as.numeric(value))
+  if (!is.finite(numeric_value) || numeric_value <= 0) {
+    stop("`--", gsub("_", "-", name), "` must be minobs, none, or a positive number.", call. = FALSE)
+  }
+  numeric_value
+}
+
+resolve_anchor_count_reference <- function(cfg, task) {
+  value <- cfg$alfak2_anchor_count_reference
+  if (is.null(value)) return(NULL)
+  if (identical(as.character(task$input_policy[[1L]]), "soft_minobs")) {
+    if (identical(value, "minobs")) return(as.numeric(task$minobs[[1L]]))
+    return(as.numeric(value))
+  }
+  NULL
 }
 
 row_field <- function(row, name, default = NA) {
@@ -539,8 +564,19 @@ prepare_alfak2_counts <- function(yi, minobs, input_policy, drop_diploid = TRUE)
   if (isTRUE(drop_diploid)) counts <- drop_diploid_counts(counts)
   if (identical(input_policy, "minobs_matched")) {
     counts <- counts[rowSums(counts, na.rm = TRUE) >= as.integer(minobs), , drop = FALSE]
+  } else if (!identical(input_policy, "full") && !identical(input_policy, "soft_minobs")) {
+    stop("Unsupported alfak2 input policy `", input_policy, "`.", call. = FALSE)
   }
   if (!nrow(counts)) stop("No rows remain for alfak2 input policy `", input_policy, "`.", call. = FALSE)
+  if (identical(input_policy, "soft_minobs")) {
+    row_totals <- rowSums(counts, na.rm = TRUE)
+    weights <- pmin(1, pmax(0, row_totals) / as.numeric(minobs))
+    weights[!is.finite(weights)] <- 0
+    weights <- cbind(t0 = weights, t1 = weights)
+    rownames(weights) <- rownames(counts)
+    attr(counts, "observation_weights") <- weights
+    attr(counts, "soft_minobs") <- list(minobs = as.integer(minobs), rule = "row_total_over_minobs")
+  }
   counts
 }
 
@@ -613,6 +649,9 @@ coerce_alfakR_landscape_nodes <- function(landscape,
     sim_pm = row_field(fit_row, "sim_pm", NA_real_),
     pm = row_field(fit_row, "pm", NA_real_),
     fit_beta_label = row_field(fit_row, "fit_beta_label", NA_character_),
+    graph_edge_weight = row_field(fit_row, "graph_edge_weight", NA_character_),
+    anchor_count_reference = row_field(fit_row, "anchor_count_reference", NA_real_),
+    anchor_count_power = row_field(fit_row, "anchor_count_power", NA_real_),
     method = method,
     engine = "alfakR",
     input_policy = "alfakR_minobs_internal",
@@ -658,6 +697,9 @@ coerce_alfak2_summary_nodes <- function(s,
     sim_pm = row_field(fit_row, "sim_pm", NA_real_),
     pm = row_field(fit_row, "pm", NA_real_),
     fit_beta_label = row_field(fit_row, "fit_beta_label", NA_character_),
+    graph_edge_weight = row_field(fit_row, "graph_edge_weight", NA_character_),
+    anchor_count_reference = row_field(fit_row, "anchor_count_reference", NA_real_),
+    anchor_count_power = row_field(fit_row, "anchor_count_power", NA_real_),
     method = method,
     engine = "alfak2",
     input_policy = input_policy,
@@ -795,6 +837,9 @@ empty_node_accuracy_table <- function() {
     sim_pm = numeric(),
     pm = numeric(),
     fit_beta_label = character(),
+    graph_edge_weight = character(),
+    anchor_count_reference = numeric(),
+    anchor_count_power = numeric(),
     method = character(),
     engine = character(),
     input_policy = character(),
@@ -1123,6 +1168,7 @@ run_alfak2_fit <- function(task, cfg, repo_versions) {
     k_mat <- parse_karyotype_ids_base(rownames(counts))
     max_cn <- max(k_mat, na.rm = TRUE) + cfg$alfak2_local_shell_depth + cfg$alfak2_global_extra_shell
   }
+  anchor_count_reference <- resolve_anchor_count_reference(cfg, task)
   started <- Sys.time()
   res <- tryCatch({
     fit_beta <- as.numeric(row_field(task, "pm", cfg$pm))
@@ -1138,6 +1184,10 @@ run_alfak2_fit <- function(task, cfg, repo_versions) {
       lambda_l_grid = cfg$alfak2_lambda_l_grid,
       lambda_e_grid = cfg$alfak2_lambda_e_grid,
       sigma_obs_grid = cfg$alfak2_sigma_obs_grid,
+      graph_edge_weight = cfg$alfak2_graph_edge_weight,
+      anchor_support_tiers = "directly_informed",
+      anchor_count_reference = anchor_count_reference,
+      anchor_count_power = cfg$alfak2_anchor_count_power,
       input_depth = cfg$alfak2_input_depth,
       effective_depth = cfg$alfak2_effective_depth,
       effective_depth_mode = cfg$alfak2_effective_depth_mode,
@@ -1164,6 +1214,9 @@ run_alfak2_fit <- function(task, cfg, repo_versions) {
         elapsed_sec = as.numeric(difftime(Sys.time(), started, units = "secs")),
         fit_path = fit_path,
         landscape_path = summary_path,
+        graph_edge_weight = cfg$alfak2_graph_edge_weight,
+        anchor_count_reference = if (is.null(anchor_count_reference)) NA_real_ else as.numeric(anchor_count_reference),
+        anchor_count_power = cfg$alfak2_anchor_count_power,
         local_convergence = fit$local$diagnostics$convergence,
         local_gradient_norm = fit$local$diagnostics$gradient_norm,
         local_covariance_status = fit$local$diagnostics$covariance_status,
@@ -1183,6 +1236,9 @@ run_alfak2_fit <- function(task, cfg, repo_versions) {
         elapsed_sec = as.numeric(difftime(Sys.time(), started, units = "secs")),
         fit_path = file.path(outdir, "alfak2_fit.rds"),
         landscape_path = file.path(outdir, "landscape.rds"),
+        graph_edge_weight = cfg$alfak2_graph_edge_weight,
+        anchor_count_reference = if (is.null(anchor_count_reference)) NA_real_ else as.numeric(anchor_count_reference),
+        anchor_count_power = cfg$alfak2_anchor_count_power,
         local_convergence = NA_integer_,
         local_gradient_norm = NA_real_,
         local_covariance_status = NA_character_,
@@ -1266,8 +1322,10 @@ build_config <- function(args, repo_dir) {
   methods <- sub("^nn_prior_", "", methods)
   methods <- setdiff(methods, "cohort_transition")
   input_policies <- arg_character_vec(args, "alfak2_input_policies", c("full", "minobs_matched"))
-  bad_policies <- setdiff(input_policies, c("full", "minobs_matched"))
+  bad_policies <- setdiff(input_policies, c("full", "minobs_matched", "soft_minobs"))
   if (length(bad_policies)) stop("Unsupported alfak2 input policies: ", paste(bad_policies, collapse = ", "), call. = FALSE)
+  graph_edge_weight <- as.character(arg_value(args, "alfak2_graph_edge_weight", "mutation"))
+  graph_edge_weight <- match.arg(graph_edge_weight, c("mutation", "unit", "normalized"))
   list(
     repo_dir = repo_dir,
     alfak2_repo = normalizePath(arg_value(args, "alfak2_repo", repo_dir), winslash = "/", mustWork = FALSE),
@@ -1354,6 +1412,9 @@ build_config <- function(args, repo_dir) {
     alfak2_lambda_l_grid = arg_numeric_vec(args, "alfak2_lambda_l_grid", 1),
     alfak2_lambda_e_grid = arg_numeric_vec(args, "alfak2_lambda_e_grid", 0.25),
     alfak2_sigma_obs_grid = arg_numeric_vec(args, "alfak2_sigma_obs_grid", 0.05),
+    alfak2_graph_edge_weight = graph_edge_weight,
+    alfak2_anchor_count_reference = arg_anchor_count_reference(args),
+    alfak2_anchor_count_power = arg_numeric(args, "alfak2_anchor_count_power", 1),
     alfak2_legacy_weight = as.character(arg_value(args, "alfak2_legacy_weight", "pi0")),
     alfak2_eval_max = arg_integer(args, "alfak2_eval_max", 500L),
     alfak2_iter_max = arg_integer(args, "alfak2_iter_max", 500L),

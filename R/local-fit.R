@@ -118,6 +118,17 @@ fit_local_posterior <- function(data,
   y1 <- numeric(n)
   y0[graph$observed_index] <- data$counts[, 1]
   y1[graph$observed_index] <- data$counts[, 2]
+  observation_weights <- data$metadata$observation_weights
+  if (is.null(observation_weights)) {
+    observation_weights <- matrix(1, nrow = nrow(data$counts), ncol = 2L,
+                                  dimnames = list(rownames(data$counts), c("t0", "t1")))
+  } else {
+    observation_weights <- validate_observation_weights(observation_weights, data$counts)
+  }
+  obs_weight0 <- rep(1, n)
+  obs_weight1 <- rep(1, n)
+  obs_weight0[graph$observed_index] <- observation_weights[, 1]
+  obs_weight1[graph$observed_index] <- observation_weights[, 2]
 
   p0 <- (y0 + 0.5) / sum(y0 + 0.5)
   p1 <- (y1 + 0.5) / sum(y1 + 0.5)
@@ -148,6 +159,8 @@ fit_local_posterior <- function(data,
     parent_context = as.integer(unlist(graph$parent_context0)),
     context_group = as.integer(unlist(graph$context_group0)),
     dt = as.numeric(data$dt),
+    obs_weight0 = as.numeric(obs_weight0),
+    obs_weight1 = as.numeric(obs_weight1),
     anchor_prior_scale = 1.0,
     mu_prior_scale = 0.5,
     scale_prior_scale = 1.0,
@@ -198,10 +211,18 @@ fit_local_posterior <- function(data,
     karyotype = as.character(graph$labels),
     support_tier = as.character(graph$support_tier),
     support_distance = as.integer(graph$support_distance),
+    count_t0 = as.integer(y0),
+    count_t1 = as.integer(y1),
+    count_total = as.integer(y0 + y1),
+    observation_weight_t0 = as.numeric(obs_weight0),
+    observation_weight_t1 = as.numeric(obs_weight1),
+    effective_count_total = as.numeric(y0 * obs_weight0 + y1 * obs_weight1),
+    is_observed = as.logical((y0 + y1) > 0),
     fitness_mean = f_mean,
     fitness_sd = f_sd,
     conf_low = f_mean - 1.959963984540054 * f_sd,
     conf_high = f_mean + 1.959963984540054 * f_sd,
+    covariance_status = covariance_status,
     stringsAsFactors = FALSE
   )
   diagnostics <- list(
@@ -215,7 +236,8 @@ fit_local_posterior <- function(data,
     retry_attempted = retry_attempted,
     retry_reason = retry_reason,
     attempts = attempts,
-    observation_model = observation_model
+    observation_model = observation_model,
+    observation_weight_summary = summary(c(obs_weight0[graph$observed_index], obs_weight1[graph$observed_index]))
   )
   new_alfak2_local_fit(list(
     data = data,
