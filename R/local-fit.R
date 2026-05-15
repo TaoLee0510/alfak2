@@ -129,6 +129,8 @@ fit_local_posterior <- function(data,
   obs_weight1 <- rep(1, n)
   obs_weight0[graph$observed_index] <- observation_weights[, 1]
   obs_weight1[graph$observed_index] <- observation_weights[, 2]
+  use_observation_weights <- any(abs(c(obs_weight0[graph$observed_index], obs_weight1[graph$observed_index]) - 1) > 1e-12)
+  likelihood_model <- if (isTRUE(use_observation_weights)) "weighted_multinomial" else observation_model
 
   p0 <- (y0 + 0.5) / sum(y0 + 0.5)
   p1 <- (y1 + 0.5) / sum(y1 + 0.5)
@@ -161,6 +163,7 @@ fit_local_posterior <- function(data,
     dt = as.numeric(data$dt),
     obs_weight0 = as.numeric(obs_weight0),
     obs_weight1 = as.numeric(obs_weight1),
+    use_observation_weights = as.integer(use_observation_weights),
     anchor_prior_scale = 1.0,
     mu_prior_scale = 0.5,
     scale_prior_scale = 1.0,
@@ -237,6 +240,8 @@ fit_local_posterior <- function(data,
     retry_reason = retry_reason,
     attempts = attempts,
     observation_model = observation_model,
+    likelihood_model = likelihood_model,
+    use_observation_weights = use_observation_weights,
     observation_weight_summary = summary(c(obs_weight0[graph$observed_index], obs_weight1[graph$observed_index]))
   )
   new_alfak2_local_fit(list(

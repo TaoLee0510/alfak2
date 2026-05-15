@@ -22,6 +22,15 @@ Type multinomial_loglik(vector<Type> prob, vector<Type> y) {
 }
 
 template<class Type>
+Type weighted_multinomial_loglik(vector<Type> prob, vector<Type> y, vector<Type> weight) {
+  Type out = 0.0;
+  for (int i = 0; i < prob.size(); ++i) {
+    out += weight(i) * y(i) * log(prob(i) + Type(1e-14));
+  }
+  return out;
+}
+
+template<class Type>
 Type dirichlet_multinomial_loglik(vector<Type> prob, vector<Type> y, Type phi) {
   Type n = 0.0;
   for (int i = 0; i < y.size(); ++i) n += y(i);
@@ -50,6 +59,7 @@ Type objective_function<Type>::operator() () {
   DATA_SCALAR(dt);
   DATA_VECTOR(obs_weight0);
   DATA_VECTOR(obs_weight1);
+  DATA_INTEGER(use_observation_weights);
   DATA_SCALAR(anchor_prior_scale);
   DATA_SCALAR(mu_prior_scale);
   DATA_SCALAR(scale_prior_scale);
@@ -91,20 +101,16 @@ Type objective_function<Type>::operator() () {
   vector<Type> pi1(n_nodes);
   for (int i = 0; i < n_nodes; ++i) pi1(i) = transported(i) / z1;
 
-  vector<Type> y0_lik(n_nodes);
-  vector<Type> y1_lik(n_nodes);
-  for (int i = 0; i < n_nodes; ++i) {
-    y0_lik(i) = y0(i) * obs_weight0(i);
-    y1_lik(i) = y1(i) * obs_weight1(i);
-  }
-
-  if (observation_model == 1) {
+  if (use_observation_weights == 1) {
+    nll -= weighted_multinomial_loglik(pi0, y0, obs_weight0);
+    nll -= weighted_multinomial_loglik(pi1, y1, obs_weight1);
+  } else if (observation_model == 1) {
     Type phi = dm_concentration;
-    nll -= dirichlet_multinomial_loglik(pi0, y0_lik, phi);
-    nll -= dirichlet_multinomial_loglik(pi1, y1_lik, phi);
+    nll -= dirichlet_multinomial_loglik(pi0, y0, phi);
+    nll -= dirichlet_multinomial_loglik(pi1, y1, phi);
   } else {
-    nll -= multinomial_loglik(pi0, y0_lik);
-    nll -= multinomial_loglik(pi1, y1_lik);
+    nll -= multinomial_loglik(pi0, y0);
+    nll -= multinomial_loglik(pi1, y1);
   }
 
   Type sigma_neighbor = softplus_floor(log_sigma_neighbor, Type(1e-5));

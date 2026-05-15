@@ -92,6 +92,26 @@ test_that("observation weights downweight low-support rows in the local likeliho
   row <- fit$summary[fit$summary$karyotype == "1.2.2", , drop = FALSE]
   expect_equal(row$observation_weight_t0, 0.25)
   expect_equal(row$effective_count_total, sum(counts["1.2.2", ]) * 0.25)
+  expect_true(fit$diagnostics$use_observation_weights)
+  expect_equal(fit$diagnostics$likelihood_model, "weighted_multinomial")
+})
+
+test_that("dirichlet-multinomial uses explicit weighted likelihood when observation weights are present", {
+  counts <- stable_counts_input()
+  weights <- matrix(1, nrow = nrow(counts), ncol = 2L, dimnames = list(rownames(counts), c("t0", "t1")))
+  weights["1.2.2", ] <- 0.25
+  attr(counts, "observation_weights") <- weights
+  dat <- prepare_alfak2_data(counts, dt = 1, beta = 0.01)
+  graph <- build_karyotype_graph(dat, shell_depth = 1, min_cn = 1, max_cn = 3, max_nodes = 200)
+  fit <- fit_local_posterior(
+    dat,
+    graph,
+    observation_model = "dirichlet_multinomial",
+    dm_concentration = 50,
+    control = list(eval.max = 120, iter.max = 120)
+  )
+  expect_equal(fit$diagnostics$observation_model, "dirichlet_multinomial")
+  expect_equal(fit$diagnostics$likelihood_model, "weighted_multinomial")
 })
 
 test_that("untrusted local covariance uses finite fallback uncertainty", {

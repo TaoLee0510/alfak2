@@ -488,6 +488,116 @@ calibration_estimate_columns <- function(summary) {
   list(mean = est_col, sd = sd_col)
 }
 
+select_calibration_holdout_labels <- function(fit, task, cfg) {
+  direct <- fit$local$summary[
+    as.character(fit$local$summary$support_tier) == "directly_informed" &
+      is.finite(fit$local$summary$fitness_mean),
+    ,
+    drop = FALSE
+  ]
+  labels <- intersect(as.character(direct$karyotype), as.character(fit$global$summary$karyotype))
+  labels <- labels[nzchar(labels)]
+  min_direct <- max(3L, as.integer(cfg$holdout_min_direct))
+  if (length(labels) < min_direct) return(character(0))
+  set.seed(as.integer(cfg$holdout_seed) + as.integer(task$task_order[[1L]]) * 1009L + as.integer(task$param_id[[1L]]))
+  n_holdout <- max(1L, as.integer(round(length(labels) * as.numeric(cfg$holdout_fraction))))
+  n_holdout <- min(n_holdout, length(labels) - 3L)
+  if (n_holdout < 1L) return(character(0))
+  sample(labels, n_holdout)
+}
+
+subset_counts_excluding_labels <- function(counts, labels) {
+  labels <- as.character(labels)
+  keep <- !(rownames(counts) %in% labels)
+  out <- counts[keep, , drop = FALSE]
+  observation_weights <- attr(counts, "observation_weights", exact = TRUE)
+  soft_minobs <- attr(counts, "soft_minobs", exact = TRUE)
+  if (!is.null(observation_weights)) {
+    attr(out, "observation_weights") <- observation_weights[rownames(out), , drop = FALSE]
+  }
+  if (!is.null(soft_minobs)) attr(out, "soft_minobs") <- soft_minobs
+  out
+}
+
+fit_calibration_holdout <- function(task, cfg, counts, dt, max_cn, fit, outdir) {
+  holdout <- select_calibration_holdout_labels(fit, task, cfg)
+  holdout_fit_path <- file.path(outdir, "alfak2_holdout_fit.rds")
+  holdout_summary_path <- file.path(outdir, "holdout_landscape.rds")
+  if (!length(holdout)) {
+    return(list(
+      holdout_status = "skipped_insufficient_direct",
+      holdout_error_message = NA_character_,
+      holdout_labels = NA_character_,
+      holdout_n_labels = 0L,
+      holdout_fit_path = holdout_fit_path,
+      holdout_landscape_path = holdout_summary_path
+    ))
+  }
+  holdout_counts <- subset_counts_excluding_labels(counts, holdout)
+  if (!nrow(holdout_counts)) {
+    return(list(
+      holdout_status = "skipped_empty_input",
+      holdout_error_message = NA_character_,
+      holdout_labels = paste(holdout, collapse = ","),
+      holdout_n_labels = length(holdout),
+      holdout_fit_path = holdout_fit_path,
+      holdout_landscape_path = holdout_summary_path
+    ))
+  }
+  anchor_count_reference <- resolve_anchor_count_reference(cfg, task)
+  tryCatch({
+    set.seed(as.integer(cfg$holdout_seed) + as.integer(task$task_order[[1L]]) * 7919L + as.integer(task$param_id[[1L]]))
+    hfit <- alfak2::fit_alfak2(
+      holdout_counts,
+      dt = dt,
+      beta = cfg$pm,
+      min_cn = cfg$alfak2_min_cn,
+      max_cn = as.integer(max_cn),
+      local_shell_depth = as.integer(task$local_shell_depth),
+      global_extra_shell = as.integer(task$global_extra_shell),
+      max_nodes = cfg$max_nodes,
+      lambda_l_grid = as.numeric(task$lambda_l),
+      lambda_e_grid = as.numeric(task$lambda_e),
+      sigma_obs_grid = as.numeric(task$sigma_obs),
+      graph_edge_weight = as.character(row_field(task, "graph_edge_weight", "mutation")),
+      anchor_support_tiers = "directly_informed",
+      anchor_count_reference = anchor_count_reference,
+      anchor_count_power = cfg$alfak2_anchor_count_power,
+      input_depth = cfg$alfak2_input_depth,
+      effective_depth = cfg$alfak2_effective_depth,
+      effective_depth_mode = as.character(task$effective_depth_mode),
+      observation_model = cfg$alfak2_observation_model,
+      dm_concentration = as.numeric(task$dm_concentration),
+      alfakR_scale = TRUE,
+      n0 = cfg$n0,
+      nb = cfg$nb,
+      correct_efflux = as.logical(task$correct_efflux),
+      legacy_weight = as.character(task$legacy_weight),
+      control = list(eval.max = cfg$eval_max, iter.max = cfg$iter_max),
+      retry_control = list(eval.max = cfg$retry_max, iter.max = cfg$retry_max)
+    )
+    saveRDS(hfit, holdout_fit_path)
+    saveRDS(alfak2::summarize_alfak2(hfit, layer = "global"), holdout_summary_path)
+    list(
+      holdout_status = "ok",
+      holdout_error_message = NA_character_,
+      holdout_labels = paste(holdout, collapse = ","),
+      holdout_n_labels = length(holdout),
+      holdout_fit_path = holdout_fit_path,
+      holdout_landscape_path = holdout_summary_path
+    )
+  }, error = function(e) {
+    list(
+      holdout_status = "error",
+      holdout_error_message = conditionMessage(e),
+      holdout_labels = paste(holdout, collapse = ","),
+      holdout_n_labels = length(holdout),
+      holdout_fit_path = holdout_fit_path,
+      holdout_landscape_path = holdout_summary_path
+    )
+  })
+}
+
 run_calibration_fit_task <- function(task, cfg, repo_versions) {
   task <- as.list(task)
   outdir <- task$outdir
@@ -496,7 +606,10 @@ run_calibration_fit_task <- function(task, cfg, repo_versions) {
   allow_cache <- !isTRUE(cfg$force_refit) &&
     (isTRUE(cfg$reuse_dirty_cache) || !isTRUE(repo_versions$dirty[repo_versions$package == "alfak2"]))
   cached <- if (allow_cache) read_rds_if_exists(result_path) else NULL
-  if (is.list(cached) && identical(cached$status, "ok") && file.exists(cached$fit_path)) {
+  cached_holdout_ok <- is.list(cached) && "holdout_status" %in% names(cached) &&
+    (!identical(cached$holdout_status, "ok") || file.exists(cached$holdout_fit_path))
+  if (is.list(cached) && identical(cached$status, "ok") && file.exists(cached$fit_path) &&
+      isTRUE(cached_holdout_ok)) {
     cached$cached <- TRUE
     saveRDS(cached, result_path)
     return(cached)
@@ -560,6 +673,7 @@ run_calibration_fit_task <- function(task, cfg, repo_versions) {
     summary_path <- file.path(outdir, "landscape.rds")
     saveRDS(fit, fit_path)
     saveRDS(alfak2::summarize_alfak2(fit, layer = "global"), summary_path)
+    holdout <- fit_calibration_holdout(task, cfg, counts, dt, max_cn, fit, outdir)
     c(
       task,
       list(
@@ -569,6 +683,12 @@ run_calibration_fit_task <- function(task, cfg, repo_versions) {
         elapsed_sec = as.numeric(difftime(Sys.time(), started, units = "secs")),
         fit_path = fit_path,
         landscape_path = summary_path,
+        holdout_status = holdout$holdout_status,
+        holdout_error_message = holdout$holdout_error_message,
+        holdout_labels = holdout$holdout_labels,
+        holdout_n_labels = holdout$holdout_n_labels,
+        holdout_fit_path = holdout$holdout_fit_path,
+        holdout_landscape_path = holdout$holdout_landscape_path,
         graph_edge_weight = as.character(row_field(task, "graph_edge_weight", "mutation")),
         anchor_count_reference = if (is.null(anchor_count_reference)) NA_real_ else as.numeric(anchor_count_reference),
         anchor_count_power = cfg$alfak2_anchor_count_power,
@@ -591,6 +711,12 @@ run_calibration_fit_task <- function(task, cfg, repo_versions) {
         elapsed_sec = as.numeric(difftime(Sys.time(), started, units = "secs")),
         fit_path = file.path(outdir, "alfak2_fit.rds"),
         landscape_path = file.path(outdir, "landscape.rds"),
+        holdout_status = NA_character_,
+        holdout_error_message = NA_character_,
+        holdout_labels = NA_character_,
+        holdout_n_labels = NA_integer_,
+        holdout_fit_path = file.path(outdir, "alfak2_holdout_fit.rds"),
+        holdout_landscape_path = file.path(outdir, "holdout_landscape.rds"),
         graph_edge_weight = as.character(row_field(task, "graph_edge_weight", "mutation")),
         anchor_count_reference = if (is.null(anchor_count_reference)) NA_real_ else as.numeric(anchor_count_reference),
         anchor_count_power = cfg$alfak2_anchor_count_power,
@@ -703,49 +829,25 @@ accuracy_metric_row <- function(task_order, param_id, support_scope, est, tru, n
   )
 }
 
+parse_holdout_labels <- function(x) {
+  if (is.null(x) || !length(x) || is.na(x[[1L]])) return(character(0))
+  out <- trimws(strsplit(as.character(x[[1L]]), ",", fixed = TRUE)[[1L]])
+  out[nzchar(out)]
+}
+
 score_graph_holdout <- function(fit, grf_sim, fr, cfg) {
-  direct <- fit$local$summary[
-    as.character(fit$local$summary$support_tier) == "directly_informed" &
-      is.finite(fit$local$summary$fitness_mean),
-    ,
-    drop = FALSE
-  ]
-  labels <- intersect(as.character(direct$karyotype), as.character(fit$global$summary$karyotype))
-  truth <- compute_grf_fitness_truth(labels, grf_sim$centroids, as.numeric(fr$lambda[[1L]]))
-  labels <- labels[is.finite(truth[labels])]
-  min_direct <- max(3L, as.integer(cfg$holdout_min_direct))
-  if (length(labels) < min_direct) {
-    return(accuracy_metric_row(fr$task_order[[1L]], fr$param_id[[1L]], "holdout", numeric(0), numeric(0), length(labels)))
+  holdout <- parse_holdout_labels(fr$holdout_labels)
+  if (!length(holdout)) {
+    return(accuracy_metric_row(fr$task_order[[1L]], fr$param_id[[1L]], "holdout", numeric(0), numeric(0), 0L))
   }
-  set.seed(as.integer(cfg$holdout_seed) + as.integer(fr$task_order[[1L]]) * 1009L + as.integer(fr$param_id[[1L]]))
-  n_holdout <- max(1L, as.integer(round(length(labels) * as.numeric(cfg$holdout_fraction))))
-  n_holdout <- min(n_holdout, length(labels) - 3L)
-  if (n_holdout < 1L) {
-    return(accuracy_metric_row(fr$task_order[[1L]], fr$param_id[[1L]], "holdout", numeric(0), numeric(0), length(labels)))
-  }
-  holdout <- sample(labels, n_holdout)
-  hp <- fit$global$hyperparameters
-  graph_edge_weight <- if (is.null(hp$graph_edge_weight)) "mutation" else as.character(hp$graph_edge_weight)
-  anchor_count_power <- if (is.null(hp$anchor_count_power) || !is.finite(as.numeric(hp$anchor_count_power))) 1 else as.numeric(hp$anchor_count_power)
-  gp <- try(
-    alfak2::fit_graph_posterior(
-      fit$local,
-      fit$global$graph,
-      lambda_l_grid = as.numeric(hp$lambda_l),
-      lambda_e_grid = as.numeric(hp$lambda_e),
-      sigma_obs_grid = as.numeric(hp$sigma_obs),
-      graph_edge_weight = graph_edge_weight,
-      anchor_support_tiers = "directly_informed",
-      anchor_count_reference = hp$anchor_count_reference,
-      anchor_count_power = anchor_count_power,
-      anchor_exclude = holdout
-    ),
-    silent = TRUE
-  )
-  if (inherits(gp, "try-error")) {
+  hfit <- read_rds_if_exists(as.character(fr$holdout_fit_path[[1L]]))
+  if (is.null(hfit)) {
     return(accuracy_metric_row(fr$task_order[[1L]], fr$param_id[[1L]], "holdout", numeric(0), numeric(0), length(holdout)))
   }
-  pred <- gp$summary$fitness_mean[match(holdout, as.character(gp$summary$karyotype))]
+  hs <- alfak2::summarize_alfak2(hfit, layer = "global")
+  cols <- calibration_estimate_columns(hs)
+  truth <- compute_grf_fitness_truth(holdout, grf_sim$centroids, as.numeric(fr$lambda[[1L]]))
+  pred <- hs[[cols$mean]][match(holdout, as.character(hs$karyotype))]
   tru <- as.numeric(truth[holdout])
   accuracy_metric_row(fr$task_order[[1L]], fr$param_id[[1L]], "holdout", as.numeric(pred), tru, length(holdout))
 }
@@ -797,7 +899,8 @@ score_one_fit <- function(fr, cfg) {
     "minobs", "param_id", "legacy_weight", "correct_efflux", "lambda_l", "lambda_e",
     "sigma_obs", "graph_edge_weight", "anchor_count_reference", "anchor_count_power",
     "dm_concentration", "effective_depth_mode", "local_shell_depth", "global_extra_shell",
-    "local_covariance_status", "global_factorization_status"
+    "local_covariance_status", "global_factorization_status",
+    "holdout_status", "holdout_n_labels"
   )
   meta <- fr[rep(1L, nrow(metrics)), intersect(meta_cols, names(fr)), drop = FALSE]
   metrics <- cbind(meta, metrics[setdiff(names(metrics), names(meta))])
