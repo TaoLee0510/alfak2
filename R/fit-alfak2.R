@@ -15,6 +15,8 @@
 #' @param graph_edge_weight Edge weighting used by the global graph prior.
 #' @param anchor_support_tiers Local support tiers used as global graph anchors;
 #'   defaults to `"all"` to preserve the legacy public API behavior.
+#' @param anchor_exclude Optional karyotype labels to exclude from the global
+#'   anchor set, primarily for neighbor-holdout validation.
 #' @param anchor_covariance_inflation Named variance multipliers for local
 #'   covariance statuses.
 #' @param anchor_count_reference Optional low-count downweighting reference for
@@ -61,6 +63,7 @@ fit_alfak2 <- function(counts,
                        sigma_obs_grid = c(0.02, 0.05, 0.1),
                        graph_edge_weight = c("mutation", "unit", "normalized"),
                        anchor_support_tiers = "all",
+                       anchor_exclude = character(),
                        anchor_covariance_inflation = c(
                          TMB_sdreport = 1,
                          untrusted_gradient = 4,
@@ -129,6 +132,7 @@ fit_alfak2 <- function(counts,
     sigma_obs_grid = sigma_obs_grid,
     graph_edge_weight = graph_edge_weight,
     anchor_support_tiers = anchor_support_tiers,
+    anchor_exclude = anchor_exclude,
     anchor_covariance_inflation = anchor_covariance_inflation,
     anchor_count_reference = anchor_count_reference,
     anchor_count_power = anchor_count_power
@@ -148,6 +152,7 @@ fit_alfak2 <- function(counts,
       dm_concentration = obs_controls$dm_concentration,
       graph_edge_weight = graph_edge_weight,
       anchor_support_tiers = anchor_support_tiers,
+      anchor_exclude = as.character(anchor_exclude),
       anchor_count_reference = anchor_count_reference,
       anchor_count_power = anchor_count_power
     )

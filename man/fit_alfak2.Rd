@@ -16,6 +16,14 @@ fit_alfak2(
   lambda_l_grid = c(0.2, 1, 5),
   lambda_e_grid = c(0.05, 0.25, 1),
   sigma_obs_grid = c(0.02, 0.05, 0.1),
+  graph_edge_weight = c("mutation", "unit", "normalized"),
+  anchor_support_tiers = "all",
+  anchor_exclude = character(),
+  anchor_covariance_inflation = c(TMB_sdreport = 1, untrusted_gradient = 4,
+    untrusted_nonconverged = 9, untrusted_sdreport_missing = 4,
+    untrusted_sdreport_nonfinite = 4, unknown = 4),
+  anchor_count_reference = NULL,
+  anchor_count_power = 1,
   input_depth = c("raw", "effective"),
   effective_depth = NULL,
   effective_depth_mode = c("min", "cap", "fixed"),
@@ -46,6 +54,22 @@ fit_alfak2(
 
 \item{lambda_l_grid, lambda_e_grid, sigma_obs_grid}{Hyperparameter grids passed
 to the compiled graph posterior.}
+
+\item{graph_edge_weight}{Edge weighting used by the global graph prior.}
+
+\item{anchor_support_tiers}{Local support tiers used as global graph anchors;
+defaults to \code{"all"} to preserve the legacy public API behavior.}
+
+\item{anchor_exclude}{Optional karyotype labels to exclude from the global
+anchor set, primarily for neighbor-holdout validation.}
+
+\item{anchor_covariance_inflation}{Named variance multipliers for local
+covariance statuses.}
+
+\item{anchor_count_reference}{Optional low-count downweighting reference for
+global graph anchors.}
+
+\item{anchor_count_power}{Exponent for count-based anchor variance inflation.}
 
 \item{input_depth}{\code{"raw"} uses the supplied count matrix directly. \code{"effective"}
 converts each timepoint to frequencies and re-counts them at a controlled

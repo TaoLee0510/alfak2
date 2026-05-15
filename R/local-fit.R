@@ -130,7 +130,13 @@ fit_local_posterior <- function(data,
   obs_weight0[graph$observed_index] <- observation_weights[, 1]
   obs_weight1[graph$observed_index] <- observation_weights[, 2]
   use_observation_weights <- any(abs(c(obs_weight0[graph$observed_index], obs_weight1[graph$observed_index]) - 1) > 1e-12)
-  likelihood_model <- if (isTRUE(use_observation_weights)) "weighted_multinomial" else observation_model
+  likelihood_model <- if (isTRUE(use_observation_weights) && identical(observation_model, "dirichlet_multinomial")) {
+    "weighted_dirichlet_multinomial"
+  } else if (isTRUE(use_observation_weights)) {
+    "weighted_multinomial"
+  } else {
+    observation_model
+  }
 
   p0 <- (y0 + 0.5) / sum(y0 + 0.5)
   p1 <- (y1 + 0.5) / sum(y1 + 0.5)

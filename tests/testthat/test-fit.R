@@ -74,11 +74,14 @@ test_that("graph posterior and end-to-end fit smoke tests work", {
                      min_cn = 1, max_cn = 3, max_nodes = 200,
                      graph_edge_weight = "unit",
                      anchor_count_reference = 20,
+                     anchor_exclude = "1.2.2",
                      control = list(eval.max = 120, iter.max = 120))
   expect_s3_class(full, "alfak2_fit")
   expect_gt(nrow(summarize_alfak2(full)), 0)
   expect_equal(full$diagnostics$graph_edge_weight, "unit")
   expect_equal(full$diagnostics$anchor_support_tiers, "all")
+  expect_equal(full$diagnostics$anchor_exclude, "1.2.2")
+  expect_false("1.2.2" %in% as.character(full$global$anchors$karyotype))
 })
 
 test_that("observation weights downweight low-support rows in the local likelihood", {
@@ -111,7 +114,7 @@ test_that("dirichlet-multinomial uses explicit weighted likelihood when observat
     control = list(eval.max = 120, iter.max = 120)
   )
   expect_equal(fit$diagnostics$observation_model, "dirichlet_multinomial")
-  expect_equal(fit$diagnostics$likelihood_model, "weighted_multinomial")
+  expect_equal(fit$diagnostics$likelihood_model, "weighted_dirichlet_multinomial")
 })
 
 test_that("untrusted local covariance uses finite fallback uncertainty", {

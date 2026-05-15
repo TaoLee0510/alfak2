@@ -10,7 +10,15 @@ fit_graph_posterior(
   lambda_l_grid = c(0.2, 1, 5),
   lambda_e_grid = c(0.05, 0.25, 1),
   sigma_obs_grid = c(0.02, 0.05, 0.1),
-  eps = 1e-05
+  eps = 1e-05,
+  graph_edge_weight = c("mutation", "unit", "normalized"),
+  anchor_support_tiers = "all",
+  anchor_covariance_inflation = c(TMB_sdreport = 1, untrusted_gradient = 4,
+    untrusted_nonconverged = 9, untrusted_sdreport_missing = 4,
+    untrusted_sdreport_nonfinite = 4, unknown = 4),
+  anchor_count_reference = NULL,
+  anchor_count_power = 1,
+  anchor_exclude = character()
 )
 }
 \arguments{
@@ -22,6 +30,26 @@ fit_graph_posterior(
 compiled leave-one-anchor-out tuning.}
 
 \item{eps}{Diagonal numerical stabilizer.}
+
+\item{graph_edge_weight}{Edge weighting used by the Gaussian graph prior.
+\code{"mutation"} preserves the transition weights implied by \code{beta}, \code{"unit"}
+gives every graph edge equal smoothing weight, and \code{"normalized"} preserves
+relative mutation weights while removing the global \code{beta} scale.}
+
+\item{anchor_support_tiers}{Local support tiers to use as Gaussian anchors.
+Defaults to \code{"all"} for the legacy behavior of anchoring every finite local
+posterior row.}
+
+\item{anchor_covariance_inflation}{Named variance multipliers for local
+covariance statuses.}
+
+\item{anchor_count_reference}{Optional count total below which observed
+anchors are downweighted by increasing their variance.}
+
+\item{anchor_count_power}{Exponent used by count-based variance inflation.}
+
+\item{anchor_exclude}{Optional karyotype labels to exclude from the anchor
+set, used for neighbor-holdout validation.}
 }
 \value{
 A list containing node summaries and tuning diagnostics.

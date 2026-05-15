@@ -43,6 +43,19 @@ Type dirichlet_multinomial_loglik(vector<Type> prob, vector<Type> y, Type phi) {
 }
 
 template<class Type>
+Type weighted_dirichlet_multinomial_loglik(vector<Type> prob, vector<Type> y, vector<Type> weight, Type phi) {
+  Type n_eff = 0.0;
+  for (int i = 0; i < y.size(); ++i) n_eff += weight(i) * y(i);
+  Type out = lgamma(phi) - lgamma(n_eff + phi);
+  for (int i = 0; i < prob.size(); ++i) {
+    Type alpha = phi * (prob(i) + Type(1e-12));
+    Type y_eff = weight(i) * y(i);
+    out += lgamma(y_eff + alpha) - lgamma(alpha);
+  }
+  return out;
+}
+
+template<class Type>
 Type objective_function<Type>::operator() () {
   DATA_VECTOR(y0);
   DATA_VECTOR(y1);
@@ -101,7 +114,11 @@ Type objective_function<Type>::operator() () {
   vector<Type> pi1(n_nodes);
   for (int i = 0; i < n_nodes; ++i) pi1(i) = transported(i) / z1;
 
-  if (use_observation_weights == 1) {
+  if (use_observation_weights == 1 && observation_model == 1) {
+    Type phi = dm_concentration;
+    nll -= weighted_dirichlet_multinomial_loglik(pi0, y0, obs_weight0, phi);
+    nll -= weighted_dirichlet_multinomial_loglik(pi1, y1, obs_weight1, phi);
+  } else if (use_observation_weights == 1) {
     nll -= weighted_multinomial_loglik(pi0, y0, obs_weight0);
     nll -= weighted_multinomial_loglik(pi1, y1, obs_weight1);
   } else if (observation_model == 1) {

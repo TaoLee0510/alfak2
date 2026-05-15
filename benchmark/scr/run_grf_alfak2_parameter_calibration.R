@@ -50,6 +50,7 @@ usage <- function() {
     "  --holdout-weight=0.15\n",
     "  --holdout-fraction=0.25\n",
     "  --holdout-min-direct=6\n",
+    "  --holdout-failure-penalty=1\n",
     "  --bias-weight=0.10\n",
     "  --spearman-weight=0.10\n",
     "  --false-high-weight=0.10\n",
@@ -77,6 +78,36 @@ arg_logical_vec <- function(args, name, default) {
 }
 
 to_num <- function(x) suppressWarnings(as.numeric(x))
+
+hash_r_object <- function(x) {
+  path <- tempfile(fileext = ".rds")
+  on.exit(unlink(path), add = TRUE)
+  saveRDS(x, path, version = 2)
+  unname(tools::md5sum(path))
+}
+
+calibration_fit_config_hash <- function(task, cfg, repo_versions, actual_input_md5 = NA_character_) {
+  task_for_hash <- task[setdiff(names(task), "outdir")]
+  cfg_keys <- c(
+    "pm", "n0", "nb", "drop_diploid", "input_policy",
+    "alfak2_input_depth", "alfak2_effective_depth", "alfak2_observation_model",
+    "alfak2_min_cn", "alfak2_max_cn", "max_nodes",
+    "alfak2_anchor_count_reference", "alfak2_anchor_count_power",
+    "eval_max", "iter_max", "retry_max",
+    "holdout_fraction", "holdout_min_direct", "holdout_seed", "holdout_mode"
+  )
+  hash_r_object(list(
+    cache_schema = 2L,
+    task = task_for_hash,
+    actual_input_md5 = as.character(actual_input_md5),
+    config = cfg[intersect(cfg_keys, names(cfg))],
+    repo_versions = repo_versions,
+    implementation = list(
+      holdout_mode = "zero_observation_weight",
+      weighted_likelihood = "weighted_dirichlet_multinomial_v1"
+    )
+  ))
+}
 
 build_calibration_dirs <- function(output_dir) {
   dirs <- list(
@@ -186,6 +217,8 @@ build_calibration_config <- function(args, repo_dir) {
     holdout_fraction = arg_numeric(args, "holdout_fraction", 0.25),
     holdout_min_direct = arg_integer(args, "holdout_min_direct", 6L),
     holdout_seed = arg_integer(args, "holdout_seed", 71011L),
+    holdout_mode = "zero_observation_weight",
+    holdout_failure_penalty = arg_numeric(args, "holdout_failure_penalty", 1),
     bias_weight = arg_numeric(args, "bias_weight", 0.10),
     spearman_weight = arg_numeric(args, "spearman_weight", 0.10),
     false_high_weight = arg_numeric(args, "false_high_weight", 0.10),
@@ -506,16 +539,23 @@ select_calibration_holdout_labels <- function(fit, task, cfg) {
   sample(labels, n_holdout)
 }
 
-subset_counts_excluding_labels <- function(counts, labels) {
-  labels <- as.character(labels)
-  keep <- !(rownames(counts) %in% labels)
-  out <- counts[keep, , drop = FALSE]
+zero_weight_holdout_counts <- function(counts, labels) {
+  labels <- intersect(as.character(labels), rownames(counts))
+  out <- counts
   observation_weights <- attr(counts, "observation_weights", exact = TRUE)
   soft_minobs <- attr(counts, "soft_minobs", exact = TRUE)
-  if (!is.null(observation_weights)) {
-    attr(out, "observation_weights") <- observation_weights[rownames(out), , drop = FALSE]
+  if (is.null(observation_weights)) {
+    observation_weights <- matrix(
+      1,
+      nrow = nrow(counts),
+      ncol = 2L,
+      dimnames = list(rownames(counts), colnames(counts))
+    )
   }
+  observation_weights[labels, ] <- 0
+  attr(out, "observation_weights") <- observation_weights
   if (!is.null(soft_minobs)) attr(out, "soft_minobs") <- soft_minobs
+  attr(out, "holdout_mode") <- list(mode = "zero_observation_weight", labels = labels)
   out
 }
 
@@ -529,17 +569,19 @@ fit_calibration_holdout <- function(task, cfg, counts, dt, max_cn, fit, outdir) 
       holdout_error_message = NA_character_,
       holdout_labels = NA_character_,
       holdout_n_labels = 0L,
+      holdout_mode = cfg$holdout_mode,
       holdout_fit_path = holdout_fit_path,
       holdout_landscape_path = holdout_summary_path
     ))
   }
-  holdout_counts <- subset_counts_excluding_labels(counts, holdout)
+  holdout_counts <- zero_weight_holdout_counts(counts, holdout)
   if (!nrow(holdout_counts)) {
     return(list(
       holdout_status = "skipped_empty_input",
       holdout_error_message = NA_character_,
       holdout_labels = paste(holdout, collapse = ","),
       holdout_n_labels = length(holdout),
+      holdout_mode = cfg$holdout_mode,
       holdout_fit_path = holdout_fit_path,
       holdout_landscape_path = holdout_summary_path
     ))
@@ -561,6 +603,7 @@ fit_calibration_holdout <- function(task, cfg, counts, dt, max_cn, fit, outdir) 
       sigma_obs_grid = as.numeric(task$sigma_obs),
       graph_edge_weight = as.character(row_field(task, "graph_edge_weight", "mutation")),
       anchor_support_tiers = "directly_informed",
+      anchor_exclude = holdout,
       anchor_count_reference = anchor_count_reference,
       anchor_count_power = cfg$alfak2_anchor_count_power,
       input_depth = cfg$alfak2_input_depth,
@@ -583,6 +626,7 @@ fit_calibration_holdout <- function(task, cfg, counts, dt, max_cn, fit, outdir) 
       holdout_error_message = NA_character_,
       holdout_labels = paste(holdout, collapse = ","),
       holdout_n_labels = length(holdout),
+      holdout_mode = cfg$holdout_mode,
       holdout_fit_path = holdout_fit_path,
       holdout_landscape_path = holdout_summary_path
     )
@@ -592,6 +636,7 @@ fit_calibration_holdout <- function(task, cfg, counts, dt, max_cn, fit, outdir) 
       holdout_error_message = conditionMessage(e),
       holdout_labels = paste(holdout, collapse = ","),
       holdout_n_labels = length(holdout),
+      holdout_mode = cfg$holdout_mode,
       holdout_fit_path = holdout_fit_path,
       holdout_landscape_path = holdout_summary_path
     )
@@ -603,21 +648,34 @@ run_calibration_fit_task <- function(task, cfg, repo_versions) {
   outdir <- task$outdir
   dir.create(outdir, recursive = TRUE, showWarnings = FALSE)
   result_path <- file.path(outdir, "fit_result.rds")
+  actual_md5 <- unname(tools::md5sum(as.character(task$input_rds)))
+  declared_md5 <- as.character(task$input_md5)
+  if (length(declared_md5) && !is.na(declared_md5[[1L]]) && nzchar(declared_md5[[1L]]) &&
+      !identical(actual_md5, declared_md5[[1L]])) {
+    stop("Prepared input_rds md5 changed for task ", task$task_order, ".", call. = FALSE)
+  }
+  expected_config_hash <- calibration_fit_config_hash(
+    task,
+    cfg,
+    repo_versions,
+    actual_input_md5 = actual_md5
+  )
   allow_cache <- !isTRUE(cfg$force_refit) &&
     (isTRUE(cfg$reuse_dirty_cache) || !isTRUE(repo_versions$dirty[repo_versions$package == "alfak2"]))
   cached <- if (allow_cache) read_rds_if_exists(result_path) else NULL
   cached_holdout_ok <- is.list(cached) && "holdout_status" %in% names(cached) &&
     (!identical(cached$holdout_status, "ok") || file.exists(cached$holdout_fit_path))
+  cached_hash <- if (is.list(cached) && "fit_config_hash" %in% names(cached)) {
+    as.character(cached$fit_config_hash[[1L]])
+  } else {
+    NA_character_
+  }
+  cached_config_ok <- identical(cached_hash, expected_config_hash)
   if (is.list(cached) && identical(cached$status, "ok") && file.exists(cached$fit_path) &&
-      isTRUE(cached_holdout_ok)) {
+      isTRUE(cached_holdout_ok) && isTRUE(cached_config_ok)) {
     cached$cached <- TRUE
     saveRDS(cached, result_path)
     return(cached)
-  }
-
-  actual_md5 <- unname(tools::md5sum(as.character(task$input_rds)))
-  if (nzchar(as.character(task$input_md5)) && !identical(actual_md5, as.character(task$input_md5))) {
-    stop("Prepared input_rds md5 changed for task ", task$task_order, ".", call. = FALSE)
   }
 
   yi <- readRDS(task$input_rds)
@@ -683,10 +741,12 @@ run_calibration_fit_task <- function(task, cfg, repo_versions) {
         elapsed_sec = as.numeric(difftime(Sys.time(), started, units = "secs")),
         fit_path = fit_path,
         landscape_path = summary_path,
+        fit_config_hash = expected_config_hash,
         holdout_status = holdout$holdout_status,
         holdout_error_message = holdout$holdout_error_message,
         holdout_labels = holdout$holdout_labels,
         holdout_n_labels = holdout$holdout_n_labels,
+        holdout_mode = holdout$holdout_mode,
         holdout_fit_path = holdout$holdout_fit_path,
         holdout_landscape_path = holdout$holdout_landscape_path,
         graph_edge_weight = as.character(row_field(task, "graph_edge_weight", "mutation")),
@@ -711,10 +771,12 @@ run_calibration_fit_task <- function(task, cfg, repo_versions) {
         elapsed_sec = as.numeric(difftime(Sys.time(), started, units = "secs")),
         fit_path = file.path(outdir, "alfak2_fit.rds"),
         landscape_path = file.path(outdir, "landscape.rds"),
+        fit_config_hash = expected_config_hash,
         holdout_status = NA_character_,
         holdout_error_message = NA_character_,
         holdout_labels = NA_character_,
         holdout_n_labels = NA_integer_,
+        holdout_mode = cfg$holdout_mode,
         holdout_fit_path = file.path(outdir, "alfak2_holdout_fit.rds"),
         holdout_landscape_path = file.path(outdir, "holdout_landscape.rds"),
         graph_edge_weight = as.character(row_field(task, "graph_edge_weight", "mutation")),
@@ -840,6 +902,10 @@ score_graph_holdout <- function(fit, grf_sim, fr, cfg) {
   if (!length(holdout)) {
     return(accuracy_metric_row(fr$task_order[[1L]], fr$param_id[[1L]], "holdout", numeric(0), numeric(0), 0L))
   }
+  holdout_status <- as.character(fr$holdout_status[[1L]])
+  if (!identical(holdout_status, "ok")) {
+    return(accuracy_metric_row(fr$task_order[[1L]], fr$param_id[[1L]], "holdout", numeric(0), numeric(0), length(holdout)))
+  }
   hfit <- read_rds_if_exists(as.character(fr$holdout_fit_path[[1L]]))
   if (is.null(hfit)) {
     return(accuracy_metric_row(fr$task_order[[1L]], fr$param_id[[1L]], "holdout", numeric(0), numeric(0), length(holdout)))
@@ -900,7 +966,7 @@ score_one_fit <- function(fr, cfg) {
     "sigma_obs", "graph_edge_weight", "anchor_count_reference", "anchor_count_power",
     "dm_concentration", "effective_depth_mode", "local_shell_depth", "global_extra_shell",
     "local_covariance_status", "global_factorization_status",
-    "holdout_status", "holdout_n_labels"
+    "holdout_status", "holdout_n_labels", "holdout_mode"
   )
   meta <- fr[rep(1L, nrow(metrics)), intersect(meta_cols, names(fr)), drop = FALSE]
   metrics <- cbind(meta, metrics[setdiff(names(metrics), names(meta))])
@@ -965,6 +1031,22 @@ rank_calibration_parameters <- function(metric_tbl, fit_tbl, cfg) {
     by = list(param_id = fit_tbl$param_id),
     FUN = function(x) if (is.logical(x)) sum(x, na.rm = TRUE) else length(x)
   )
+  if ("holdout_status" %in% names(fit_tbl)) {
+    holdout_status <- as.character(fit_tbl$holdout_status)
+    holdout_status[is.na(holdout_status) | !nzchar(holdout_status)] <- "missing"
+    holdout_status_tbl <- aggregate(
+      list(
+        n_holdout_ok = holdout_status == "ok",
+        n_holdout_error = holdout_status == "error",
+        n_holdout_skipped = grepl("^skipped", holdout_status),
+        n_holdout_missing = holdout_status == "missing"
+      ),
+      by = list(param_id = fit_tbl$param_id),
+      FUN = function(x) sum(x, na.rm = TRUE)
+    )
+  } else {
+    holdout_status_tbl <- data.frame(param_id = integer())
+  }
 
   summarize_scope <- function(scope, prefix) {
     x <- metric_tbl[metric_tbl$support_scope == scope, , drop = FALSE]
@@ -974,6 +1056,7 @@ rank_calibration_parameters <- function(metric_tbl, fit_tbl, cfg) {
       data.frame(
         param_id = as.integer(z$param_id[[1L]]),
         setNames(list(nrow(z)), paste0(prefix, "_n_conditions")),
+        setNames(list(sum(z$n_scored > 0, na.rm = TRUE)), paste0(prefix, "_n_scored_conditions")),
         setNames(list(sum(z$n_scored, na.rm = TRUE)), paste0(prefix, "_total_scored")),
         setNames(list(if (cfg$objective_metric == "sparse_composite") NA_real_ else median(z[[cfg$objective_metric]], na.rm = TRUE)), paste0(prefix, "_median_", cfg$objective_metric)),
         setNames(list(if (cfg$objective_metric == "sparse_composite") NA_real_ else stats::quantile(z[[cfg$objective_metric]], 0.75, na.rm = TRUE, names = FALSE)), paste0(prefix, "_q75_", cfg$objective_metric)),
@@ -994,6 +1077,7 @@ rank_calibration_parameters <- function(metric_tbl, fit_tbl, cfg) {
   holdout_tbl <- summarize_scope("holdout", "holdout")
   all_tbl <- summarize_scope("all", "all")
   out <- merge(param_tbl, status_tbl, by = "param_id", all.x = TRUE)
+  out <- merge(out, holdout_status_tbl, by = "param_id", all.x = TRUE)
   out <- merge(out, objective_tbl, by = "param_id", all.x = TRUE)
   out <- merge(out, direct_tbl, by = "param_id", all.x = TRUE)
   out <- merge(out, holdout_tbl, by = "param_id", all.x = TRUE)
@@ -1012,25 +1096,48 @@ rank_calibration_parameters <- function(metric_tbl, fit_tbl, cfg) {
   )) {
     if (!nm %in% names(out)) out[[nm]] <- NA_real_
   }
+  for (nm in c(
+    "n_ok", "n_holdout_ok", "n_holdout_error", "n_holdout_skipped", "n_holdout_missing",
+    "holdout_n_conditions", "holdout_n_scored_conditions", "holdout_total_scored"
+  )) {
+    if (!nm %in% names(out)) out[[nm]] <- 0
+    out[[nm]][!is.finite(out[[nm]])] <- 0
+  }
+  holdout_expected <- pmax(as.numeric(out$n_ok), 1)
+  holdout_unscored_fraction <- pmax(
+    0,
+    1 - as.numeric(out$holdout_n_scored_conditions) / holdout_expected
+  )
+  holdout_bad_status_fraction <- pmax(
+    0,
+    (as.numeric(out$n_holdout_error) + as.numeric(out$n_holdout_skipped) + as.numeric(out$n_holdout_missing)) /
+      holdout_expected
+  )
+  holdout_no_scores <- !is.finite(out$holdout_total_scored) | as.numeric(out$holdout_total_scored) <= 0
+  out$holdout_failure_fraction <- pmax(holdout_unscored_fraction, holdout_bad_status_fraction, as.numeric(holdout_no_scores))
+  out$holdout_failure_penalty_value <- as.numeric(cfg$holdout_failure_penalty) * out$holdout_failure_fraction
   if (cfg$objective_metric == "sparse_composite") {
     out$calibration_score <- out$objective_median_centered_rmse +
       cfg$direct_weight * ifelse(is.finite(out$direct_median_centered_rmse), out$direct_median_centered_rmse, 0) +
       cfg$holdout_weight * ifelse(is.finite(out$holdout_median_centered_rmse), out$holdout_median_centered_rmse, 0) +
       cfg$bias_weight * ifelse(is.finite(out[[bias_col]]), out[[bias_col]], 0) -
       cfg$spearman_weight * ifelse(is.finite(out$objective_median_spearman), out$objective_median_spearman, 0) +
-      cfg$false_high_weight * ifelse(is.finite(out$objective_median_false_high_rate), out$objective_median_false_high_rate, 0)
+      cfg$false_high_weight * ifelse(is.finite(out$objective_median_false_high_rate), out$objective_median_false_high_rate, 0) +
+      out$holdout_failure_penalty_value
     objective_order_col <- "objective_median_centered_rmse"
   } else {
     out$calibration_score <- out[[objective_col]] +
       cfg$direct_weight * ifelse(is.finite(out[[direct_col]]), out[[direct_col]], 0) +
       cfg$holdout_weight * ifelse(is.finite(out$holdout_median_centered_rmse), out$holdout_median_centered_rmse, 0) +
-      cfg$bias_weight * ifelse(is.finite(out[[bias_col]]), out[[bias_col]], 0)
+      cfg$bias_weight * ifelse(is.finite(out[[bias_col]]), out[[bias_col]], 0) +
+      out$holdout_failure_penalty_value
     objective_order_col <- objective_col
   }
   out$objective_scope <- cfg$objective_scope
   out$objective_metric <- cfg$objective_metric
   out$direct_weight <- cfg$direct_weight
   out$holdout_weight <- cfg$holdout_weight
+  out$holdout_failure_penalty <- cfg$holdout_failure_penalty
   out$bias_weight <- cfg$bias_weight
   out$spearman_weight <- cfg$spearman_weight
   out$false_high_weight <- cfg$false_high_weight
