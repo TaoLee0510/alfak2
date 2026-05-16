@@ -10,7 +10,12 @@ graph_edge_weights <- function(edge_weight,
     return(out)
   }
   scale <- stats::median(edge_weight[positive], na.rm = TRUE)
-  if (!is.finite(scale) || scale <= 0) return(edge_weight)
+  if (!is.finite(scale) || scale <= 0) {
+    alfak2_abort(
+      "Cannot normalize graph edge weights because no positive finite scale is available.",
+      diagnostics = list(stage = "graph_edge_weights", mode = mode, edge_weight_summary = summary(edge_weight))
+    )
+  }
   edge_weight / scale
 }
 
@@ -30,12 +35,19 @@ anchor_covariance_multiplier <- function(status,
   if (is.null(names(inflation)) || any(!nzchar(names(inflation)))) {
     stop("`anchor_covariance_inflation` must be a named numeric vector.", call. = FALSE)
   }
+  if (any(!is.finite(inflation) | inflation <= 0)) {
+    stop("`anchor_covariance_inflation` values must be positive finite numbers.", call. = FALSE)
+  }
   status <- as.character(status)
   status[is.na(status) | !nzchar(status)] <- "unknown"
+  missing_status <- setdiff(unique(status), names(inflation))
+  if (length(missing_status)) {
+    alfak2_abort(
+      "Local covariance status is not covered by `anchor_covariance_inflation`.",
+      diagnostics = list(stage = "anchor_covariance_multiplier", missing_status = missing_status)
+    )
+  }
   out <- inflation[match(status, names(inflation))]
-  fallback <- inflation[["unknown"]]
-  if (!is.finite(fallback) || fallback <= 0) fallback <- 4
-  out[!is.finite(out) | out <= 0] <- fallback
   as.numeric(out)
 }
 
@@ -49,7 +61,12 @@ count_anchor_multiplier <- function(count_total,
   out <- rep(1, length(count_total))
   ok <- is.finite(count_total) & count_total > 0
   out[ok] <- pmax(1, (as.numeric(count_reference) / count_total[ok]) ^ as.numeric(power))
-  out[!ok] <- as.numeric(count_reference) ^ as.numeric(power)
+  if (any(!ok)) {
+    alfak2_abort(
+      "Count-weighted anchor variance requires positive finite anchor counts.",
+      diagnostics = list(stage = "count_anchor_multiplier", bad_indices = which(!ok))
+    )
+  }
   out
 }
 
@@ -69,7 +86,9 @@ resolve_anchor_tiers <- function(anchor_support_tiers) {
 #' @param local_fit An `alfak2_local_fit` object.
 #' @param graph Bounded global `alfak2_graph`.
 #' @param lambda_l_grid,lambda_e_grid,sigma_obs_grid Hyperparameter grids for
-#'   compiled leave-one-anchor-out tuning.
+#'   compiled leave-one-anchor-out tuning. Supplying one value for each grid uses
+#'   fixed hyperparameters; multi-value grids require enough evaluable anchors and
+#'   abort rather than substituting default values.
 #' @param eps Diagonal numerical stabilizer.
 #' @param graph_edge_weight Edge weighting used by the Gaussian graph prior.
 #'   `"mutation"` preserves the transition weights implied by `beta`, `"unit"`
@@ -122,6 +141,10 @@ fit_graph_posterior <- function(local_fit,
     validate_scalar(as.numeric(anchor_min_effective_count), "anchor_min_effective_count", lower = 0)
     anchor_min_effective_count <- as.numeric(anchor_min_effective_count)
   }
+  lambda_l_grid <- validate_positive_grid(lambda_l_grid, "lambda_l_grid")
+  lambda_e_grid <- validate_positive_grid(lambda_e_grid, "lambda_e_grid")
+  sigma_obs_grid <- validate_positive_grid(sigma_obs_grid, "sigma_obs_grid")
+  validate_scalar(eps, "eps", lower = .Machine$double.eps)
 
   anchor_match <- match(local_fit$summary$karyotype, as.character(graph$labels))
   tier_ok <- rep(TRUE, nrow(local_fit$summary))
@@ -133,7 +156,13 @@ fit_graph_posterior <- function(local_fit,
     rep(NA_real_, nrow(local_fit$summary))
   }
   count_ok <- rep(TRUE, nrow(local_fit$summary))
-  if (!is.null(anchor_min_effective_count) && any(is.finite(anchor_count_all))) {
+  if (!is.null(anchor_min_effective_count)) {
+    if (!any(is.finite(anchor_count_all))) {
+      alfak2_abort(
+        "`anchor_min_effective_count` requires finite local effective counts.",
+        diagnostics = list(stage = "global_anchor_filter")
+      )
+    }
     count_ok <- is.finite(anchor_count_all) & anchor_count_all > anchor_min_effective_count
   }
   if (!is.null(anchor_tiers)) {
@@ -143,20 +172,32 @@ fit_graph_posterior <- function(local_fit,
     tier_ok <- tier_ok & !(as.character(local_fit$summary$karyotype) %in% as.character(anchor_exclude))
   }
   keep <- which(!is.na(anchor_match) & is.finite(local_fit$summary$fitness_mean) & tier_ok & count_ok)
-  if (!length(keep)) stop("No local posterior anchors are present in the global graph.", call. = FALSE)
+  if (!length(keep)) {
+    alfak2_abort(
+      "No local posterior anchors are present in the global graph.",
+      diagnostics = list(
+        stage = "global_anchor_filter",
+        n_local = nrow(local_fit$summary),
+        n_in_graph = sum(!is.na(anchor_match)),
+        anchor_min_effective_count = anchor_min_effective_count
+      )
+    )
+  }
   anchor_var_base <- local_fit$summary$fitness_sd[keep]^2
   anchor_var <- anchor_var_base
-  anchor_var[!is.finite(anchor_var) | anchor_var <= 0] <- stats::median(anchor_var[is.finite(anchor_var) & anchor_var > 0], na.rm = TRUE)
-  anchor_var[!is.finite(anchor_var) | anchor_var <= 0] <- 0.25
-  covariance_status <- if ("covariance_status" %in% names(local_fit$summary)) {
-    as.character(local_fit$summary$covariance_status[keep])
-  } else {
-    status <- local_fit$diagnostics$covariance_status
-    if (is.null(status) || !length(status) || is.na(status[[1L]]) || !nzchar(as.character(status[[1L]]))) {
-      status <- "unknown"
-    }
-    rep(as.character(status[[1L]]), length(keep))
+  if (any(!is.finite(anchor_var) | anchor_var <= 0)) {
+    alfak2_abort(
+      "Global graph anchors contain non-finite local fitness variances.",
+      diagnostics = list(stage = "global_anchor_variance", bad_indices = keep[!is.finite(anchor_var) | anchor_var <= 0])
+    )
   }
+  if (!"covariance_status" %in% names(local_fit$summary)) {
+    alfak2_abort(
+      "Local fit summary is missing covariance status; aborting instead of assigning unknown anchor status.",
+      diagnostics = list(stage = "global_anchor_covariance_status")
+    )
+  }
+  covariance_status <- as.character(local_fit$summary$covariance_status[keep])
   covariance_mult <- anchor_covariance_multiplier(covariance_status, anchor_covariance_inflation)
   anchor_count_for_weight <- anchor_count_all[keep]
   count_mult <- if (any(is.finite(anchor_count_for_weight))) {
@@ -168,18 +209,33 @@ fit_graph_posterior <- function(local_fit,
   anchor_var <- anchor_var * anchor_var_multiplier
   edge_weight <- graph_edge_weights(graph$edge_weight, graph_edge_weight)
 
-  res <- alfak2_graph_posterior_cpp(
-    karyotypes = graph$karyotypes,
-    edge_from = as.integer(graph$edge_from),
-    edge_to = as.integer(graph$edge_to),
-    edge_weight = as.numeric(edge_weight),
-    anchor_index = as.integer(anchor_match[keep]),
-    anchor_mean = as.numeric(local_fit$summary$fitness_mean[keep]),
-    anchor_var = as.numeric(anchor_var),
-    lambda_l_grid = as.numeric(lambda_l_grid),
-    lambda_e_grid = as.numeric(lambda_e_grid),
-    sigma_obs_grid = as.numeric(sigma_obs_grid),
-    eps = eps
+  res <- tryCatch(
+    alfak2_graph_posterior_cpp(
+      karyotypes = graph$karyotypes,
+      edge_from = as.integer(graph$edge_from),
+      edge_to = as.integer(graph$edge_to),
+      edge_weight = as.numeric(edge_weight),
+      anchor_index = as.integer(anchor_match[keep]),
+      anchor_mean = as.numeric(local_fit$summary$fitness_mean[keep]),
+      anchor_var = as.numeric(anchor_var),
+      lambda_l_grid = as.numeric(lambda_l_grid),
+      lambda_e_grid = as.numeric(lambda_e_grid),
+      sigma_obs_grid = as.numeric(sigma_obs_grid),
+      eps = eps
+    ),
+    error = function(e) {
+      alfak2_abort(
+        "Global graph posterior failed.",
+        diagnostics = list(
+          stage = "global_graph_posterior",
+          error = conditionMessage(e),
+          n_anchors = length(keep),
+          lambda_l_grid = as.numeric(lambda_l_grid),
+          lambda_e_grid = as.numeric(lambda_e_grid),
+          sigma_obs_grid = as.numeric(sigma_obs_grid)
+        )
+      )
+    }
   )
 
   tier <- as.character(graph$support_tier)

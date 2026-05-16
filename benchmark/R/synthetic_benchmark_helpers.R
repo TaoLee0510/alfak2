@@ -25,10 +25,13 @@ top_k_overlap <- function(truth, pred, k = 10) {
 
 benchmark_format_karyotypes <- function(karyotypes) {
   if (exists("format_karyotypes", mode = "function")) {
-    out <- try(format_karyotypes(karyotypes), silent = TRUE)
-    if (!inherits(out, "try-error")) return(as.character(out))
+    return(as.character(format_karyotypes(karyotypes)))
   }
-  apply(as.matrix(karyotypes), 1L, paste, collapse = ".")
+  if (requireNamespace("alfak2", quietly = TRUE) &&
+      "format_karyotypes" %in% getNamespaceExports("alfak2")) {
+    return(as.character(alfak2::format_karyotypes(karyotypes)))
+  }
+  stop("Benchmark karyotype formatting requires `format_karyotypes()`.", call. = FALSE)
 }
 
 benchmark_predict_landscape_fitness <- function(landscape, karyotypes) {
@@ -432,8 +435,11 @@ run_synthetic_reference_task <- function(task,
                                          input_depth,
                                          effective_depth,
                                          effective_depth_mode,
+                                         effective_depth_rounding,
+                                         effective_depth_seed,
                                          observation_model,
                                          dm_concentration,
+                                         observation_weight_mode,
                                          force_rebuild_reference,
                                          reference_cache_subdir,
                                          verbose) {
@@ -495,8 +501,11 @@ run_synthetic_reference_task <- function(task,
         input_depth = input_depth,
         effective_depth = effective_depth,
         effective_depth_mode = effective_depth_mode,
+        effective_depth_rounding = effective_depth_rounding,
+        effective_depth_seed = effective_depth_seed,
         observation_model = observation_model,
         dm_concentration = dm_concentration,
+        observation_weight_mode = observation_weight_mode,
         control = list(eval.max = 200, iter.max = 200)
       )
       fit_key <- paste("l1_gp", replicate, pm, min_obs, downsample_fraction, sep = "__")
@@ -553,8 +562,11 @@ run_synthetic_sparsity_benchmark <- function(repo_dir,
                                              input_depth = "raw",
                                              effective_depth = NULL,
                                              effective_depth_mode = "min",
+                                             effective_depth_rounding = "hash",
+                                             effective_depth_seed = NULL,
                                              observation_model = NULL,
                                              dm_concentration = NULL,
+                                             observation_weight_mode = "likelihood",
                                              force_rebuild_reference = FALSE,
                                              reference_cache_subdir = "reference_standard_inputs",
                                              parallel_workers = 1L,
@@ -606,8 +618,11 @@ run_synthetic_sparsity_benchmark <- function(repo_dir,
       input_depth = input_depth,
       effective_depth = effective_depth,
       effective_depth_mode = effective_depth_mode,
+      effective_depth_rounding = effective_depth_rounding,
+      effective_depth_seed = effective_depth_seed,
       observation_model = observation_model,
       dm_concentration = dm_concentration,
+      observation_weight_mode = observation_weight_mode,
       force_rebuild_reference = force_rebuild_reference,
       reference_cache_subdir = reference_cache_subdir,
       verbose = verbose
@@ -620,7 +635,7 @@ run_synthetic_sparsity_benchmark <- function(repo_dir,
     task_results <- parallel::mclapply(seq_len(nrow(tasks)), run_task, mc.cores = workers, mc.preschedule = FALSE)
   } else {
     if (parallel_workers > 1L && .Platform$OS.type == "windows") {
-      warning("Parallel benchmark execution uses forked workers and is disabled on Windows; running serially.", call. = FALSE)
+      stop("Forked parallelism is unavailable on Windows; set `parallel_workers = 1`.", call. = FALSE)
     }
     task_results <- lapply(seq_len(nrow(tasks)), run_task)
   }

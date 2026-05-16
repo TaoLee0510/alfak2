@@ -16,6 +16,61 @@ test_that("effective-depth preprocessing preserves controlled column totals", {
   expect_true(all(rowSums(out) > 0))
 })
 
+test_that("hash effective-depth rounding is stable under row reordering", {
+  counts <- matrix(
+    c(1, 1,
+      1, 1,
+      1, 1),
+    nrow = 3,
+    byrow = TRUE,
+    dimnames = list(c("2.2", "2.3", "3.3"), c("t0", "t1"))
+  )
+  out1 <- apply_effective_depth_counts(
+    counts,
+    effective_depth = 2,
+    effective_depth_mode = "fixed",
+    effective_depth_rounding = "hash"
+  )
+  out2 <- apply_effective_depth_counts(
+    counts[c("3.3", "2.2", "2.3"), , drop = FALSE],
+    effective_depth = 2,
+    effective_depth_mode = "fixed",
+    effective_depth_rounding = "hash"
+  )
+
+  common <- intersect(rownames(out1), rownames(out2))
+  expect_equal(out1[common, , drop = FALSE], out2[common, , drop = FALSE])
+  expect_equal(sort(rownames(out1)), sort(rownames(out2)))
+})
+
+test_that("stochastic effective-depth rounding is seed-reproducible", {
+  counts <- matrix(
+    c(1, 1,
+      1, 1,
+      1, 1,
+      1, 1),
+    nrow = 4,
+    byrow = TRUE,
+    dimnames = list(c("2.2", "2.3", "3.2", "3.3"), c("t0", "t1"))
+  )
+  out1 <- apply_effective_depth_counts(
+    counts,
+    effective_depth = 2,
+    effective_depth_mode = "fixed",
+    effective_depth_rounding = "stochastic",
+    effective_depth_seed = 11
+  )
+  out2 <- apply_effective_depth_counts(
+    counts,
+    effective_depth = 2,
+    effective_depth_mode = "fixed",
+    effective_depth_rounding = "stochastic",
+    effective_depth_seed = 11
+  )
+
+  expect_equal(out1, out2)
+})
+
 test_that("effective-depth preprocessing preserves observation weights", {
   counts <- matrix(
     c(90, 9,

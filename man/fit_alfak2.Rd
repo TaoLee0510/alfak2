@@ -29,8 +29,11 @@ fit_alfak2(
   input_depth = c("raw", "effective"),
   effective_depth = NULL,
   effective_depth_mode = c("min", "cap", "fixed"),
+  effective_depth_rounding = c("hash", "largest_remainder", "stochastic"),
+  effective_depth_seed = NULL,
   observation_model = NULL,
   dm_concentration = NULL,
+  observation_weight_mode = c("likelihood", "fractional_count"),
   alfakR_scale = FALSE,
   n0 = NULL,
   nb = NULL,
@@ -93,12 +96,24 @@ by \code{"min"} mode.}
 timepoint depth for both columns, \code{"cap"} caps each raw depth at
 \code{effective_depth}, and \code{"fixed"} uses \code{effective_depth} for every timepoint.}
 
+\item{effective_depth_rounding}{Rounding rule for effective-depth expected
+counts. \code{"hash"} uses deterministic label-based tie breaking,
+\code{"largest_remainder"} preserves row-order tie breaking, and \code{"stochastic"}
+samples remainders with \code{effective_depth_seed}.}
+
+\item{effective_depth_seed}{Optional seed used only by stochastic
+effective-depth rounding.}
+
 \item{observation_model}{Optional observation model passed to
 \code{fit_local_posterior()}. If omitted, raw input uses \code{"multinomial"} and
 effective-depth input uses \code{"dirichlet_multinomial"}.}
 
-\item{dm_concentration}{Optional Dirichlet-multinomial concentration. If omitted,
-effective-depth Dirichlet-multinomial fits use 50 and other fits use 200.}
+\item{dm_concentration}{Optional Dirichlet-multinomial concentration value or
+grid. If omitted, effective-depth Dirichlet-multinomial fits use 50 and other
+fits use 200.}
+
+\item{observation_weight_mode}{How observation weights enter the
+Dirichlet-multinomial likelihood. See \code{fit_local_posterior()}.}
 
 \item{alfakR_scale}{Logical; if \code{TRUE}, append \code{alfakR}-scale legacy fitness
 columns without changing the native \code{alfak2} posterior estimates.}

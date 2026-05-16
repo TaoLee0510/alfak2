@@ -4,7 +4,22 @@ validate_effective_depth_mode <- function(input_depth, effective_depth_mode) {
   list(input_depth = input_depth, effective_depth_mode = effective_depth_mode)
 }
 
-round_expected_counts_to_total <- function(expected, total) {
+stable_rounding_key <- function(labels, salt = "") {
+  labels <- as.character(labels)
+  vapply(labels, function(x) {
+    bytes <- utf8ToInt(paste0(salt, "|", x))
+    if (!length(bytes)) return(0)
+    sum((seq_along(bytes) * 131 + 17) * bytes) %% .Machine$integer.max
+  }, numeric(1))
+}
+
+round_expected_counts_to_total <- function(expected,
+                                           total,
+                                           method = c("hash", "largest_remainder", "stochastic"),
+                                           labels = NULL,
+                                           salt = "",
+                                           seed = NULL) {
+  method <- match.arg(method)
   total <- as.integer(round(total))
   if (!is.finite(total) || total < 1L) {
     stop("Effective depth totals must round to positive integers.", call. = FALSE)
@@ -14,9 +29,30 @@ round_expected_counts_to_total <- function(expected, total) {
   remainder <- total - sum(floored)
   if (remainder > 0L) {
     frac <- expected - floored
-    ord <- order(frac, decreasing = TRUE)
-    floored[ord[seq_len(min(remainder, length(ord)))]] <-
-      floored[ord[seq_len(min(remainder, length(ord)))]] + 1L
+    if (identical(method, "stochastic")) {
+      if (!is.null(seed)) {
+        has_seed <- exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)
+        old_seed <- if (has_seed) get(".Random.seed", envir = .GlobalEnv, inherits = FALSE) else NULL
+        on.exit({
+          if (has_seed) {
+            assign(".Random.seed", old_seed, envir = .GlobalEnv)
+          } else if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) {
+            rm(".Random.seed", envir = .GlobalEnv)
+          }
+        }, add = TRUE)
+        set.seed(as.integer(seed))
+      }
+      prob <- pmax(frac, 0)
+      if (sum(prob) <= 0) prob <- rep(1, length(prob))
+      ord <- sample(seq_along(frac), size = min(remainder, length(frac)), prob = prob)
+    } else if (identical(method, "hash")) {
+      if (is.null(labels)) labels <- seq_along(frac)
+      ord <- order(-frac, stable_rounding_key(labels, salt = salt), as.character(labels))
+    } else {
+      ord <- order(-frac, seq_along(frac))
+    }
+    take <- ord[seq_len(min(remainder, length(ord)))]
+    floored[take] <- floored[take] + 1L
   }
   as.integer(floored)
 }
@@ -40,8 +76,11 @@ resolve_effective_depth <- function(raw_depth, effective_depth, effective_depth_
 
 apply_effective_depth_counts <- function(counts,
                                          effective_depth = NULL,
-                                         effective_depth_mode = c("min", "cap", "fixed")) {
+                                         effective_depth_mode = c("min", "cap", "fixed"),
+                                         effective_depth_rounding = c("hash", "largest_remainder", "stochastic"),
+                                         effective_depth_seed = NULL) {
   effective_depth_mode <- match.arg(effective_depth_mode)
+  effective_depth_rounding <- match.arg(effective_depth_rounding)
   observation_weights <- attr(counts, "observation_weights", exact = TRUE)
   soft_minobs <- attr(counts, "soft_minobs", exact = TRUE)
   holdout_mode <- attr(counts, "holdout_mode", exact = TRUE)
@@ -51,7 +90,15 @@ apply_effective_depth_counts <- function(counts,
   freq <- sweep(counts, 2L, raw_depth, "/")
   out <- matrix(0L, nrow = nrow(counts), ncol = ncol(counts), dimnames = dimnames(counts))
   for (j in seq_len(ncol(counts))) {
-    out[, j] <- round_expected_counts_to_total(freq[, j] * target_depth[j], target_depth[j])
+    seed_j <- if (is.null(effective_depth_seed)) NULL else as.integer(effective_depth_seed) + j - 1L
+    out[, j] <- round_expected_counts_to_total(
+      freq[, j] * target_depth[j],
+      target_depth[j],
+      method = effective_depth_rounding,
+      labels = rownames(counts),
+      salt = colnames(counts)[j],
+      seed = seed_j
+    )
   }
   keep <- rowSums(out) > 0L
   if (!any(keep)) {
@@ -62,6 +109,8 @@ apply_effective_depth_counts <- function(counts,
     input_depth = "effective",
     effective_depth_mode = effective_depth_mode,
     requested_effective_depth = effective_depth,
+    effective_depth_rounding = effective_depth_rounding,
+    effective_depth_seed = effective_depth_seed,
     raw_depth = as.numeric(raw_depth),
     effective_depth = as.numeric(target_depth),
     retained_karyotypes = nrow(out),
@@ -80,10 +129,13 @@ prepare_counts_for_input_depth <- function(counts,
                                            beta,
                                            input_depth = c("raw", "effective"),
                                            effective_depth = NULL,
-                                           effective_depth_mode = c("min", "cap", "fixed")) {
+                                           effective_depth_mode = c("min", "cap", "fixed"),
+                                           effective_depth_rounding = c("hash", "largest_remainder", "stochastic"),
+                                           effective_depth_seed = NULL) {
   modes <- validate_effective_depth_mode(input_depth, effective_depth_mode)
   input_depth <- modes$input_depth
   effective_depth_mode <- modes$effective_depth_mode
+  effective_depth_rounding <- match.arg(effective_depth_rounding)
   if (inherits(counts, "alfak2_data")) {
     data <- counts
     if (input_depth == "raw") return(data)
@@ -96,7 +148,13 @@ prepare_counts_for_input_depth <- function(counts,
     if (!is.null(data$metadata$holdout_mode)) {
       attr(data$counts, "holdout_mode") <- data$metadata$holdout_mode
     }
-    eff_counts <- apply_effective_depth_counts(data$counts, effective_depth, effective_depth_mode)
+    eff_counts <- apply_effective_depth_counts(
+      data$counts,
+      effective_depth,
+      effective_depth_mode,
+      effective_depth_rounding = effective_depth_rounding,
+      effective_depth_seed = effective_depth_seed
+    )
     info <- attr(eff_counts, "effective_depth_info")
     metadata <- data$metadata
     metadata$input_depth <- info
@@ -105,7 +163,13 @@ prepare_counts_for_input_depth <- function(counts,
   if (input_depth == "raw") {
     return(prepare_alfak2_data(counts, dt = dt, beta = beta))
   }
-  eff_counts <- apply_effective_depth_counts(counts, effective_depth, effective_depth_mode)
+  eff_counts <- apply_effective_depth_counts(
+    counts,
+    effective_depth,
+    effective_depth_mode,
+    effective_depth_rounding = effective_depth_rounding,
+    effective_depth_seed = effective_depth_seed
+  )
   info <- attr(eff_counts, "effective_depth_info")
   prepare_alfak2_data(eff_counts, dt = dt, beta = beta, metadata = list(input_depth = info))
 }
@@ -127,6 +191,6 @@ resolve_fit_observation_controls <- function(input_depth, observation_model, dm_
       200
     }
   }
-  validate_scalar(dm_concentration, "dm_concentration", lower = .Machine$double.eps)
+  dm_concentration <- validate_positive_grid(dm_concentration, "dm_concentration")
   list(observation_model = observation_model, dm_concentration = dm_concentration)
 }

@@ -262,17 +262,6 @@ static CvScoreResult cv_score_grid(const Rcpp::IntegerMatrix& karyotypes,
   return {rss / evaluated, evaluated, skipped};
 }
 
-static double middle_grid_value(Rcpp::NumericVector grid, double fallback) {
-  std::vector<double> values;
-  values.reserve(grid.size());
-  for (double x : grid) {
-    if (R_finite(x)) values.push_back(x);
-  }
-  if (values.empty()) return fallback;
-  std::sort(values.begin(), values.end());
-  return values[values.size() / 2];
-}
-
 // [[Rcpp::export]]
 Rcpp::List alfak2_graph_posterior_cpp(Rcpp::IntegerMatrix karyotypes,
                                       Rcpp::IntegerVector edge_from,
@@ -297,17 +286,24 @@ Rcpp::List alfak2_graph_posterior_cpp(Rcpp::IntegerMatrix karyotypes,
     }
   }
 
-  if (lambda_l_grid.size() == 0) lambda_l_grid = Rcpp::NumericVector::create(1.0);
-  if (lambda_e_grid.size() == 0) lambda_e_grid = Rcpp::NumericVector::create(0.25);
-  if (sigma_obs_grid.size() == 0) sigma_obs_grid = Rcpp::NumericVector::create(0.05);
+  if (lambda_l_grid.size() == 0 || lambda_e_grid.size() == 0 || sigma_obs_grid.size() == 0) {
+    Rcpp::stop("Hyperparameter grids must be non-empty.");
+  }
 
   std::vector<int> component = graph_components(karyotypes.nrow(), edge_from, edge_to);
   std::vector<int> component_anchor_count = anchor_component_counts(anchor0, component);
   int cv_evaluable = cv_evaluable_anchors(anchor0, component, component_anchor_count);
-  bool tune_by_cv = anchor0.size() >= 3 && cv_evaluable >= 3;
+  bool fixed_hyperparameters = lambda_l_grid.size() == 1 &&
+    lambda_e_grid.size() == 1 &&
+    sigma_obs_grid.size() == 1;
+  bool tune_by_cv = !fixed_hyperparameters && anchor0.size() >= 3 && cv_evaluable >= 3;
   int cv_skipped = anchor0.size() - cv_evaluable;
+  int cv_report_evaluated = tune_by_cv ? cv_evaluable : 0;
+  int cv_report_skipped = tune_by_cv ? cv_skipped : 0;
   std::string cv_status;
-  if (anchor0.size() < 3) {
+  if (fixed_hyperparameters) {
+    cv_status = "fixed_hyperparameters";
+  } else if (anchor0.size() < 3) {
     cv_status = "insufficient_anchors";
   } else if (cv_evaluable < 3) {
     cv_status = "insufficient_component_anchors";
@@ -316,10 +312,13 @@ Rcpp::List alfak2_graph_posterior_cpp(Rcpp::IntegerMatrix karyotypes,
   } else {
     cv_status = "ok";
   }
+  if (!fixed_hyperparameters && !tune_by_cv) {
+    Rcpp::stop("Graph hyperparameter tuning cannot run: " + cv_status);
+  }
   double best_score = tune_by_cv ? std::numeric_limits<double>::infinity() : NA_REAL;
-  double best_l = tune_by_cv ? lambda_l_grid[0] : middle_grid_value(lambda_l_grid, 1.0);
-  double best_e = tune_by_cv ? lambda_e_grid[0] : middle_grid_value(lambda_e_grid, 0.25);
-  double best_s = tune_by_cv ? sigma_obs_grid[0] : middle_grid_value(sigma_obs_grid, 0.05);
+  double best_l = lambda_l_grid[0];
+  double best_e = lambda_e_grid[0];
+  double best_s = sigma_obs_grid[0];
   Rcpp::DataFrame grid = Rcpp::DataFrame::create();
   std::vector<double> gl, ge, gs, score;
   for (double l : lambda_l_grid) {
@@ -330,7 +329,7 @@ Rcpp::List alfak2_graph_posterior_cpp(Rcpp::IntegerMatrix karyotypes,
                         anchor0, anchor_mean, anchor_var,
                         component, component_anchor_count,
                         l, e, s, eps) :
-          CvScoreResult{NA_REAL, 0, cv_skipped};
+          CvScoreResult{NA_REAL, 0, cv_report_skipped};
         double sc = cv.score;
         gl.push_back(l); ge.push_back(e); gs.push_back(s); score.push_back(sc);
         if (tune_by_cv && R_finite(sc) && sc < best_score) {
@@ -339,6 +338,10 @@ Rcpp::List alfak2_graph_posterior_cpp(Rcpp::IntegerMatrix karyotypes,
         }
       }
     }
+  }
+
+  if (tune_by_cv && !R_finite(best_score)) {
+    Rcpp::stop("Graph hyperparameter tuning failed: all CV scores are non-finite.");
   }
 
   GraphSolveResult final = solve_graph(karyotypes, edge_from, edge_to, edge_weight,
@@ -359,8 +362,8 @@ Rcpp::List alfak2_graph_posterior_cpp(Rcpp::IntegerMatrix karyotypes,
     Rcpp::Named("sigma_obs") = best_s,
     Rcpp::Named("cv_score") = best_score,
     Rcpp::Named("cv_status") = cv_status,
-    Rcpp::Named("cv_evaluated") = cv_evaluable,
-    Rcpp::Named("cv_skipped") = cv_skipped,
+    Rcpp::Named("cv_evaluated") = cv_report_evaluated,
+    Rcpp::Named("cv_skipped") = cv_report_skipped,
     Rcpp::Named("grid") = Rcpp::DataFrame::create(
       Rcpp::Named("lambda_l") = gl,
       Rcpp::Named("lambda_e") = ge,

@@ -48,10 +48,9 @@ with_grf_seed <- function(seed, expr) {
 
 format_grf_labels <- function(karyotypes) {
   if (exists("format_karyotypes", mode = "function")) {
-    out <- try(format_karyotypes(karyotypes), silent = TRUE)
-    if (!inherits(out, "try-error")) return(as.character(out))
+    return(as.character(format_karyotypes(karyotypes)))
   }
-  apply(karyotypes, 1L, paste, collapse = ".")
+  stop("`format_grf_labels()` requires `format_karyotypes()`.", call. = FALSE)
 }
 
 coerce_grf_karyotypes <- function(karyotypes, n_chr = NULL) {

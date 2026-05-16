@@ -27,6 +27,10 @@ load_alfak2_for_benchmark <- function(repo_dir) {
   invisible(TRUE)
 }
 
+`%||%` <- function(x, y) {
+  if (is.null(x) || !length(x)) y else x
+}
+
 ensure_benchmark_dirs <- function(repo_dir, subdir = "real_samples") {
   out <- list(
     results = file.path(repo_dir, "benchmark", "results", subdir),
@@ -262,33 +266,26 @@ alfak2_heldout_xval <- function(fit,
     heldout_local <- fit$local
     heldout_local$summary <- local_summary[!(as.character(local_summary$karyotype) %in% test_labels), , drop = FALSE]
     if (nrow(heldout_local$summary) < 2L) {
-      detail[[i]] <- data.frame(
-        fold = fold,
-        k = test_labels,
-        state_class = ifelse(test_labels %in% direct_labels, "fq", "nn"),
-        validation = local_summary$fitness_mean[match(test_labels, local_summary$karyotype)],
-        estimate = NA_real_,
-        stringsAsFactors = FALSE
-      )
-      next
+      stop("Heldout xval fold has fewer than two training anchors: ", fold, call. = FALSE)
     }
-    pred_fit <- try(
-      alfak2::fit_graph_posterior(
-        heldout_local,
-        global_graph,
-        lambda_l_grid = hp$lambda_l,
-        lambda_e_grid = hp$lambda_e,
-        sigma_obs_grid = hp$sigma_obs
-      ),
-      silent = TRUE
+    diag <- fit$diagnostics
+    pred_fit <- alfak2::fit_graph_posterior(
+      heldout_local,
+      global_graph,
+      lambda_l_grid = hp$lambda_l,
+      lambda_e_grid = hp$lambda_e,
+      sigma_obs_grid = hp$sigma_obs,
+      graph_edge_weight = hp$graph_edge_weight %||% diag$graph_edge_weight %||% "mutation",
+      anchor_support_tiers = hp$anchor_support_tiers %||% diag$anchor_support_tiers %||% "all",
+      anchor_count_reference = hp$anchor_count_reference %||% diag$anchor_count_reference,
+      anchor_count_power = hp$anchor_count_power %||% diag$anchor_count_power %||% 1,
+      anchor_min_effective_count = hp$anchor_min_effective_count %||% diag$anchor_min_effective_count %||% 0
     )
     validation <- local_summary$fitness_mean[match(test_labels, local_summary$karyotype)]
     estimate <- rep(NA_real_, length(test_labels))
-    if (!inherits(pred_fit, "try-error")) {
-      idx <- match(test_labels, as.character(pred_fit$summary$karyotype))
-      ok <- !is.na(idx)
-      estimate[ok] <- pred_fit$summary$fitness_mean[idx[ok]]
-    }
+    idx <- match(test_labels, as.character(pred_fit$summary$karyotype))
+    ok <- !is.na(idx)
+    estimate[ok] <- pred_fit$summary$fitness_mean[idx[ok]]
     detail[[i]] <- data.frame(
       fold = fold,
       k = test_labels,
@@ -335,8 +332,11 @@ real_fit_parameters <- function(min_total_count,
                                 input_depth,
                                 effective_depth,
                                 effective_depth_mode,
+                                effective_depth_rounding,
+                                effective_depth_seed,
                                 observation_model,
                                 dm_concentration,
+                                observation_weight_mode,
                                 alfakR_scale,
                                 legacy_n0,
                                 legacy_nb,
@@ -354,8 +354,11 @@ real_fit_parameters <- function(min_total_count,
     input_depth = as.character(input_depth)[1],
     effective_depth = if (is.null(effective_depth)) NA_real_ else as.numeric(effective_depth),
     effective_depth_mode = as.character(effective_depth_mode)[1],
+    effective_depth_rounding = as.character(effective_depth_rounding)[1],
+    effective_depth_seed = if (is.null(effective_depth_seed)) NA_integer_ else as.integer(effective_depth_seed),
     observation_model = if (is.null(observation_model)) NA_character_ else as.character(observation_model)[1],
-    dm_concentration = if (is.null(dm_concentration)) NA_real_ else as.numeric(dm_concentration),
+    dm_concentration = if (is.null(dm_concentration)) NA_real_ else paste(as.numeric(dm_concentration), collapse = ","),
+    observation_weight_mode = as.character(observation_weight_mode)[1],
     alfakR_scale = isTRUE(alfakR_scale),
     legacy_n0 = if (is.null(legacy_n0)) NA_real_ else as.numeric(legacy_n0),
     legacy_nb = if (is.null(legacy_nb)) NA_real_ else as.numeric(legacy_nb),
@@ -372,7 +375,8 @@ fit_parameters_match <- function(bundle, expected) {
   all(vapply(keys, function(k) {
     a <- actual[[k]]
     b <- expected[[k]]
-    if (is.numeric(a) || is.numeric(b) || is.integer(a) || is.integer(b)) {
+    if ((is.numeric(a) || is.numeric(b) || is.integer(a) || is.integer(b)) &&
+        length(a) == length(b)) {
       isTRUE(all.equal(as.numeric(a), as.numeric(b), tolerance = 1e-12))
     } else {
       identical(a, b)
@@ -393,8 +397,11 @@ fit_real_patient_alfak2 <- function(repo_dir,
                                     input_depth = "raw",
                                     effective_depth = NULL,
                                     effective_depth_mode = "min",
+                                    effective_depth_rounding = "hash",
+                                    effective_depth_seed = NULL,
                                     observation_model = NULL,
                                     dm_concentration = NULL,
+                                    observation_weight_mode = "likelihood",
                                     alfakR_scale = TRUE,
                                     legacy_n0 = 1e5,
                                     legacy_nb = 1e7,
@@ -427,8 +434,11 @@ fit_real_patient_alfak2 <- function(repo_dir,
     input_depth = input_depth,
     effective_depth = effective_depth,
     effective_depth_mode = effective_depth_mode,
+    effective_depth_rounding = effective_depth_rounding,
+    effective_depth_seed = effective_depth_seed,
     observation_model = observation_model,
     dm_concentration = dm_concentration,
+    observation_weight_mode = observation_weight_mode,
     alfakR_scale = alfakR_scale,
     legacy_n0 = legacy_n0,
     legacy_nb = legacy_nb,
@@ -493,8 +503,11 @@ fit_real_patient_alfak2 <- function(repo_dir,
     input_depth = input_depth,
     effective_depth = effective_depth,
     effective_depth_mode = effective_depth_mode,
+    effective_depth_rounding = effective_depth_rounding,
+    effective_depth_seed = effective_depth_seed,
     observation_model = observation_model,
     dm_concentration = dm_concentration,
+    observation_weight_mode = observation_weight_mode,
     alfakR_scale = alfakR_scale,
     n0 = legacy_n0,
     nb = legacy_nb,
@@ -549,21 +562,14 @@ selected_real_patient_ids <- function(repo_dir, patient_subset = NULL) {
 
 run_real_sample_landscapes <- function(repo_dir,
                                        patient_subset = NULL,
-                                       continue_on_error = TRUE,
+                                       continue_on_error = FALSE,
                                        ...) {
+  if (isTRUE(continue_on_error)) {
+    stop("`continue_on_error = TRUE` is disabled; benchmark runs now stop on the first failure.", call. = FALSE)
+  }
   pids <- selected_real_patient_ids(repo_dir, patient_subset = patient_subset)
   names(pids) <- pids
-  out <- lapply(pids, function(pid) {
-    tryCatch(
-      fit_real_patient_alfak2(repo_dir, pid, ...),
-      error = function(e) {
-        if (!continue_on_error) stop(e)
-        warning("Skipping ", pid, ": ", conditionMessage(e), call. = FALSE)
-        NULL
-      }
-    )
-  })
-  out[!vapply(out, is.null, logical(1))]
+  lapply(pids, function(pid) fit_real_patient_alfak2(repo_dir, pid, ...))
 }
 
 run_real_sample_landscape_grid <- function(repo_dir,
@@ -571,8 +577,11 @@ run_real_sample_landscape_grid <- function(repo_dir,
                                            min_total_count_grid = c(5L, 10L, 20L),
                                            parallel_workers = 1L,
                                            output_root = "real_samples",
-                                           continue_on_error = TRUE,
+                                           continue_on_error = FALSE,
                                            ...) {
+  if (isTRUE(continue_on_error)) {
+    stop("`continue_on_error = TRUE` is disabled; benchmark grids now stop on the first failure.", call. = FALSE)
+  }
   pids <- selected_real_patient_ids(repo_dir, patient_subset = patient_subset)
   min_total_count_grid <- as.integer(min_total_count_grid)
   if (!length(min_total_count_grid) || anyNA(min_total_count_grid) || any(min_total_count_grid < 1L)) {
@@ -590,43 +599,35 @@ run_real_sample_landscape_grid <- function(repo_dir,
   run_one <- function(i) {
     task <- tasks[i, , drop = FALSE]
     out_subdir <- file.path(output_root, paste0("MINOBS_", task$min_total_count))
-    tryCatch(
-      {
-        bundle <- fit_real_patient_alfak2(
-          repo_dir = repo_dir,
-          patient_id = task$patient_id,
-          min_total_count = task$min_total_count,
-          output_subdir = out_subdir,
-          ...
-        )
-        bundle$task_id <- task$task_id
-        bundle$min_total_count <- task$min_total_count
-        bundle$output_subdir <- out_subdir
-        bundle
-      },
-      error = function(e) {
-        if (!continue_on_error) stop(e)
-        warning("Skipping ", task$task_id, ": ", conditionMessage(e), call. = FALSE)
-        NULL
-      }
+    bundle <- fit_real_patient_alfak2(
+      repo_dir = repo_dir,
+      patient_id = task$patient_id,
+      min_total_count = task$min_total_count,
+      output_subdir = out_subdir,
+      ...
     )
+    bundle$task_id <- task$task_id
+    bundle$min_total_count <- task$min_total_count
+    bundle$output_subdir <- out_subdir
+    bundle
   }
 
   idx <- seq_len(nrow(tasks))
   parallel_workers <- suppressWarnings(as.numeric(parallel_workers)[1])
-  if (is.na(parallel_workers) || parallel_workers < 1) parallel_workers <- 1
+  if (is.na(parallel_workers) || parallel_workers < 1) {
+    stop("`parallel_workers` must be a positive number.", call. = FALSE)
+  }
   if (is.infinite(parallel_workers)) parallel_workers <- length(idx)
   parallel_workers <- as.integer(min(parallel_workers, length(idx)))
+  if (parallel_workers > 1L && .Platform$OS.type == "windows") {
+    stop("Forked parallelism is unavailable on Windows; set `parallel_workers = 1`.", call. = FALSE)
+  }
   if (parallel_workers > 1L && .Platform$OS.type != "windows") {
     out <- parallel::mclapply(idx, run_one, mc.cores = parallel_workers)
   } else {
-    if (parallel_workers > 1L && .Platform$OS.type == "windows") {
-      warning("Forked parallelism is unavailable on Windows; running tasks serially.", call. = FALSE)
-    }
     out <- lapply(idx, run_one)
   }
   names(out) <- tasks$task_id
-  out <- out[!vapply(out, is.null, logical(1))]
   out
 }
 

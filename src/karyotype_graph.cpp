@@ -137,7 +137,7 @@ Rcpp::List alfak2_build_graph_cpp(Rcpp::CharacterVector labels,
     parent_weight.push_back(e.weight);
   }
   if (ctx_labels.empty()) {
-    ctx_labels.push_back("fallback");
+    ctx_labels.push_back("baseline");
     ctx_group.push_back(0);
   }
 

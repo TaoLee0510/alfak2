@@ -28,7 +28,9 @@ fit_graph_posterior(
 \item{graph}{Bounded global \code{alfak2_graph}.}
 
 \item{lambda_l_grid, lambda_e_grid, sigma_obs_grid}{Hyperparameter grids for
-compiled leave-one-anchor-out tuning.}
+compiled leave-one-anchor-out tuning. Supplying one value for each grid uses
+fixed hyperparameters; multi-value grids require enough evaluable anchors and
+abort rather than substituting default values.}
 
 \item{eps}{Diagonal numerical stabilizer.}
 

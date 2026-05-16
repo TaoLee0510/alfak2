@@ -27,6 +27,68 @@ validate_scalar <- function(x, name, lower = -Inf, upper = Inf) {
   invisible(x)
 }
 
+validate_positive_grid <- function(x, name, lower = .Machine$double.eps) {
+  if (!is.numeric(x) || !length(x) || any(!is.finite(x)) || any(x < lower)) {
+    stop(sprintf("`%s` must contain finite values >= %s.", name, lower), call. = FALSE)
+  }
+  as.numeric(x)
+}
+
 match_observation_model <- function(x) {
   match.arg(x, c("multinomial", "dirichlet_multinomial"))
+}
+
+match_observation_weight_mode <- function(x) {
+  match.arg(x, c("likelihood", "fractional_count"))
+}
+
+alfak2_error_log_dir <- function() {
+  env_dir <- Sys.getenv("ALFAK2_ERROR_LOG_DIR", unset = NA_character_)
+  opt_dir <- getOption("alfak2.error_log_dir", default = NULL)
+  out <- if (!is.na(env_dir) && nzchar(env_dir)) env_dir else opt_dir
+  if (is.null(out)) out <- file.path(tempdir(), "alfak2_error_logs")
+  out
+}
+
+alfak2_write_error_log <- function(message, diagnostics = list()) {
+  log_dir <- alfak2_error_log_dir()
+  dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
+  stamp <- format(Sys.time(), "%Y%m%d_%H%M%OS3")
+  stamp <- gsub("[^0-9A-Za-z_.-]+", "_", stamp)
+  path <- file.path(log_dir, paste0("alfak2_error_", stamp, "_", Sys.getpid(), ".rds"))
+  saveRDS(
+    list(
+      timestamp = Sys.time(),
+      message = message,
+      diagnostics = diagnostics
+    ),
+    path
+  )
+  path
+}
+
+alfak2_abort <- function(message, diagnostics = list()) {
+  log_error <- NULL
+  log_path <- tryCatch(
+    alfak2_write_error_log(message, diagnostics),
+    error = function(e) {
+      log_error <<- conditionMessage(e)
+      NA_character_
+    }
+  )
+  if (!is.na(log_path)) {
+    message <- paste0(message, " Diagnostics were written to: ", log_path)
+  } else if (!is.null(log_error)) {
+    message <- paste0(message, " Diagnostic log write failed: ", log_error)
+  }
+  stop(structure(
+    list(
+      message = message,
+      call = NULL,
+      diagnostics = diagnostics,
+      log_path = log_path,
+      log_error = log_error
+    ),
+    class = c("alfak2_error", "error", "condition")
+  ))
 }

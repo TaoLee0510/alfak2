@@ -37,11 +37,20 @@
 #' @param effective_depth_mode Effective-depth rule. `"min"` uses the smaller raw
 #'   timepoint depth for both columns, `"cap"` caps each raw depth at
 #'   `effective_depth`, and `"fixed"` uses `effective_depth` for every timepoint.
+#' @param effective_depth_rounding Rounding rule for effective-depth expected
+#'   counts. `"hash"` uses deterministic label-based tie breaking,
+#'   `"largest_remainder"` preserves row-order tie breaking, and `"stochastic"`
+#'   samples remainders with `effective_depth_seed`.
+#' @param effective_depth_seed Optional seed used only by stochastic
+#'   effective-depth rounding.
 #' @param observation_model Optional observation model passed to
 #'   `fit_local_posterior()`. If omitted, raw input uses `"multinomial"` and
 #'   effective-depth input uses `"dirichlet_multinomial"`.
-#' @param dm_concentration Optional Dirichlet-multinomial concentration. If omitted,
-#'   effective-depth Dirichlet-multinomial fits use 50 and other fits use 200.
+#' @param dm_concentration Optional Dirichlet-multinomial concentration value or
+#'   grid. If omitted, effective-depth Dirichlet-multinomial fits use 50 and other
+#'   fits use 200.
+#' @param observation_weight_mode How observation weights enter the
+#'   Dirichlet-multinomial likelihood. See `fit_local_posterior()`.
 #' @param alfakR_scale Logical; if `TRUE`, append `alfakR`-scale legacy fitness
 #'   columns without changing the native `alfak2` posterior estimates.
 #' @param n0,nb Initial and final population sizes used to calibrate the
@@ -85,8 +94,11 @@ fit_alfak2 <- function(counts,
                        input_depth = c("raw", "effective"),
                        effective_depth = NULL,
                        effective_depth_mode = c("min", "cap", "fixed"),
+                       effective_depth_rounding = c("hash", "largest_remainder", "stochastic"),
+                       effective_depth_seed = NULL,
                        observation_model = NULL,
                        dm_concentration = NULL,
+                       observation_weight_mode = c("likelihood", "fractional_count"),
                        alfakR_scale = FALSE,
                        n0 = NULL,
                        nb = NULL,
@@ -101,6 +113,8 @@ fit_alfak2 <- function(counts,
   effective_depth_mode <- modes$effective_depth_mode
   graph_edge_weight <- match.arg(graph_edge_weight)
   transition_kernel <- match.arg(transition_kernel)
+  effective_depth_rounding <- match.arg(effective_depth_rounding)
+  observation_weight_mode <- match_observation_weight_mode(observation_weight_mode)
   obs_controls <- resolve_fit_observation_controls(input_depth, observation_model, dm_concentration)
   legacy_weight <- match.arg(legacy_weight)
 
@@ -110,7 +124,9 @@ fit_alfak2 <- function(counts,
     beta = beta,
     input_depth = input_depth,
     effective_depth = effective_depth,
-    effective_depth_mode = effective_depth_mode
+    effective_depth_mode = effective_depth_mode,
+    effective_depth_rounding = effective_depth_rounding,
+    effective_depth_seed = effective_depth_seed
   )
   local_graph <- build_karyotype_graph(
     data,
@@ -125,6 +141,7 @@ fit_alfak2 <- function(counts,
     local_graph,
     observation_model = obs_controls$observation_model,
     dm_concentration = obs_controls$dm_concentration,
+    observation_weight_mode = observation_weight_mode,
     ...
   )
   global_graph <- build_karyotype_graph(
@@ -161,7 +178,9 @@ fit_alfak2 <- function(counts,
       backend = c(local = "TMB", global = "RcppEigen"),
       input_depth = input_depth_diag,
       observation_model = obs_controls$observation_model,
-      dm_concentration = obs_controls$dm_concentration,
+      observation_weight_mode = observation_weight_mode,
+      dm_concentration = local$diagnostics$dm_concentration,
+      dm_concentration_grid = obs_controls$dm_concentration,
       transition_kernel = transition_kernel,
       graph_edge_weight = graph_edge_weight,
       anchor_support_tiers = anchor_support_tiers,

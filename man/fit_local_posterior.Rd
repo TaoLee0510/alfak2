@@ -9,8 +9,9 @@ fit_local_posterior(
   graph = NULL,
   observation_model = c("multinomial", "dirichlet_multinomial"),
   dm_concentration = 200,
+  observation_weight_mode = c("likelihood", "fractional_count"),
   control = list(eval.max = 500, iter.max = 500),
-  gradient_tolerance = 0.001,
+  gradient_tolerance = Inf,
   retry_on_untrusted_covariance = TRUE,
   retry_control = list(eval.max = 2000, iter.max = 2000),
   eta_prior_sd = 5,
@@ -26,12 +27,20 @@ fit_local_posterior(
 
 \item{observation_model}{\code{"multinomial"} or \code{"dirichlet_multinomial"}.}
 
-\item{dm_concentration}{Dirichlet-multinomial concentration when requested.}
+\item{dm_concentration}{Dirichlet-multinomial concentration value or grid when
+requested. Multiple values are fit explicitly and the finite objective minimum
+is selected.}
+
+\item{observation_weight_mode}{How observation weights enter the
+Dirichlet-multinomial likelihood. \code{"likelihood"} uses a weighted likelihood
+score that preserves the original count scale; \code{"fractional_count"} uses the
+historical fractional-count pseudo-likelihood.}
 
 \item{control}{List passed to \code{stats::nlminb}.}
 
 \item{gradient_tolerance}{Maximum absolute gradient tolerated before TMB
-covariance is marked untrusted.}
+covariance is marked untrusted. Set to \code{Inf} to rely on optimizer
+convergence and finite \code{sdreport} uncertainty.}
 
 \item{retry_on_untrusted_covariance}{Whether to retry with \code{retry_control}
 when the first optimizer pass does not yield trusted covariance.}

@@ -55,13 +55,7 @@ test_that("local TMB fit smoke test returns finite intervals and tiers", {
   expect_lt(sum(fit$summary$pi0[fit$summary$support_distance > 0]), 0.05)
   expect_lt(sum(fit$summary$pi1[fit$summary$support_distance > 0]), 0.1)
   expect_gt(fit$diagnostics$eta_prior$n_borrowed_shrunk, 0)
-  expect_true(fit$diagnostics$covariance_status %in% c(
-    "TMB_sdreport",
-    "untrusted_nonconverged",
-    "untrusted_gradient",
-    "untrusted_sdreport_missing",
-    "untrusted_sdreport_nonfinite"
-  ))
+  expect_equal(fit$diagnostics$covariance_status, "TMB_sdreport")
 })
 
 test_that("graph posterior and end-to-end fit smoke tests work", {
@@ -141,26 +135,49 @@ test_that("dirichlet-multinomial uses explicit weighted likelihood when observat
     control = list(eval.max = 120, iter.max = 120)
   )
   expect_equal(fit$diagnostics$observation_model, "dirichlet_multinomial")
-  expect_equal(fit$diagnostics$likelihood_model, "weighted_dirichlet_multinomial")
+  expect_equal(fit$diagnostics$likelihood_model, "weighted_dirichlet_multinomial_likelihood")
+  expect_equal(fit$diagnostics$observation_weight_mode, "likelihood")
 })
 
-test_that("global tuning records insufficient-anchor fallback", {
+test_that("dirichlet-multinomial concentration grids select an explicit finite fit", {
+  counts <- stable_counts_input()
+  dat <- prepare_alfak2_data(counts, dt = 1, beta = 0.01)
+  graph <- build_karyotype_graph(dat, shell_depth = 1, min_cn = 1, max_cn = 3, max_nodes = 200)
+  fit <- fit_local_posterior(
+    dat,
+    graph,
+    observation_model = "dirichlet_multinomial",
+    dm_concentration = c(25, 50),
+    control = list(eval.max = 120, iter.max = 120)
+  )
+  expect_true(fit$diagnostics$dm_concentration %in% c(25, 50))
+  expect_equal(fit$diagnostics$dm_concentration_grid, c(25, 50))
+  expect_true(all(is.finite(fit$diagnostics$dm_concentration_objective)))
+})
+
+test_that("global tuning stops when CV is requested without enough anchors", {
   counts <- stable_counts_input()[1:2, , drop = FALSE]
   dat <- prepare_alfak2_data(counts, dt = 1, beta = 0.01)
   graph <- build_karyotype_graph(dat, shell_depth = 0, min_cn = 1, max_cn = 3, max_nodes = 20)
   local <- fit_local_posterior(dat, graph, control = list(eval.max = 120, iter.max = 120))
-  gp <- fit_graph_posterior(
-    local,
-    graph,
-    lambda_l_grid = c(0.2, 1, 5),
-    lambda_e_grid = c(0.05, 0.25, 1),
-    sigma_obs_grid = c(0.02, 0.05, 0.1)
+  expect_error(
+    fit_graph_posterior(
+      local,
+      graph,
+      lambda_l_grid = c(0.2, 1, 5),
+      lambda_e_grid = c(0.05, 0.25, 1),
+      sigma_obs_grid = c(0.02, 0.05, 0.1)
+    ),
+    class = "alfak2_error"
   )
 
-  expect_equal(gp$diagnostics$cv_status, "insufficient_anchors")
+  gp <- fit_graph_posterior(local, graph, lambda_l_grid = 1, lambda_e_grid = 0.25, sigma_obs_grid = 0.05)
+  expect_equal(gp$diagnostics$cv_status, "fixed_hyperparameters")
   expect_equal(gp$hyperparameters$lambda_l, 1)
   expect_equal(gp$hyperparameters$lambda_e, 0.25)
   expect_equal(gp$hyperparameters$sigma_obs, 0.05)
+  expect_equal(gp$diagnostics$cv_evaluated, 0)
+  expect_equal(gp$diagnostics$cv_skipped, 0)
   expect_true(all(is.na(gp$tuning_grid$score)))
 })
 
@@ -204,19 +221,21 @@ test_that("global tuning skips heldout anchors without component support", {
   expect_true(all(is.finite(gp$tuning_grid$score)))
 })
 
-test_that("untrusted local covariance uses finite fallback uncertainty", {
+test_that("untrusted local covariance aborts with a diagnostic log", {
   dat <- prepare_alfak2_data(stable_counts_input(), dt = 1, beta = 0.01)
   graph <- build_karyotype_graph(dat, shell_depth = 1, min_cn = 1, max_cn = 3, max_nodes = 200)
-  fit <- fit_local_posterior(
-    dat,
-    graph,
-    control = list(eval.max = 1, iter.max = 1),
-    retry_on_untrusted_covariance = FALSE
+  err <- expect_error(
+    fit_local_posterior(
+      dat,
+      graph,
+      control = list(eval.max = 1, iter.max = 1),
+      retry_on_untrusted_covariance = FALSE
+    ),
+    class = "alfak2_error"
   )
-  expect_true(fit$diagnostics$covariance_fallback)
-  expect_equal(fit$diagnostics$fitness_sd_source, "fallback_prior_scale")
-  expect_true(all(is.finite(fit$summary$fitness_sd)))
-  expect_true(all(is.finite(fit$summary$conf_low)))
+  expect_true(file.exists(err$log_path))
+  log <- readRDS(err$log_path)
+  expect_equal(log$diagnostics$stage, "local_covariance")
 })
 
 test_that("sparse stochastic stress input does not leak non-finite local intervals", {
