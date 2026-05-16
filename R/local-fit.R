@@ -44,6 +44,25 @@ assess_local_covariance <- function(attempt, gradient_tolerance) {
   "TMB_sdreport"
 }
 
+fallback_local_fitness_sd <- function(report, support_distance) {
+  sigma_anchor <- if (!inherits(report, "try-error") && !is.null(report$sigma_anchor)) {
+    as.numeric(report$sigma_anchor)[1]
+  } else {
+    NA_real_
+  }
+  sigma_neighbor <- if (!inherits(report, "try-error") && !is.null(report$sigma_neighbor)) {
+    as.numeric(report$sigma_neighbor)[1]
+  } else {
+    NA_real_
+  }
+  if (!is.finite(sigma_anchor) || sigma_anchor <= 0) sigma_anchor <- 1
+  if (!is.finite(sigma_neighbor) || sigma_neighbor <= 0) sigma_neighbor <- sigma_anchor
+
+  out <- ifelse(support_distance == 0L, sigma_anchor, sigma_neighbor)
+  out[support_distance >= 2L] <- out[support_distance >= 2L] * 1.75
+  pmax(as.numeric(out), .Machine$double.eps)
+}
+
 local_attempt_diagnostics <- function(attempt, covariance_status) {
   list(
     convergence = attempt$opt$convergence,
@@ -277,17 +296,21 @@ fit_local_posterior <- function(data,
       attempt <- retry_attempt
       covariance_status <- retry_status
     }
-    if (!identical(covariance_status, "TMB_sdreport")) {
-      alfak2_abort(
-        "Local TMB covariance is untrusted; aborting without substituting prior-scale uncertainty.",
-        diagnostics = list(
-          stage = "local_covariance",
-          dm_concentration = as.numeric(phi),
-          covariance_status = covariance_status,
-          retry_attempted = retry_attempted,
-          retry_reason = retry_reason,
-          attempts = attempts
-        )
+    covariance_fallback <- !identical(covariance_status, "TMB_sdreport")
+    warning_log_path <- NA_character_
+    warning_diagnostics <- NULL
+    if (isTRUE(covariance_fallback)) {
+      warning_diagnostics <- list(
+        stage = "local_covariance",
+        dm_concentration = as.numeric(phi),
+        covariance_status = covariance_status,
+        retry_attempted = retry_attempted,
+        retry_reason = retry_reason,
+        attempts = attempts
+      )
+      warning_log_path <- alfak2_warn(
+        "Local TMB covariance is untrusted; using prior-scale uncertainty fallback.",
+        diagnostics = warning_diagnostics
       )
     }
     report <- try(obj$report(attempt$opt$par), silent = TRUE)
@@ -313,7 +336,12 @@ fit_local_posterior <- function(data,
         )
       )
     }
-    f_sd <- as.numeric(attempt$frep$sd)
+    fitness_sd_source <- if (isTRUE(covariance_fallback)) "fallback_prior_scale" else "TMB_sdreport"
+    f_sd <- if (isTRUE(covariance_fallback)) {
+      fallback_local_fitness_sd(report, graph$support_distance)
+    } else {
+      as.numeric(attempt$frep$sd)
+    }
     bad_sd <- !is.finite(f_sd) | f_sd <= 0
     if (any(bad_sd)) {
       alfak2_abort(
@@ -335,7 +363,12 @@ fit_local_posterior <- function(data,
       retry_attempted = retry_attempted,
       retry_reason = retry_reason,
       report = report,
-      objective = as.numeric(attempt$opt$objective)
+      objective = as.numeric(attempt$opt$objective),
+      f_sd = f_sd,
+      covariance_fallback = covariance_fallback,
+      fitness_sd_source = fitness_sd_source,
+      warning_log_path = warning_log_path,
+      warning_diagnostics = warning_diagnostics
     )
   })
   objectives <- vapply(concentration_results, `[[`, numeric(1), "objective")
@@ -354,6 +387,10 @@ fit_local_posterior <- function(data,
   obj <- selected$obj
   attempt <- selected$attempt
   covariance_status <- selected$covariance_status
+  covariance_fallback <- selected$covariance_fallback
+  fitness_sd_source <- selected$fitness_sd_source
+  warning_log_path <- selected$warning_log_path
+  warning_diagnostics <- selected$warning_diagnostics
   attempts <- selected$attempts
   retry_attempted <- selected$retry_attempted
   retry_reason <- selected$retry_reason
@@ -364,7 +401,7 @@ fit_local_posterior <- function(data,
   report <- selected$report
   pi0_report <- as.numeric(report$pi0)
   pi1_report <- as.numeric(report$pi1)
-  f_sd <- as.numeric(attempt$frep$sd)
+  f_sd <- selected$f_sd
 
   summary <- data.frame(
     node_id = seq_len(n),
@@ -384,6 +421,7 @@ fit_local_posterior <- function(data,
     is_observed = as.logical((y0 + y1) > 0),
     fitness_mean = f_mean,
     fitness_sd = f_sd,
+    fitness_sd_source = fitness_sd_source,
     conf_low = f_mean - 1.959963984540054 * f_sd,
     conf_high = f_mean + 1.959963984540054 * f_sd,
     covariance_status = covariance_status,
@@ -395,7 +433,10 @@ fit_local_posterior <- function(data,
     objective = opt$objective,
     gradient_norm = attempt$gradient_norm,
     covariance_status = covariance_status,
-    fitness_sd_source = "TMB_sdreport",
+    covariance_fallback = covariance_fallback,
+    fitness_sd_source = fitness_sd_source,
+    warning_log_path = warning_log_path,
+    warning_diagnostics = warning_diagnostics,
     retry_attempted = retry_attempted,
     retry_reason = retry_reason,
     attempts = attempts,

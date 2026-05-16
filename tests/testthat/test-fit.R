@@ -221,21 +221,38 @@ test_that("global tuning skips heldout anchors without component support", {
   expect_true(all(is.finite(gp$tuning_grid$score)))
 })
 
-test_that("untrusted local covariance aborts with a diagnostic log", {
+test_that("untrusted local covariance falls back with a warning log", {
   dat <- prepare_alfak2_data(stable_counts_input(), dt = 1, beta = 0.01)
   graph <- build_karyotype_graph(dat, shell_depth = 1, min_cn = 1, max_cn = 3, max_nodes = 200)
-  err <- expect_error(
+  log_dir <- tempfile("alfak2_warning_logs_")
+  old <- options(alfak2.warning_log_dir = log_dir)
+  on.exit(options(old), add = TRUE)
+
+  warnings <- character()
+  fit <- withCallingHandlers(
     fit_local_posterior(
       dat,
       graph,
       control = list(eval.max = 1, iter.max = 1),
       retry_on_untrusted_covariance = FALSE
     ),
-    class = "alfak2_error"
+    warning = function(w) {
+      warnings <<- c(warnings, conditionMessage(w))
+      invokeRestart("muffleWarning")
+    }
   )
-  expect_true(file.exists(err$log_path))
-  log <- readRDS(err$log_path)
-  expect_equal(log$diagnostics$stage, "local_covariance")
+  expect_match(paste(warnings, collapse = "\n"), "using prior-scale uncertainty fallback")
+  expect_true(inherits(fit, "alfak2_local_fit"))
+  expect_equal(fit$diagnostics$covariance_status, "untrusted_nonconverged")
+  expect_true(fit$diagnostics$covariance_fallback)
+  expect_equal(fit$diagnostics$fitness_sd_source, "fallback_prior_scale")
+  expect_true(file.exists(fit$diagnostics$warning_log_path))
+  expect_match(basename(fit$diagnostics$warning_log_path), "\\.log$")
+  expect_true(all(is.finite(fit$summary$fitness_sd)))
+
+  log <- readLines(fit$diagnostics$warning_log_path, warn = FALSE)
+  expect_true(any(grepl("stage", log)))
+  expect_true(any(grepl("local_covariance", log)))
 })
 
 test_that("sparse stochastic stress input does not leak non-finite local intervals", {

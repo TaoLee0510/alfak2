@@ -50,21 +50,61 @@ alfak2_error_log_dir <- function() {
   out
 }
 
-alfak2_write_error_log <- function(message, diagnostics = list()) {
-  log_dir <- alfak2_error_log_dir()
+alfak2_write_condition_log <- function(log_dir, prefix, message, diagnostics = list()) {
   dir.create(log_dir, recursive = TRUE, showWarnings = FALSE)
   stamp <- format(Sys.time(), "%Y%m%d_%H%M%OS3")
   stamp <- gsub("[^0-9A-Za-z_.-]+", "_", stamp)
-  path <- file.path(log_dir, paste0("alfak2_error_", stamp, "_", Sys.getpid(), ".rds"))
-  saveRDS(
-    list(
-      timestamp = Sys.time(),
-      message = message,
-      diagnostics = diagnostics
+  path <- file.path(log_dir, paste0("alfak2_", prefix, "_", stamp, "_", Sys.getpid(), ".log"))
+  diagnostic_lines <- utils::capture.output(str(diagnostics, give.attr = FALSE, vec.len = 50, max.level = 12))
+  writeLines(
+    c(
+      paste0("timestamp: ", format(Sys.time(), "%Y-%m-%d %H:%M:%OS3 %Z")),
+      paste0("pid: ", Sys.getpid()),
+      paste0("type: ", prefix),
+      paste0("message: ", message),
+      "",
+      "diagnostics:",
+      diagnostic_lines
     ),
-    path
+    con = path,
+    useBytes = TRUE
   )
   path
+}
+
+alfak2_write_error_log <- function(message, diagnostics = list()) {
+  alfak2_write_condition_log(alfak2_error_log_dir(), "error", message, diagnostics)
+}
+
+alfak2_warning_log_dir <- function() {
+  env_dir <- Sys.getenv("ALFAK2_WARNING_LOG_DIR", unset = NA_character_)
+  opt_dir <- getOption("alfak2.warning_log_dir", default = NULL)
+  out <- if (!is.na(env_dir) && nzchar(env_dir)) env_dir else opt_dir
+  if (is.null(out)) out <- alfak2_error_log_dir()
+  out
+}
+
+alfak2_write_warning_log <- function(message, diagnostics = list()) {
+  alfak2_write_condition_log(alfak2_warning_log_dir(), "warning", message, diagnostics)
+}
+
+alfak2_warn <- function(message, diagnostics = list()) {
+  log_error <- NULL
+  log_path <- tryCatch(
+    alfak2_write_warning_log(message, diagnostics),
+    error = function(e) {
+      log_error <<- conditionMessage(e)
+      NA_character_
+    }
+  )
+  warning_message <- message
+  if (!is.na(log_path)) {
+    warning_message <- paste0(warning_message, " Diagnostics were written to: ", log_path)
+  } else if (!is.null(log_error)) {
+    warning_message <- paste0(warning_message, " Diagnostic log write failed: ", log_error)
+  }
+  warning(warning_message, call. = FALSE)
+  invisible(log_path)
 }
 
 alfak2_abort <- function(message, diagnostics = list()) {

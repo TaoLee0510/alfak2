@@ -154,7 +154,13 @@ if [[ -n "${SOURCE_INPUT_DIR}" ]]; then
   echo "  source input dir:  ${SOURCE_INPUT_DIR}"
 fi
 echo "  cpus per task:     ${SLURM_CPUS_PER_TASK:-1}"
-echo "  mem per task:      8G"
+if [[ -n "${SLURM_MEM_PER_NODE:-}" ]]; then
+  echo "  mem per task:      ${SLURM_MEM_PER_NODE}M"
+elif [[ -n "${SLURM_MEM_PER_CPU:-}" ]]; then
+  echo "  mem per task:      ${SLURM_MEM_PER_CPU}M per CPU"
+else
+  echo "  mem per task:      unknown"
+fi
 echo "  n_sim:             ${N_SIM}"
 echo "  lambdas:           ${LAMBDAS}"
 echo "  time gaps:         ${TIME_GAPS}"
