@@ -31,6 +31,9 @@ usage <- function() {
     "  --lambdas=0.8\n",
     "  --time-gaps=2,4\n",
     "  --sample-depth=2000\n",
+    "  --grf-centroid-mode=method_blind  # method_blind|nn_initial\n",
+    "  --grf-centroid-min-cn=0\n",
+    "  --grf-centroid-max-cn=4\n",
     "  --time-max=360\n",
     "  --passage-interval=45\n\n",
     "Calibration grid options:\n",
@@ -173,6 +176,14 @@ build_calibration_config <- function(args, repo_dir) {
     drop_diploid = arg_logical(args, "drop_diploid", TRUE),
     k_dim = arg_integer(args, "k_dim", 22L),
     n_centroids = arg_integer(args, "n_centroids", 64L),
+    grf_centroid_mode = normalize_grf_centroid_mode(arg_value(args, "grf_centroid_mode", "method_blind")),
+    grf_centroid_min_cn = arg_integer(args, "grf_centroid_min_cn", 0L),
+    grf_centroid_max_cn = arg_integer(args, "grf_centroid_max_cn", 4L),
+    grf_centroid_jitter_sd = {
+      x <- arg_value(args, "grf_centroid_jitter_sd", NA_character_)
+      y <- suppressWarnings(as.numeric(x))
+      if (is.finite(y)) y else NULL
+    },
     time_max = arg_numeric(args, "time_max", 360),
     passage_interval = arg_numeric(args, "passage_interval", 45),
     sample_depth = arg_integer(args, "sample_depth", 2000L),
@@ -281,6 +292,9 @@ filter_source_input_table <- function(source_tbl, cfg) {
     numeric_in(source_tbl$time_start, cfg$time_starts) &
     numeric_in(source_tbl$time_gap, cfg$time_gaps) &
     source_tbl$minobs %in% cfg$minobs
+  if ("grf_centroid_mode" %in% names(source_tbl)) {
+    keep <- keep & as.character(source_tbl$grf_centroid_mode) == as.character(cfg$grf_centroid_mode)
+  }
   out <- source_tbl[keep, , drop = FALSE]
   out <- out[order(out$simulation_id, out$lambda, out$time_start, out$time_gap, out$minobs), , drop = FALSE]
   if (!nrow(out)) {
@@ -340,6 +354,9 @@ prepare_calibration_inputs_from_source <- function(cfg, dirs) {
         patient_id = row$patient_id,
         grf_key = row$grf_key,
         grf_rds = row$grf_rds,
+        grf_centroid_mode = row_field(row, "grf_centroid_mode", NA_character_),
+        grf_centroid_min_cn = row_field(row, "grf_centroid_min_cn", NA_integer_),
+        grf_centroid_max_cn = row_field(row, "grf_centroid_max_cn", NA_integer_),
         input_rds = row$input_rds,
         input_md5 = row$input_md5,
         minobs = as.integer(row$minobs),
@@ -384,13 +401,14 @@ prepare_calibration_inputs <- function(cfg, dirs, repo_versions) {
   task_idx <- 0L
   param_grid <- make_param_grid(cfg)
   time_axis_label <- paste0("tmax_", path_token(cfg$time_max), "_pint_", path_token(cfg$passage_interval))
+  grf_landscape_label <- grf_landscape_token(cfg)
 
   for (sim_idx in seq_len(cfg$n_sim)) {
     for (lambda_idx in seq_along(cfg$lambdas)) {
       lambda <- cfg$lambdas[[lambda_idx]]
       lambda_label <- format_grf_label(lambda)
       abm_seed <- cfg$seed + sim_idx * 10000L + lambda_idx * 100L
-      grf_key <- paste(sim_idx, lambda_label, time_axis_label, sep = "__")
+      grf_key <- paste(sim_idx, lambda_label, grf_landscape_label, time_axis_label, sep = "__")
       grf_path <- file.path(dirs$cache, paste0("grf_sim_", grf_key, ".rds"))
       use_grf_cache <- !isTRUE(cfg$force_sim) &&
         file.exists(grf_path) &&
@@ -410,7 +428,11 @@ prepare_calibration_inputs <- function(cfg, dirs, repo_versions) {
           abm_pop_size = cfg$abm_pop_size,
           abm_delta_t = cfg$abm_delta_t,
           abm_max_pop = cfg$abm_max_pop,
-          abm_culling_survival = cfg$abm_culling_survival
+          abm_culling_survival = cfg$abm_culling_survival,
+          centroid_mode = cfg$grf_centroid_mode,
+          centroid_min_cn = cfg$grf_centroid_min_cn,
+          centroid_max_cn = cfg$grf_centroid_max_cn,
+          centroid_jitter_sd = cfg$grf_centroid_jitter_sd
         )
         saveRDS(out, grf_path)
         out
@@ -419,7 +441,7 @@ prepare_calibration_inputs <- function(cfg, dirs, repo_versions) {
       for (time_start in cfg$time_starts) {
         for (time_gap in cfg$time_gaps) {
           patient_id <- paste0(
-            "grf_", sim_idx, "_lambda_", lambda_label, "_", time_axis_label,
+            "grf_", sim_idx, "_lambda_", lambda_label, "_", grf_landscape_label, "_", time_axis_label,
             "_start_", path_token(time_start), "_gap_", path_token(time_gap)
           )
           input_rds <- file.path(dirs$cache, paste0("input_", patient_id, ".rds"))
@@ -454,6 +476,9 @@ prepare_calibration_inputs <- function(cfg, dirs, repo_versions) {
               patient_id = patient_id,
               grf_key = grf_key,
               grf_rds = grf_path,
+              grf_centroid_mode = cfg$grf_centroid_mode,
+              grf_centroid_min_cn = cfg$grf_centroid_min_cn,
+              grf_centroid_max_cn = cfg$grf_centroid_max_cn,
               input_rds = input_rds,
               input_csv = input_csv,
               input_md5 = input_md5,
@@ -480,6 +505,9 @@ prepare_calibration_inputs <- function(cfg, dirs, repo_versions) {
                 patient_id = patient_id,
                 grf_key = grf_key,
                 grf_rds = grf_path,
+                grf_centroid_mode = cfg$grf_centroid_mode,
+                grf_centroid_min_cn = cfg$grf_centroid_min_cn,
+                grf_centroid_max_cn = cfg$grf_centroid_max_cn,
                 input_rds = input_rds,
                 input_md5 = input_md5,
                 minobs = as.integer(minobs),

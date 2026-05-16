@@ -31,6 +31,9 @@ usage <- function() {
     "  --beta-levels=1e-05,5e-05,1e-04,1e-03,1e-02  # fitted beta grid\n",
     "  --k-dim=22\n",
     "  --n-centroids=64\n",
+    "  --grf-centroid-mode=method_blind  # method_blind|nn_initial\n",
+    "  --grf-centroid-min-cn=0\n",
+    "  --grf-centroid-max-cn=4\n",
     "  --time-max=360\n",
     "  --passage-interval=45\n",
     "  --abm-pop-size=50000\n",
@@ -353,6 +356,29 @@ path_token <- function(x) {
   gsub("[^A-Za-z0-9]+", "p", x)
 }
 
+normalize_grf_centroid_mode <- function(x) {
+  x <- tolower(gsub("-", "_", as.character(x)))
+  if (x %in% c("method_blind", "full_space", "uniform_universe", "stratified_universe")) {
+    return("method_blind")
+  }
+  if (x %in% c("nn_initial", "initial_nn", "legacy")) {
+    return("nn_initial")
+  }
+  stop("Unsupported --grf-centroid-mode: ", x, call. = FALSE)
+}
+
+grf_landscape_token <- function(cfg) {
+  mode <- normalize_grf_centroid_mode(cfg$grf_centroid_mode)
+  if (identical(mode, "method_blind")) {
+    return(paste0(
+      "land_", mode,
+      "_cn", path_token(cfg$grf_centroid_min_cn),
+      "to", path_token(cfg$grf_centroid_max_cn)
+    ))
+  }
+  paste0("land_", mode)
+}
+
 parse_karyotype_ids_base <- function(ids) {
   ids <- as.character(ids)
   if (!length(ids) || any(!nzchar(ids))) stop("Karyotype ids must be non-empty.", call. = FALSE)
@@ -440,6 +466,53 @@ make_nn_grf_centroids <- function(lambda, initial_karyotypes, n_centroids, jitte
   centroids
 }
 
+make_method_blind_grf_centroids <- function(lambda,
+                                            k_dim,
+                                            n_centroids,
+                                            min_cn = 0L,
+                                            max_cn = 4L,
+                                            jitter_sd = NULL) {
+  k_dim <- as.integer(k_dim)
+  n_centroids <- as.integer(n_centroids)
+  min_cn <- as.integer(min_cn)
+  max_cn <- as.integer(max_cn)
+  if (!is.finite(k_dim) || k_dim < 2L) stop("`k_dim` must be an integer >= 2.", call. = FALSE)
+  if (!is.finite(n_centroids) || n_centroids < 1L) {
+    stop("`n_centroids` must be a positive integer.", call. = FALSE)
+  }
+  if (!is.finite(min_cn) || !is.finite(max_cn) || min_cn > max_cn) {
+    stop("GRF centroid CN bounds must be finite and satisfy min <= max.", call. = FALSE)
+  }
+  cn_values <- seq.int(min_cn, max_cn)
+  if (!2L %in% cn_values) {
+    stop("Method-blind GRF centroid universe must include diploid CN=2.", call. = FALSE)
+  }
+  altered_values <- setdiff(cn_values, 2L)
+  if (!length(altered_values)) {
+    stop("Method-blind GRF centroid universe needs at least one non-diploid CN state.", call. = FALSE)
+  }
+  if (is.null(jitter_sd)) jitter_sd <- min(0.15, as.numeric(lambda) * 0.10)
+  if (!is.finite(jitter_sd) || jitter_sd < 0) {
+    stop("`jitter_sd` must be non-negative when supplied.", call. = FALSE)
+  }
+
+  centroids <- matrix(2, nrow = n_centroids, ncol = k_dim)
+  colnames(centroids) <- paste0("chr", seq_len(k_dim))
+  for (i in seq_len(n_centroids)) {
+    # Stratify over Hamming shells around diploid without using observed or NN nodes.
+    shell <- (i - 1L) %% (k_dim + 1L)
+    if (shell > 0L) {
+      chr <- sample.int(k_dim, shell)
+      centroids[i, chr] <- sample(altered_values, shell, replace = TRUE)
+    }
+    if (jitter_sd > 0) {
+      centroids[i, ] <- centroids[i, ] + stats::rnorm(k_dim, mean = 0, sd = jitter_sd)
+      centroids[i, ] <- pmin(as.numeric(max_cn), pmax(as.numeric(min_cn), centroids[i, ]))
+    }
+  }
+  centroids
+}
+
 simulate_nn_prior_grf_abm <- function(seed,
                                       lambda,
                                       p,
@@ -450,14 +523,31 @@ simulate_nn_prior_grf_abm <- function(seed,
                                       abm_pop_size,
                                       abm_delta_t,
                                       abm_max_pop,
-                                      abm_culling_survival) {
+                                      abm_culling_survival,
+                                      centroid_mode = "nn_initial",
+                                      centroid_min_cn = 0L,
+                                      centroid_max_cn = 4L,
+                                      centroid_jitter_sd = NULL) {
   set.seed(seed)
+  centroid_mode <- normalize_grf_centroid_mode(centroid_mode)
   x0 <- make_nn_grf_initial_x0(k_dim = k_dim)
-  centroids <- make_nn_grf_centroids(
-    lambda = lambda,
-    initial_karyotypes = names(x0),
-    n_centroids = n_centroids
-  )
+  centroids <- if (identical(centroid_mode, "method_blind")) {
+    make_method_blind_grf_centroids(
+      lambda = lambda,
+      k_dim = k_dim,
+      n_centroids = n_centroids,
+      min_cn = centroid_min_cn,
+      max_cn = centroid_max_cn,
+      jitter_sd = centroid_jitter_sd
+    )
+  } else {
+    make_nn_grf_centroids(
+      lambda = lambda,
+      initial_karyotypes = names(x0),
+      n_centroids = n_centroids,
+      jitter_sd = centroid_jitter_sd
+    )
+  }
   sim_times <- seq(0, time_max, by = passage_interval)
   if (length(sim_times) < 2L) stop("GRF simulation needs at least two requested timepoints.", call. = FALSE)
   record_interval <- max(1L, as.integer(round(passage_interval / abm_delta_t)))
@@ -480,6 +570,10 @@ simulate_nn_prior_grf_abm <- function(seed,
   list(
     sim_wide = as.data.frame(sim_wide, check.names = FALSE),
     centroids = centroids,
+    centroid_mode = centroid_mode,
+    centroid_min_cn = if (identical(centroid_mode, "method_blind")) as.integer(centroid_min_cn) else NA_integer_,
+    centroid_max_cn = if (identical(centroid_mode, "method_blind")) as.integer(centroid_max_cn) else NA_integer_,
+    centroid_jitter_sd = if (is.null(centroid_jitter_sd)) NA_real_ else as.numeric(centroid_jitter_sd),
     lambda = lambda,
     p = p,
     x0 = x0,
@@ -1326,6 +1420,7 @@ build_config <- function(args, repo_dir) {
   if (length(bad_policies)) stop("Unsupported alfak2 input policies: ", paste(bad_policies, collapse = ", "), call. = FALSE)
   graph_edge_weight <- as.character(arg_value(args, "alfak2_graph_edge_weight", "mutation"))
   graph_edge_weight <- match.arg(graph_edge_weight, c("mutation", "unit", "normalized"))
+  grf_centroid_mode <- normalize_grf_centroid_mode(arg_value(args, "grf_centroid_mode", "method_blind"))
   list(
     repo_dir = repo_dir,
     alfak2_repo = normalizePath(arg_value(args, "alfak2_repo", repo_dir), winslash = "/", mustWork = FALSE),
@@ -1353,6 +1448,14 @@ build_config <- function(args, repo_dir) {
     drop_diploid = arg_logical(args, "drop_diploid", TRUE),
     k_dim = arg_integer(args, "k_dim", 22L),
     n_centroids = arg_integer(args, "n_centroids", 64L),
+    grf_centroid_mode = grf_centroid_mode,
+    grf_centroid_min_cn = arg_integer(args, "grf_centroid_min_cn", 0L),
+    grf_centroid_max_cn = arg_integer(args, "grf_centroid_max_cn", 4L),
+    grf_centroid_jitter_sd = {
+      x <- arg_value(args, "grf_centroid_jitter_sd", NA_character_)
+      y <- suppressWarnings(as.numeric(x))
+      if (is.finite(y)) y else NULL
+    },
     time_max = arg_numeric(args, "time_max", 360),
     passage_interval = arg_numeric(args, "passage_interval", 45),
     sample_depth = arg_integer(args, "sample_depth", 2000L),
@@ -1474,6 +1577,9 @@ filter_source_input_table <- function(source_tbl, cfg) {
   if ("sim_pm" %in% names(source_tbl)) {
     keep <- keep & numeric_in(source_tbl$sim_pm, cfg$pm)
   }
+  if ("grf_centroid_mode" %in% names(source_tbl)) {
+    keep <- keep & as.character(source_tbl$grf_centroid_mode) == as.character(cfg$grf_centroid_mode)
+  }
   out <- source_tbl[keep, , drop = FALSE]
   out <- out[order(out$simulation_id, out$lambda, out$time_start, out$time_gap, out$minobs), , drop = FALSE]
   if (!nrow(out)) {
@@ -1538,6 +1644,9 @@ prepare_benchmark_inputs_from_source <- function(cfg, dirs) {
           patient_id = as.character(row$patient_id),
           grf_key = as.character(row$grf_key),
           grf_rds = as.character(row$grf_rds),
+          grf_centroid_mode = row_field(row, "grf_centroid_mode", NA_character_),
+          grf_centroid_min_cn = row_field(row, "grf_centroid_min_cn", NA_integer_),
+          grf_centroid_max_cn = row_field(row, "grf_centroid_max_cn", NA_integer_),
           input_rds = as.character(row$input_rds),
           input_md5 = as.character(row$input_md5),
           minobs = as.integer(row$minobs),
@@ -1571,6 +1680,9 @@ prepare_benchmark_inputs_from_source <- function(cfg, dirs) {
           patient_id = as.character(row$patient_id),
           grf_key = as.character(row$grf_key),
           grf_rds = as.character(row$grf_rds),
+          grf_centroid_mode = row_field(row, "grf_centroid_mode", NA_character_),
+          grf_centroid_min_cn = row_field(row, "grf_centroid_min_cn", NA_integer_),
+          grf_centroid_max_cn = row_field(row, "grf_centroid_max_cn", NA_integer_),
           input_rds = as.character(row$input_rds),
           input_md5 = as.character(row$input_md5),
           minobs = as.integer(row$minobs),
@@ -1618,13 +1730,14 @@ prepare_benchmark_inputs <- function(cfg, dirs, repo_versions) {
   grf_lookup <- list()
   time_axis_label <- paste0("tmax_", path_token(cfg$time_max), "_pint_", path_token(cfg$passage_interval))
   sim_pm_label <- pm_to_label(cfg$pm)
+  grf_landscape_label <- grf_landscape_token(cfg)
 
   for (sim_idx in seq_len(cfg$n_sim)) {
     for (lambda_idx in seq_along(cfg$lambdas)) {
       lambda <- cfg$lambdas[[lambda_idx]]
       lambda_label <- format_grf_label(lambda)
       abm_seed <- cfg$seed + sim_idx * 10000L + lambda_idx * 100L
-      grf_key <- paste(sim_idx, lambda_label, paste0("simpm_", sim_pm_label), time_axis_label, sep = "__")
+      grf_key <- paste(sim_idx, lambda_label, paste0("simpm_", sim_pm_label), grf_landscape_label, time_axis_label, sep = "__")
       grf_path <- file.path(dirs$cache, paste0("grf_sim_", grf_key, ".rds"))
       grf_sim <- if (!isTRUE(cfg$force_sim) &&
                      file.exists(grf_path) &&
@@ -1643,7 +1756,11 @@ prepare_benchmark_inputs <- function(cfg, dirs, repo_versions) {
           abm_pop_size = cfg$abm_pop_size,
           abm_delta_t = cfg$abm_delta_t,
           abm_max_pop = cfg$abm_max_pop,
-          abm_culling_survival = cfg$abm_culling_survival
+          abm_culling_survival = cfg$abm_culling_survival,
+          centroid_mode = cfg$grf_centroid_mode,
+          centroid_min_cn = cfg$grf_centroid_min_cn,
+          centroid_max_cn = cfg$grf_centroid_max_cn,
+          centroid_jitter_sd = cfg$grf_centroid_jitter_sd
         )
         saveRDS(out, grf_path)
         out
@@ -1652,7 +1769,7 @@ prepare_benchmark_inputs <- function(cfg, dirs, repo_versions) {
 
       for (time_start in cfg$time_starts) {
         for (time_gap in cfg$time_gaps) {
-          patient_id <- paste0("grf_", sim_idx, "_lambda_", lambda_label, "_simpm_", sim_pm_label, "_", time_axis_label, "_start_", path_token(time_start), "_gap_", path_token(time_gap))
+          patient_id <- paste0("grf_", sim_idx, "_lambda_", lambda_label, "_simpm_", sim_pm_label, "_", grf_landscape_label, "_", time_axis_label, "_start_", path_token(time_start), "_gap_", path_token(time_gap))
           input_rds <- file.path(dirs$cache, paste0("input_", patient_id, ".rds"))
           input_csv <- file.path(dirs$cache, paste0("input_", patient_id, ".csv"))
           input_seed <- abm_seed + as.integer(round(time_start * 10)) + as.integer(round(time_gap * 1000))
@@ -1686,6 +1803,9 @@ prepare_benchmark_inputs <- function(cfg, dirs, repo_versions) {
               patient_id = patient_id,
               grf_key = grf_key,
               grf_rds = grf_path,
+              grf_centroid_mode = cfg$grf_centroid_mode,
+              grf_centroid_min_cn = cfg$grf_centroid_min_cn,
+              grf_centroid_max_cn = cfg$grf_centroid_max_cn,
               input_rds = input_rds,
               input_csv = input_csv,
               input_md5 = input_md5,
@@ -1717,6 +1837,9 @@ prepare_benchmark_inputs <- function(cfg, dirs, repo_versions) {
                   patient_id = patient_id,
                   grf_key = grf_key,
                   grf_rds = grf_path,
+                  grf_centroid_mode = cfg$grf_centroid_mode,
+                  grf_centroid_min_cn = cfg$grf_centroid_min_cn,
+                  grf_centroid_max_cn = cfg$grf_centroid_max_cn,
                   input_rds = input_rds,
                   input_md5 = input_md5,
                   minobs = as.integer(minobs),
@@ -1744,6 +1867,9 @@ prepare_benchmark_inputs <- function(cfg, dirs, repo_versions) {
                   patient_id = patient_id,
                   grf_key = grf_key,
                   grf_rds = grf_path,
+                  grf_centroid_mode = cfg$grf_centroid_mode,
+                  grf_centroid_min_cn = cfg$grf_centroid_min_cn,
+                  grf_centroid_max_cn = cfg$grf_centroid_max_cn,
                   input_rds = input_rds,
                   input_md5 = input_md5,
                   minobs = as.integer(minobs),
@@ -2011,13 +2137,14 @@ main <- function() {
   grf_lookup <- list()
   time_axis_label <- paste0("tmax_", path_token(cfg$time_max), "_pint_", path_token(cfg$passage_interval))
   sim_pm_label <- pm_to_label(cfg$pm)
+  grf_landscape_label <- grf_landscape_token(cfg)
 
   for (sim_idx in seq_len(cfg$n_sim)) {
     for (lambda_idx in seq_along(cfg$lambdas)) {
       lambda <- cfg$lambdas[[lambda_idx]]
       lambda_label <- format_grf_label(lambda)
       abm_seed <- cfg$seed + sim_idx * 10000L + lambda_idx * 100L
-      grf_key <- paste(sim_idx, lambda_label, paste0("simpm_", sim_pm_label), time_axis_label, sep = "__")
+      grf_key <- paste(sim_idx, lambda_label, paste0("simpm_", sim_pm_label), grf_landscape_label, time_axis_label, sep = "__")
       grf_path <- file.path(dirs$cache, paste0("grf_sim_", grf_key, ".rds"))
       grf_sim <- if (!isTRUE(cfg$force_sim) &&
                      file.exists(grf_path) &&
@@ -2036,7 +2163,11 @@ main <- function() {
           abm_pop_size = cfg$abm_pop_size,
           abm_delta_t = cfg$abm_delta_t,
           abm_max_pop = cfg$abm_max_pop,
-          abm_culling_survival = cfg$abm_culling_survival
+          abm_culling_survival = cfg$abm_culling_survival,
+          centroid_mode = cfg$grf_centroid_mode,
+          centroid_min_cn = cfg$grf_centroid_min_cn,
+          centroid_max_cn = cfg$grf_centroid_max_cn,
+          centroid_jitter_sd = cfg$grf_centroid_jitter_sd
         )
         saveRDS(out, grf_path)
         out
@@ -2045,7 +2176,7 @@ main <- function() {
 
       for (time_start in cfg$time_starts) {
         for (time_gap in cfg$time_gaps) {
-          patient_id <- paste0("grf_", sim_idx, "_lambda_", lambda_label, "_simpm_", sim_pm_label, "_", time_axis_label, "_start_", path_token(time_start), "_gap_", path_token(time_gap))
+          patient_id <- paste0("grf_", sim_idx, "_lambda_", lambda_label, "_simpm_", sim_pm_label, "_", grf_landscape_label, "_", time_axis_label, "_start_", path_token(time_start), "_gap_", path_token(time_gap))
           input_rds <- file.path(dirs$cache, paste0("input_", patient_id, ".rds"))
           input_csv <- file.path(dirs$cache, paste0("input_", patient_id, ".csv"))
           input_seed <- abm_seed + as.integer(round(time_start * 10)) + as.integer(round(time_gap * 1000))
@@ -2079,6 +2210,9 @@ main <- function() {
               patient_id = patient_id,
               grf_key = grf_key,
               grf_rds = grf_path,
+              grf_centroid_mode = cfg$grf_centroid_mode,
+              grf_centroid_min_cn = cfg$grf_centroid_min_cn,
+              grf_centroid_max_cn = cfg$grf_centroid_max_cn,
               input_rds = input_rds,
               input_csv = input_csv,
               input_md5 = input_md5,
@@ -2110,6 +2244,9 @@ main <- function() {
                   patient_id = patient_id,
                   grf_key = grf_key,
                   grf_rds = grf_path,
+                  grf_centroid_mode = cfg$grf_centroid_mode,
+                  grf_centroid_min_cn = cfg$grf_centroid_min_cn,
+                  grf_centroid_max_cn = cfg$grf_centroid_max_cn,
                   input_rds = input_rds,
                   input_md5 = input_md5,
                   minobs = as.integer(minobs),
@@ -2137,6 +2274,9 @@ main <- function() {
                   patient_id = patient_id,
                   grf_key = grf_key,
                   grf_rds = grf_path,
+                  grf_centroid_mode = cfg$grf_centroid_mode,
+                  grf_centroid_min_cn = cfg$grf_centroid_min_cn,
+                  grf_centroid_max_cn = cfg$grf_centroid_max_cn,
                   input_rds = input_rds,
                   input_md5 = input_md5,
                   minobs = as.integer(minobs),
