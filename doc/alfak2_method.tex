@@ -1,0 +1,761 @@
+\documentclass[11pt]{article}
+
+\usepackage[a4paper,margin=1in]{geometry}
+\usepackage{amsmath,amssymb,bm}
+\usepackage{booktabs}
+\usepackage{hyperref}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  urlcolor=blue,
+  citecolor=blue
+}
+
+\title{\texttt{alfak2}: Mathematical Description of the Current Method}
+\author{}
+\date{\today}
+
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\Var}{\operatorname{Var}}
+\newcommand{\Normal}{\mathcal{N}}
+\newcommand{\Mult}{\operatorname{Multinomial}}
+\newcommand{\DM}{\operatorname{DirichletMultinomial}}
+\newcommand{\softmax}{\operatorname{softmax}}
+
+\begin{document}
+\maketitle
+
+\section{Overview}
+
+\texttt{alfak2} infers aneuploid karyotype fitness landscapes from sparse
+two-timepoint count data. The input is a two-column count matrix
+\[
+  Y = \{y_{v0}, y_{v1}\}_{v \in \mathcal{O}},
+\]
+where $\mathcal{O}$ is the set of observed karyotypes and $y_{v0}$,
+$y_{v1}$ are counts at the two timepoints. Each karyotype is represented as a
+copy-number vector
+\[
+  x_v = (x_{v1}, \ldots, x_{vp}) \in \mathbb{Z}_{\ge 0}^{p},
+\]
+where $p$ is the chromosome dimension.
+
+The current method is a two-layer model:
+\[
+\begin{aligned}
+\text{count data}
+&\longrightarrow
+\text{local hierarchical Bayesian count model}
+\longrightarrow
+\text{local fitness anchors}\\
+&\longrightarrow
+\text{graph Gaussian posterior smoothing}
+\longrightarrow
+\text{global fitness landscape}.
+\end{aligned}
+\]
+
+The first layer uses the observed counts and an explicit selection plus
+missegregation forward model to estimate local fitness values and their
+uncertainties. The second layer treats those local estimates as noisy anchors
+and propagates information over a larger bounded karyotype graph using a sparse
+Gaussian graph posterior.
+
+\section{Notation}
+
+\begin{table}[h]
+\centering
+\begin{tabular}{ll}
+\toprule
+Symbol & Meaning \\
+\midrule
+$x_v$ & Copy-number vector for node $v$ \\
+$\mathcal{O}$ & Observed karyotype set \\
+$\mathcal{G}=(\mathcal{V},\mathcal{E})$ & Bounded karyotype graph \\
+$d(v)$ & Shortest one-step copy-number distance from observed seed nodes \\
+$\beta$ & Single-chromosome missegregation probability \\
+$\Delta t$ & Time interval between the two count observations \\
+$T_{uv}$ & Row-stochastic transition probability from parent node $u$ to child node $v$ \\
+$\eta_v$ & Initial log-abundance parameter for node $v$ \\
+$\pi_{0v}, \pi_{1v}$ & Model frequencies at the two timepoints \\
+$f_v$ & Native \texttt{alfak2} fitness for node $v$ \\
+$z_a$ & Local fitness estimate used as a global anchor \\
+$s_a^2$ & Local fitness variance estimate for anchor $a$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Count Preprocessing}
+
+If \texttt{input\_depth = "raw"}, the model uses the supplied count matrix
+directly:
+\[
+  y'_{vt}=y_{vt}.
+\]
+
+If \texttt{input\_depth = "effective"}, each timepoint is first converted to
+frequencies and then recounted at a controlled target depth:
+\[
+  N_t = \sum_{v \in \mathcal{O}} y_{vt},
+  \qquad
+  \hat p_{vt} = \frac{y_{vt}}{N_t}.
+\]
+The target depth is
+\[
+  D_t =
+  \begin{cases}
+  \min(N_0,N_1), & \text{mode = min},\\
+  \min(N_t,D), & \text{mode = cap},\\
+  D, & \text{mode = fixed}.
+  \end{cases}
+\]
+The effective counts satisfy
+\[
+  y'_{vt} \approx D_t \hat p_{vt},
+  \qquad
+  \sum_v y'_{vt}=D_t.
+\]
+Rounding is performed with a largest-remainder style rule so that the total is
+exactly preserved.
+
+This step controls the influence of sequencing depth. Without it, a timepoint
+with much larger depth can dominate the likelihood even when the biological
+information content should be treated as comparable.
+
+\section{Bounded Karyotype Graph}
+
+\texttt{alfak2} builds a finite graph
+$\mathcal{G}=(\mathcal{V},\mathcal{E})$ around the observed karyotypes.
+Two nodes are connected by a one-step edge if they differ by one copy on one
+chromosome:
+\[
+  x_v = x_u \pm e_c,
+\]
+where $e_c$ is the unit vector in chromosome coordinate $c$.
+
+Graph expansion is bounded by copy-number limits, shell depth, and a maximum
+node count:
+\[
+  \min_{\mathrm{cn}} \le x_{vc} \le \max_{\mathrm{cn}},
+  \qquad
+  d(v) \le h,
+  \qquad
+  |\mathcal{V}| \le M.
+\]
+
+Nodes are classified by support distance:
+\[
+\begin{array}{ll}
+d(v)=0 & \text{directly informed},\\
+d(v)=1 & \text{local borrowed},\\
+d(v)=2 & \text{weakly supported},\\
+d(v)>2 & \text{graph borrowed}.
+\end{array}
+\]
+
+The bounded graph avoids enumerating the full copy-number lattice, whose size
+grows exponentially with chromosome dimension. It keeps the inference focused
+on biologically plausible states near the observed karyotypes.
+
+\section{Missegregation Transition Kernel}
+
+\subsection{Exact Single-Chromosome Kernel}
+
+Let $i$ be the parent copy number and $j$ the child copy number for one
+chromosome. Under the exact kernel, the transition probability is
+\[
+  p_{\beta}(i \to j)
+  =
+  \sum_{\substack{m=|i-j|\\m\equiv |i-j|\;(\mathrm{mod}\;2)}}^{i}
+  \binom{i}{m}
+  \beta^m(1-\beta)^{i-m}
+  2^{-m}
+  \binom{m}{(m+i-j)/2}.
+\]
+Here $m$ is the number of missegregating copies. The term
+$\binom{i}{m}$ selects which copies missegregate,
+$\beta^m(1-\beta)^{i-m}$ is the missegregation probability, and
+$2^{-m}\binom{m}{(m+i-j)/2}$ accounts for their allocation to the two
+daughter directions.
+
+\subsection{Karyotype-Level Transition Weight}
+
+For a full karyotype transition from node $u$ to node $v$, the exact weight is
+the product over chromosomes:
+\[
+  q_{\beta}(u \to v)
+  =
+  \prod_{c=1}^{p}
+  p_{\beta}(x_{uc}\to x_{vc}).
+\]
+
+The alternative \texttt{linear} kernel preserves the historical first-order
+approximation:
+\[
+  q_{\beta}(u \to v)
+  =
+  \begin{cases}
+  \beta\max(1,x_{uc}), & x_v=x_u\pm e_c,\\
+  1, & v=u,\\
+  0, & \text{otherwise}.
+  \end{cases}
+\]
+
+\subsection{Row-Stochastic Transport Matrix}
+
+The local forward model uses a row-stochastic transport matrix $T$. Let
+$q_{uv}$ be the one-step edge weight and $s_u$ the self weight. Then
+\[
+  T_{uv}
+  =
+  \frac{q_{uv}}{s_u+\sum_{z:(u,z)\in\mathcal{E}}q_{uz}},
+  \qquad u\ne v,
+\]
+and
+\[
+  T_{uu}
+  =
+  \frac{s_u}{s_u+\sum_{z:(u,z)\in\mathcal{E}}q_{uz}}.
+\]
+For the exact kernel, $s_u=q_\beta(u\to u)$. For the linear kernel, $s_u=1$.
+
+\section{Local Hierarchical Bayesian Count Model}
+
+The local model estimates initial frequencies and fitness values on a local
+karyotype graph $\mathcal{G}_{\mathrm{local}}$.
+
+\subsection{Initial Frequency Parameterization}
+
+Each node $v$ has an initial log-abundance parameter $\eta_v$. Initial
+frequencies are obtained by a softmax transform:
+\[
+  \pi_{0v}
+  =
+  \frac{\exp(\eta_v)}
+       {\sum_{u\in\mathcal{V}}\exp(\eta_u)}.
+\]
+
+\subsection{Selection and Missegregation Forward Model}
+
+Fitness acts through exponential growth between the two timepoints:
+\[
+  g_v = \pi_{0v}\exp(\Delta t\,f_v).
+\]
+After growth, mass is transported through the missegregation matrix:
+\[
+  \tilde\pi_{1v}
+  =
+  \sum_{u\in\mathcal{V}} T_{uv}g_u.
+\]
+The result is normalized to a frequency vector:
+\[
+  \pi_{1v}
+  =
+  \frac{\tilde\pi_{1v}}
+       {\sum_{z\in\mathcal{V}}\tilde\pi_{1z}}.
+\]
+
+Thus the model explicitly represents
+\[
+  \text{initial composition}
+  \quad+\quad
+  \text{fitness-driven growth}
+  \quad+\quad
+  \text{missegregation transport}.
+\]
+
+\subsection{Observation Model}
+
+For raw counts, the default observation model is multinomial:
+\[
+  y_{\cdot 0}\mid \pi_0
+  \sim
+  \Mult(N_0,\pi_0),
+  \qquad
+  y_{\cdot 1}\mid \pi_1
+  \sim
+  \Mult(N_1,\pi_1),
+\]
+where $N_t=\sum_v y_{vt}$. Up to constants independent of the parameters,
+\[
+  \ell_{\mathrm{mult}}
+  =
+  \sum_v y_{v0}\log \pi_{0v}
+  +
+  \sum_v y_{v1}\log \pi_{1v}.
+\]
+
+The optional Dirichlet-multinomial observation model is
+\[
+  y_{\cdot t}\mid \pi_t,\phi
+  \sim
+  \DM(N_t,\pi_t,\phi),
+\]
+with log-likelihood
+\[
+  \ell_{\mathrm{DM}}(y,\pi,\phi)
+  =
+  \log\Gamma(\phi)
+  -
+  \log\Gamma(N+\phi)
+  +
+  \sum_v
+  \left[
+    \log\Gamma(y_v+\phi\pi_v)
+    -
+    \log\Gamma(\phi\pi_v)
+  \right].
+\]
+This model allows overdispersion relative to the multinomial likelihood.
+
+\subsection{Prior for Initial Abundance}
+
+Initial log-abundance has a node-specific Gaussian prior:
+\[
+  \eta_v \sim \Normal(m_{\eta v},s_{\eta v}^2).
+\]
+Directly observed or otherwise effectively counted nodes use a diffuse prior:
+\[
+  m_{\eta v}=0,\qquad s_{\eta v}=5.
+\]
+Unobserved borrowed nodes use a smaller prior mean:
+\[
+  m_{\eta v}
+  =
+  -6 - 0.75\max\{0,d(v)-1\},
+  \qquad
+  s_{\eta v}=1.5.
+\]
+This encodes the conservative assumption that unobserved nearby karyotypes may
+exist but should have small initial abundance unless the data support them.
+
+\subsection{Hierarchical Fitness Prior}
+
+For directly informed nodes, fitness is centered at zero:
+\[
+  f_v\mid \sigma_{\mathrm{anchor}}
+  \sim
+  \Normal(0,\sigma_{\mathrm{anchor}}^2),
+  \qquad d(v)=0.
+\]
+
+Borrowed nodes receive information from parent nodes closer to the observed
+set. Each parent edge $(u,v)$ has a context
+\[
+  c(u,v)
+  =
+  \{\text{gain/loss},\;\text{chromosome index},\;\text{parent ploidy band}\}.
+\]
+Context effects follow a hierarchical Gaussian prior:
+\[
+  \delta_c\mid \mu_{g(c)},\tau_{g(c)}
+  \sim
+  \Normal(\mu_{g(c)},\tau_{g(c)}^2),
+\]
+\[
+  \mu_g\sim \Normal(0,0.5^2).
+\]
+The scale parameters are positive and are given half-normal type priors:
+\[
+  \sigma_{\mathrm{neighbor}}>0,\qquad
+  \sigma_{\mathrm{anchor}}>0,\qquad
+  \tau_g>0.
+\]
+
+For a borrowed node $v$, the prior mean is the transition-weighted average of
+parent fitness plus context effect:
+\[
+  m_{fv}
+  =
+  \frac{
+    \sum_{u\in P(v)}
+    w_{uv}\{f_u+\delta_{c(u,v)}\}
+  }{
+    \sum_{u\in P(v)}w_{uv}
+  }.
+\]
+The borrowed-node prior is
+\[
+  f_v\mid \{f_u:u\in P(v)\},\delta,\sigma_{\mathrm{neighbor}}
+  \sim
+  \Normal(m_{fv},\sigma_{\mathrm{neighbor}}^2),
+  \qquad d(v)>0.
+\]
+When $d(v)\ge 2$, the local model inflates this prior standard deviation by
+$1.75$:
+\[
+  f_v \sim \Normal(m_{fv},(1.75\sigma_{\mathrm{neighbor}})^2).
+\]
+This expresses weaker local information farther from observed nodes.
+
+\subsection{Local Posterior Objective}
+
+The local layer estimates the maximum a posteriori parameter vector
+\[
+  \theta=(\eta,f,\delta,\mu,\sigma_{\mathrm{neighbor}},
+  \sigma_{\mathrm{anchor}},\tau).
+\]
+It solves
+\[
+  \hat\theta
+  =
+  \arg\max_{\theta}
+  \left\{
+    \ell(Y\mid \eta,f,\beta,\Delta t)
+    +
+    \log p(\eta)
+    +
+    \log p(f\mid \delta)
+    +
+    \log p(\delta,\mu,\sigma,\tau)
+  \right\}.
+\]
+Equivalently, the code minimizes the negative log posterior
+\[
+  \mathcal{J}_{\mathrm{local}}(\theta)
+  =
+  -\ell(Y\mid \eta,f,\beta,\Delta t)
+  -
+  \log p(\eta)
+  -
+  \log p(f\mid \delta)
+  -
+  \log p(\delta,\mu,\sigma,\tau).
+\]
+
+This objective is implemented with Template Model Builder (TMB). TMB is not the
+statistical algorithm; it is the numerical backend used to compute derivatives,
+optimize the MAP objective, and obtain approximate marginal standard errors
+through \texttt{sdreport}.
+
+The local layer returns, for each local graph node,
+\[
+  z_v=\hat f_v,\qquad s_v=\widehat{\mathrm{sd}}(f_v).
+\]
+These become noisy anchors for the global graph layer.
+
+\section{Global Graph Gaussian Posterior}
+
+The global layer does not revisit the raw counts. Instead, it treats local
+fitness estimates as noisy observations and infers the full fitness vector
+\[
+  \bm f=(f_1,\ldots,f_n)^\top
+\]
+on a larger graph $\mathcal{G}_{\mathrm{global}}$.
+
+\subsection{Anchor Observation Model}
+
+Let $\mathcal{A}$ be the retained anchor set. For each anchor $a$,
+\[
+  z_a\mid f_a
+  \sim
+  \Normal(f_a,R_a),
+\]
+where
+\[
+  R_a = s_a^2\,m_a + \sigma_{\mathrm{obs}}^2.
+\]
+The multiplier $m_a$ combines covariance-status and count-based inflation:
+\[
+  m_a
+  =
+  m^{\mathrm{cov}}_a
+  m^{\mathrm{count}}_a.
+\]
+If count-based downweighting is enabled,
+\[
+  m^{\mathrm{count}}_a
+  =
+  \max\left\{
+    1,
+    \left(\frac{C_{\mathrm{ref}}}{C_a}\right)^\alpha
+  \right\}.
+\]
+Low-count or unreliable local anchors therefore receive larger observation
+variance and have less influence on the global posterior.
+
+\subsection{Graph Laplacian Smoothing}
+
+The first global prior term is graph edge smoothing:
+\[
+  \mathcal{P}_{\mathrm{edge}}(\bm f)
+  =
+  \sum_{(i,j)\in\mathcal{E}}
+  w_{ij}(f_i-f_j)^2.
+\]
+It enters the posterior with strength $\lambda_l$:
+\[
+  \lambda_l\mathcal{P}_{\mathrm{edge}}(\bm f).
+\]
+This term encourages neighboring karyotypes connected by plausible one-step
+copy-number changes to have similar fitness unless anchor data support a sharp
+difference.
+
+\subsection{Ordered Copy-Number Curvature Penalty}
+
+The second prior term penalizes second differences along a chromosome
+copy-number axis. For any triplet $x-e_c$, $x$, $x+e_c$ present in the graph,
+define
+\[
+  \Delta_c^2 f(x)
+  =
+  f(x-e_c)-2f(x)+f(x+e_c).
+\]
+The curvature penalty is
+\[
+  \mathcal{P}_{\mathrm{curv}}(\bm f)
+  =
+  \sum_{x,c}
+  \left\{\Delta_c^2 f(x)\right\}^2.
+\]
+This discourages unsupported zig-zag behavior along ordered copy-number
+coordinates.
+
+\subsection{Epistasis Penalty}
+
+The third prior term controls second-order interaction between two chromosome
+directions. For any quadruplet $x$, $x+e_c$, $x+e_d$, and $x+e_c+e_d$ present
+in the graph,
+\[
+  \Delta_{cd} f(x)
+  =
+  f(x)-f(x+e_c)-f(x+e_d)+f(x+e_c+e_d).
+\]
+The epistasis penalty is
+\[
+  \mathcal{P}_{\mathrm{epi}}(\bm f)
+  =
+  \frac{1}{2}
+  \sum_{x,c<d}
+  \left\{\Delta_{cd}f(x)\right\}^2.
+\]
+This does not forbid epistasis. It penalizes strong interaction effects when
+they are weakly supported by anchors, reducing unstable high-order oscillations
+in sparse regions.
+
+\subsection{Gaussian Posterior}
+
+The global negative log posterior is
+\[
+\begin{aligned}
+  \mathcal{J}_{\mathrm{global}}(\bm f)
+  =
+  \frac{1}{2}
+  \bigg[
+  &\lambda_l\mathcal{P}_{\mathrm{edge}}(\bm f)
+  +
+  \lambda_e\mathcal{P}_{\mathrm{curv}}(\bm f)
+  +
+  \lambda_e\mathcal{P}_{\mathrm{epi}}(\bm f)\\
+  &+
+  \sum_{a\in\mathcal{A}}
+  \frac{(f_a-z_a)^2}{R_a}
+  +
+  \epsilon\sum_{v\in\mathcal{V}}f_v^2
+  \bigg].
+\end{aligned}
+\]
+All terms are quadratic, so the posterior is Gaussian:
+\[
+  p(\bm f\mid \bm z)
+  =
+  \Normal(\bm \mu,\bm Q^{-1}).
+\]
+The precision matrix can be written as
+\[
+  \bm Q
+  =
+  \lambda_l\bm L
+  +
+  \lambda_e\bm K
+  +
+  \bm A^\top\bm R^{-1}\bm A
+  +
+  \epsilon\bm I.
+\]
+Here $\bm L$ is the weighted graph Laplacian, $\bm K$ is the sparse precision
+contribution from the ordered copy-number curvature and epistasis penalties,
+$\bm A$ selects anchor nodes from the full graph, and $\bm R$ is the diagonal
+anchor variance matrix.
+
+The right-hand side is
+\[
+  \bm b
+  =
+  \bm A^\top\bm R^{-1}\bm z.
+\]
+The posterior mean solves
+\[
+  \bm Q\bm\mu=\bm b,
+  \qquad
+  \bm \mu=\bm Q^{-1}\bm b.
+\]
+The marginal posterior variance for node $v$ is
+\[
+  \Var(f_v\mid \bm z)
+  =
+  (\bm Q^{-1})_{vv}.
+\]
+
+The implementation assembles $\bm Q$ as a sparse matrix and uses RcppEigen
+sparse linear algebra to solve for $\bm \mu$ and the diagonal of
+$\bm Q^{-1}$.
+
+\subsection{Hyperparameter Selection}
+
+The global layer has three main hyperparameters:
+\[
+  \lambda_l,\qquad \lambda_e,\qquad \sigma_{\mathrm{obs}}.
+\]
+If each grid contains a single value, these are treated as fixed. If multiple
+values are supplied, \texttt{alfak2} uses leave-one-anchor-out cross-validation.
+For each anchor $a$, the model removes $a$, predicts its fitness from the
+remaining anchors, and obtains $\mu_{-a,a}$. The score is
+\[
+  \operatorname{CV}(\lambda_l,\lambda_e,\sigma_{\mathrm{obs}})
+  =
+  \frac{1}{|\mathcal{A}_{\mathrm{eval}}|}
+  \sum_{a\in\mathcal{A}_{\mathrm{eval}}}
+  \frac{(z_a-\mu_{-a,a})^2}{R_a}.
+\]
+The selected values are
+\[
+  (\lambda_l^\star,\lambda_e^\star,\sigma_{\mathrm{obs}}^\star)
+  =
+  \arg\min
+  \operatorname{CV}(\lambda_l,\lambda_e,\sigma_{\mathrm{obs}}).
+\]
+
+\section{Output}
+
+The local layer reports
+\[
+  \hat f_v^{\mathrm{local}},
+  \qquad
+  \widehat{\operatorname{sd}}(f_v^{\mathrm{local}}),
+  \qquad
+  \hat\pi_{0v},
+  \qquad
+  \hat\pi_{1v}.
+\]
+The global layer reports
+\[
+  \hat f_v^{\mathrm{global}}=\mu_v,
+  \qquad
+  \widehat{\operatorname{sd}}(f_v^{\mathrm{global}})
+  =
+  \sqrt{(\bm Q^{-1})_{vv}}.
+\]
+Approximate normal intervals are
+\[
+  \hat f_v \pm 1.9599639845\,\widehat{\operatorname{sd}}(f_v).
+\]
+
+The fit also reports support tier, support distance, anchor diagnostics,
+selected hyperparameters, and cross-validation status. Nodes far from anchors
+or with large posterior standard deviation can be labeled as graph-borrowed or
+prior-dominated, indicating that their estimates are driven mostly by prior
+structure rather than direct data.
+
+\section{Optional \texttt{alfakR}-Scale Transformation}
+
+Native \texttt{alfak2} fitness is on a relative scale. If
+\texttt{alfakR\_scale = TRUE}, the package appends legacy-scale columns for
+compatibility with \texttt{alfakR}. Let
+\[
+  g_0=\frac{\log(n_b/n_0)}{\Delta t}
+\]
+and define the efflux viability approximation
+\[
+  V(x)=2(1-\beta)^{\sum_c x_c}-1.
+\]
+
+Without efflux correction,
+\[
+  f^{\mathrm{alfakR}}(x)
+  =
+  f^{\mathrm{alfak2}}(x)
+  +
+  g_0
+  -
+  \sum_x w_x f^{\mathrm{alfak2}}(x).
+\]
+With efflux correction,
+\[
+  o
+  =
+  \frac{
+    \sum_x w_x f^{\mathrm{alfak2}}(x)/V(x)-g_0
+  }{
+    \sum_x w_x/V(x)
+  },
+\]
+\[
+  f^{\mathrm{alfakR}}(x)
+  =
+  \frac{f^{\mathrm{alfak2}}(x)-o}{V(x)}.
+\]
+This is a post-processing scale conversion. It does not change the native
+\texttt{alfak2} posterior estimates.
+
+\section{Why This Method Is Useful}
+
+\begin{enumerate}
+  \item \textbf{It uses count likelihoods directly.}
+  The local layer models counts with multinomial or Dirichlet-multinomial
+  likelihoods rather than only comparing observed frequency changes.
+
+  \item \textbf{It separates selection from missegregation.}
+  The forward model
+  \[
+    \pi_0 \to \pi_0\exp(\Delta t f)
+    \to T^\top\{\pi_0\exp(\Delta t f)\}
+  \]
+  represents both fitness-driven growth and missegregation transport.
+
+  \item \textbf{It is designed for sparse two-timepoint data.}
+  Nearby unobserved nodes borrow information through parent fitness and context
+  effects, while their uncertainty increases with weaker support.
+
+  \item \textbf{It avoids full lattice enumeration.}
+  Bounded graph expansion makes high-dimensional karyotype spaces
+  computationally manageable.
+
+  \item \textbf{It uses structured graph smoothing.}
+  The global layer uses graph Laplacian smoothing, ordered copy-number
+  curvature penalties, and epistasis penalties that reflect the structure of
+  copy-number landscapes.
+
+  \item \textbf{It preserves uncertainty.}
+  The local TMB layer provides anchor uncertainty, and the global Gaussian
+  posterior provides posterior standard deviations for all graph nodes.
+
+  \item \textbf{It provides interpretable support tiers.}
+  Each node is annotated by support distance and support tier, helping users
+  distinguish directly informed estimates from graph-borrowed estimates.
+\end{enumerate}
+
+\section{Summary}
+
+The current \texttt{alfak2} method can be summarized as
+\[
+\begin{aligned}
+\text{Local:}\quad
+&\text{counts}
++ \text{evolution dynamics}
++ \text{neighbor priors}\\
+&\longrightarrow
+\text{fitness anchors};
+\\[4pt]
+\text{Global:}\quad
+&\text{anchor observations}
++ \text{graph smoothing}
++ \text{CN penalties}\\
+&\longrightarrow
+\text{graph Gaussian posterior}.
+\end{aligned}
+\]
+
+\end{document}
