@@ -1,5 +1,5 @@
 Package: alfak2
-Title: Hierarchical Fitness Inference for Aneuploid Karyotype Evolution
+Title: ALFA-K2: Adaptive Local-to-Global Fitness Landscapes for Aneuploid Karyotypes
 Version: 0.1.0
 Authors@R: c(
     person(given = "Richard", family = "Beck",
@@ -9,7 +9,8 @@ Authors@R: c(
     )
 Author: Richard Beck [aut], Tao Li [aut, cre]
 Maintainer: Tao Li <Tao.Li2@moffitt.org>
-Description: Methods to infer fitness landscapes for aneuploid karyotypes from
+Description: ALFA-K2 (Adaptive Local-to-Global Fitness Landscapes for Aneuploid
+    Karyotypes) provides methods to infer fitness landscapes for aneuploid karyotypes from
     sparse two-timepoint count data and use those landscapes to study karyotype
     evolution. The package builds bounded karyotype graphs, fits a local
     hierarchical Bayesian model, and propagates estimates across the graph with
