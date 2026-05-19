@@ -1,0 +1,68 @@
+---
+title: "alfak2 Lazy GRF Pipeline"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{alfak2 Lazy GRF Pipeline}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+```
+
+```{r setup}
+library(alfak2)
+```
+
+Generate a lightweight paper-style GRF truth landscape. The object stores GRF
+centroids and computes fitness only for requested karyotypes.
+
+```{r landscape}
+landscape <- simulate_grf_landscape(
+  n_chr = 4,
+  n_centroids = 12,
+  lambda = 0.8,
+  min_cn = 1,
+  max_cn = 4,
+  seed = 10
+)
+predict_landscape_fitness(landscape, matrix(c(2, 2, 2, 2), nrow = 1))
+```
+
+Simulate sparse two-timepoint data from the known landscape.
+
+```{r simulate}
+sim <- simulate_sparse_counts(
+  landscape,
+  beta = 0.00005,
+  n0 = 150,
+  n1 = 150,
+  detection_threshold = 1,
+  seed = 20,
+  initial_population = 500
+)
+sim$sparsity
+```
+
+Fit the two-layer compiled pipeline.
+
+```{r fit}
+fit <- fit_alfak2(
+  sim$counts,
+  dt = 1,
+  beta = 0.00005,
+  min_cn = 1,
+  max_cn = 4,
+  local_shell_depth = 2,
+  global_extra_shell = 1
+)
+head(summarize_alfak2(fit))
+```
+
+Inspect local and global support tiers.
+
+```{r tiers}
+table(summarize_alfak2(fit, layer = "local")$support_tier)
+table(summarize_alfak2(fit, layer = "global")$support_tier)
+```
