@@ -39,6 +39,7 @@ usage <- function() {
     "Calibration grid options:\n",
     "  --legacy-weights=pi0,directly_informed,uniform\n",
     "  --correct-efflux-values=true,false\n",
+    "  --graph-edge-weights=normalized  # default normalized; add mutation for legacy baseline\n",
     "  --lambda-l-values=0.2,1,5\n",
     "  --lambda-e-values=0.05,0.25,1\n",
     "  --sigma-obs-values=0.02,0.05,0.1\n",
@@ -142,7 +143,7 @@ build_calibration_config <- function(args, repo_dir) {
   input_depth <- match.arg(input_depth, c("raw", "effective"))
   observation_model <- as.character(arg_value(args, "alfak2_observation_model", "dirichlet_multinomial"))
   if (!nzchar(observation_model)) observation_model <- NULL
-  graph_edge_weights <- arg_character_vec(args, "graph_edge_weights", "mutation")
+  graph_edge_weights <- arg_character_vec(args, "graph_edge_weights", "normalized")
   bad_graph_weights <- setdiff(graph_edge_weights, c("mutation", "unit", "normalized"))
   if (length(bad_graph_weights)) {
     stop("Unsupported graph edge weights: ", paste(bad_graph_weights, collapse = ", "), call. = FALSE)
@@ -890,6 +891,12 @@ accuracy_metric_row <- function(task_order, param_id, support_scope, est, tru, n
       spearman = NA_real_,
       sign_accuracy = NA_real_,
       false_high_rate = NA_real_,
+      estimate_sd = NA_real_,
+      truth_sd = NA_real_,
+      estimate_sd_ratio = NA_real_,
+      estimate_range_ratio = NA_real_,
+      estimate_iqr_ratio = NA_real_,
+      amplitude_collapse = TRUE,
       stringsAsFactors = FALSE
     ))
   }
@@ -899,6 +906,19 @@ accuracy_metric_row <- function(task_order, param_id, support_scope, est, tru, n
   est_c <- est - mean(est)
   tru_c <- tru - mean(tru)
   centered_err <- est_c - tru_c
+  estimate_sd <- if (length(est) >= 2L) stats::sd(est) else NA_real_
+  truth_sd <- if (length(tru) >= 2L) stats::sd(tru) else NA_real_
+  estimate_sd_ratio <- if (is.finite(truth_sd) && truth_sd > 0) estimate_sd / truth_sd else NA_real_
+  estimate_range <- if (length(est) >= 2L) {
+    stats::quantile(est, 0.95, na.rm = TRUE, names = FALSE) -
+      stats::quantile(est, 0.05, na.rm = TRUE, names = FALSE)
+  } else NA_real_
+  truth_range <- if (length(tru) >= 2L) {
+    stats::quantile(tru, 0.95, na.rm = TRUE, names = FALSE) -
+      stats::quantile(tru, 0.05, na.rm = TRUE, names = FALSE)
+  } else NA_real_
+  estimate_iqr <- if (length(est) >= 2L) stats::IQR(est, na.rm = TRUE) else NA_real_
+  truth_iqr <- if (length(tru) >= 2L) stats::IQR(tru, na.rm = TRUE) else NA_real_
   data.frame(
     task_order = as.integer(task_order),
     param_id = as.integer(param_id),
@@ -915,6 +935,12 @@ accuracy_metric_row <- function(task_order, param_id, support_scope, est, tru, n
     spearman = safe_cor(est, tru, method = "spearman"),
     sign_accuracy = mean(sign(est_c) == sign(tru_c), na.rm = TRUE),
     false_high_rate = mean(est_c > 0 & tru_c <= 0, na.rm = TRUE),
+    estimate_sd = estimate_sd,
+    truth_sd = truth_sd,
+    estimate_sd_ratio = estimate_sd_ratio,
+    estimate_range_ratio = if (is.finite(truth_range) && truth_range > 0) estimate_range / truth_range else NA_real_,
+    estimate_iqr_ratio = if (is.finite(truth_iqr) && truth_iqr > 0) estimate_iqr / truth_iqr else NA_real_,
+    amplitude_collapse = !is.finite(estimate_sd_ratio) || estimate_sd_ratio < 0.02,
     stringsAsFactors = FALSE
   )
 }
@@ -1038,8 +1064,16 @@ summarize_calibration_results <- function(cfg, dirs) {
 
 rank_calibration_parameters <- function(metric_tbl, fit_tbl, cfg) {
   if (!nrow(metric_tbl)) return(data.frame())
-  metric_names <- c("mae", "rmse", "centered_mae", "centered_rmse", "median_abs_error", "signed_bias", "false_high_rate", "sign_accuracy", "spearman")
+  metric_names <- c(
+    "mae", "rmse", "centered_mae", "centered_rmse", "median_abs_error",
+    "signed_bias", "false_high_rate", "sign_accuracy", "spearman",
+    "estimate_sd_ratio", "estimate_range_ratio", "estimate_iqr_ratio"
+  )
   for (nm in intersect(metric_names, names(metric_tbl))) metric_tbl[[nm]] <- to_num(metric_tbl[[nm]])
+  for (nm in c("estimate_sd_ratio", "estimate_range_ratio", "estimate_iqr_ratio")) {
+    if (!nm %in% names(metric_tbl)) metric_tbl[[nm]] <- NA_real_
+  }
+  if (!"amplitude_collapse" %in% names(metric_tbl)) metric_tbl$amplitude_collapse <- NA
   metric_tbl$param_id <- as.integer(metric_tbl$param_id)
   fit_tbl$param_id <- as.integer(fit_tbl$param_id)
 
@@ -1094,6 +1128,10 @@ rank_calibration_parameters <- function(metric_tbl, fit_tbl, cfg) {
         setNames(list(median(z$spearman, na.rm = TRUE)), paste0(prefix, "_median_spearman")),
         setNames(list(median(z$false_high_rate, na.rm = TRUE)), paste0(prefix, "_median_false_high_rate")),
         setNames(list(median(z$sign_accuracy, na.rm = TRUE)), paste0(prefix, "_median_sign_accuracy")),
+        setNames(list(median(z$estimate_sd_ratio, na.rm = TRUE)), paste0(prefix, "_median_estimate_sd_ratio")),
+        setNames(list(median(z$estimate_range_ratio, na.rm = TRUE)), paste0(prefix, "_median_estimate_range_ratio")),
+        setNames(list(median(z$estimate_iqr_ratio, na.rm = TRUE)), paste0(prefix, "_median_estimate_iqr_ratio")),
+        setNames(list(mean(z$amplitude_collapse, na.rm = TRUE)), paste0(prefix, "_amplitude_collapse_fraction")),
         check.names = FALSE
       )
     })
@@ -1120,7 +1158,8 @@ rank_calibration_parameters <- function(metric_tbl, fit_tbl, cfg) {
   for (nm in c(
     "objective_median_centered_rmse", "direct_median_centered_rmse",
     "holdout_median_centered_rmse",
-    "objective_median_spearman", "objective_median_false_high_rate"
+    "objective_median_spearman", "objective_median_false_high_rate",
+    "objective_median_estimate_sd_ratio"
   )) {
     if (!nm %in% names(out)) out[[nm]] <- NA_real_
   }
@@ -1145,13 +1184,19 @@ rank_calibration_parameters <- function(metric_tbl, fit_tbl, cfg) {
   out$holdout_failure_fraction <- pmax(holdout_unscored_fraction, holdout_bad_status_fraction, as.numeric(holdout_no_scores))
   out$holdout_failure_penalty_value <- as.numeric(cfg$holdout_failure_penalty) * out$holdout_failure_fraction
   if (cfg$objective_metric == "sparse_composite") {
+    objective_amplitude_penalty <- abs(log(pmax(
+      ifelse(is.finite(out$objective_median_estimate_sd_ratio), out$objective_median_estimate_sd_ratio, 1e-4),
+      1e-4
+    )))
     out$calibration_score <- out$objective_median_centered_rmse +
       cfg$direct_weight * ifelse(is.finite(out$direct_median_centered_rmse), out$direct_median_centered_rmse, 0) +
       cfg$holdout_weight * ifelse(is.finite(out$holdout_median_centered_rmse), out$holdout_median_centered_rmse, 0) +
       cfg$bias_weight * ifelse(is.finite(out[[bias_col]]), out[[bias_col]], 0) -
       cfg$spearman_weight * ifelse(is.finite(out$objective_median_spearman), out$objective_median_spearman, 0) +
       cfg$false_high_weight * ifelse(is.finite(out$objective_median_false_high_rate), out$objective_median_false_high_rate, 0) +
+      0.25 * objective_amplitude_penalty +
       out$holdout_failure_penalty_value
+    out$objective_amplitude_penalty <- objective_amplitude_penalty
     objective_order_col <- "objective_median_centered_rmse"
   } else {
     out$calibration_score <- out[[objective_col]] +

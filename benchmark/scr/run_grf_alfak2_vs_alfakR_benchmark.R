@@ -44,7 +44,7 @@ usage <- function() {
     "  --alfak2-input-policies=full,minobs_matched,soft_minobs\n",
     "  --alfak2-input-depth=effective\n",
     "  --alfak2-effective-depth-mode=min\n",
-    "  --alfak2-graph-edge-weight=mutation|unit|normalized\n",
+    "  --alfak2-graph-edge-weight=mutation|unit|normalized  # default normalized; use mutation for legacy baseline\n",
     "  --alfak2-anchor-count-reference=minobs|none|<number>\n",
     "  --alfak2-local-shell-depth=0\n",
     "  --alfak2-global-extra-shell=1\n",
@@ -850,6 +850,19 @@ summarize_accuracy <- function(node_tbl) {
       pred_c <- df$estimated_fitness[ok] - mean(df$estimated_fitness[ok])
       truth_c <- df$true_fitness[ok] - mean(df$true_fitness[ok])
       centered_err <- pred_c - truth_c
+      estimate_sd <- if (sum(ok) >= 2L) stats::sd(df$estimated_fitness[ok]) else NA_real_
+      truth_sd <- if (sum(ok) >= 2L) stats::sd(df$true_fitness[ok]) else NA_real_
+      estimate_sd_ratio <- if (is.finite(truth_sd) && truth_sd > 0) estimate_sd / truth_sd else NA_real_
+      estimate_range <- if (sum(ok) >= 2L) {
+        stats::quantile(df$estimated_fitness[ok], 0.95, na.rm = TRUE, names = FALSE) -
+          stats::quantile(df$estimated_fitness[ok], 0.05, na.rm = TRUE, names = FALSE)
+      } else NA_real_
+      truth_range <- if (sum(ok) >= 2L) {
+        stats::quantile(df$true_fitness[ok], 0.95, na.rm = TRUE, names = FALSE) -
+          stats::quantile(df$true_fitness[ok], 0.05, na.rm = TRUE, names = FALSE)
+      } else NA_real_
+      estimate_iqr <- if (sum(ok) >= 2L) stats::IQR(df$estimated_fitness[ok], na.rm = TRUE) else NA_real_
+      truth_iqr <- if (sum(ok) >= 2L) stats::IQR(df$true_fitness[ok], na.rm = TRUE) else NA_real_
       idx <- idx + 1L
       base <- df0[1L, group_cols, drop = FALSE]
       rows[[idx]] <- data.frame(
@@ -869,6 +882,12 @@ summarize_accuracy <- function(node_tbl) {
         sign_accuracy = if (length(centered_err)) mean(sign(pred_c) == sign(truth_c), na.rm = TRUE) else NA_real_,
         false_high_rate = if (length(centered_err)) mean(pred_c > 0 & truth_c <= 0, na.rm = TRUE) else NA_real_,
         mean_estimated_sd = mean(df$estimated_sd, na.rm = TRUE),
+        estimate_sd = estimate_sd,
+        truth_sd = truth_sd,
+        estimate_sd_ratio = estimate_sd_ratio,
+        estimate_range_ratio = if (is.finite(truth_range) && truth_range > 0) estimate_range / truth_range else NA_real_,
+        estimate_iqr_ratio = if (is.finite(truth_iqr) && truth_iqr > 0) estimate_iqr / truth_iqr else NA_real_,
+        amplitude_collapse = !is.finite(estimate_sd_ratio) || estimate_sd_ratio < 0.02,
         stringsAsFactors = FALSE,
         check.names = FALSE
       )
@@ -1033,6 +1052,19 @@ accuracy_accumulators_to_summary <- function(acc) {
       pred_c <- estimated - mean(estimated)
       truth_c <- truth - mean(truth)
       centered_err <- pred_c - truth_c
+      estimate_sd <- if (length(estimated) >= 2L) stats::sd(estimated) else NA_real_
+      truth_sd <- if (length(truth) >= 2L) stats::sd(truth) else NA_real_
+      estimate_sd_ratio <- if (is.finite(truth_sd) && truth_sd > 0) estimate_sd / truth_sd else NA_real_
+      estimate_range <- if (length(estimated) >= 2L) {
+        stats::quantile(estimated, 0.95, na.rm = TRUE, names = FALSE) -
+          stats::quantile(estimated, 0.05, na.rm = TRUE, names = FALSE)
+      } else NA_real_
+      truth_range <- if (length(truth) >= 2L) {
+        stats::quantile(truth, 0.95, na.rm = TRUE, names = FALSE) -
+          stats::quantile(truth, 0.05, na.rm = TRUE, names = FALSE)
+      } else NA_real_
+      estimate_iqr <- if (length(estimated) >= 2L) stats::IQR(estimated, na.rm = TRUE) else NA_real_
+      truth_iqr <- if (length(truth) >= 2L) stats::IQR(truth, na.rm = TRUE) else NA_real_
       idx <- idx + 1L
       rows[[idx]] <- data.frame(
         group$base,
@@ -1051,6 +1083,12 @@ accuracy_accumulators_to_summary <- function(acc) {
         sign_accuracy = if (length(centered_err)) mean(sign(pred_c) == sign(truth_c), na.rm = TRUE) else NA_real_,
         false_high_rate = if (length(centered_err)) mean(pred_c > 0 & truth_c <= 0, na.rm = TRUE) else NA_real_,
         mean_estimated_sd = if (s$sd_n) s$sd_sum / s$sd_n else NaN,
+        estimate_sd = estimate_sd,
+        truth_sd = truth_sd,
+        estimate_sd_ratio = estimate_sd_ratio,
+        estimate_range_ratio = if (is.finite(truth_range) && truth_range > 0) estimate_range / truth_range else NA_real_,
+        estimate_iqr_ratio = if (is.finite(truth_iqr) && truth_iqr > 0) estimate_iqr / truth_iqr else NA_real_,
+        amplitude_collapse = !is.finite(estimate_sd_ratio) || estimate_sd_ratio < 0.02,
         stringsAsFactors = FALSE,
         check.names = FALSE
       )
@@ -1418,7 +1456,7 @@ build_config <- function(args, repo_dir) {
   input_policies <- arg_character_vec(args, "alfak2_input_policies", c("full", "minobs_matched"))
   bad_policies <- setdiff(input_policies, c("full", "minobs_matched", "soft_minobs"))
   if (length(bad_policies)) stop("Unsupported alfak2 input policies: ", paste(bad_policies, collapse = ", "), call. = FALSE)
-  graph_edge_weight <- as.character(arg_value(args, "alfak2_graph_edge_weight", "mutation"))
+  graph_edge_weight <- as.character(arg_value(args, "alfak2_graph_edge_weight", "normalized"))
   graph_edge_weight <- match.arg(graph_edge_weight, c("mutation", "unit", "normalized"))
   grf_centroid_mode <- normalize_grf_centroid_mode(arg_value(args, "grf_centroid_mode", "method_blind"))
   list(
