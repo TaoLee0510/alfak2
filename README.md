@@ -1,10 +1,11 @@
 # alfak2
 
-`alfak2` provides methods to infer fitness landscapes for aneuploid karyotypes
-from sparse two-timepoint count data and to support analyses of karyotype
-evolution. It combines bounded karyotype graph construction, local hierarchical
-Bayesian inference, and a graph Gaussian-process posterior with ordered
-copy-number epistasis penalties.
+`alfak2` implements **ALFA-K2: Adaptive Local-to-Global Fitness Landscapes for
+Aneuploid Karyotypes**. It provides methods to infer fitness landscapes for
+aneuploid karyotypes from sparse two-timepoint count data and to support
+analyses of karyotype evolution. It combines bounded karyotype graph
+construction, local hierarchical Bayesian inference, and a graph
+Gaussian-process posterior with ordered copy-number epistasis penalties.
 
 The active package has one pipeline:
 

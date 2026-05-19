@@ -4,13 +4,14 @@
 \name{alfak2-package}
 \alias{alfak2}
 \alias{alfak2-package}
-\title{alfak2: hierarchical fitness inference for aneuploid karyotype evolution}
+\title{ALFA-K2: Adaptive Local-to-Global Fitness Landscapes for Aneuploid Karyotypes}
 \description{
-\code{alfak2} provides methods to infer fitness landscapes for aneuploid
-karyotypes from sparse two-timepoint count data and to study karyotype
-evolution. The package builds bounded karyotype graphs, fits a local
-hierarchical Bayesian model, and propagates estimates across the graph with
-a Gaussian-process prior and ordered copy-number epistasis penalties.
+\code{alfak2} implements ALFA-K2 (Adaptive Local-to-Global Fitness Landscapes for
+Aneuploid Karyotypes). It provides methods to infer fitness landscapes for
+aneuploid karyotypes from sparse two-timepoint count data and to study
+karyotype evolution. The package builds bounded karyotype graphs, fits a
+local hierarchical Bayesian model, and propagates estimates across the graph
+with a Gaussian-process prior and ordered copy-number epistasis penalties.
 }
 \author{
 \strong{Maintainer}: Tao Li \email{Tao.Li2@moffitt.org}
