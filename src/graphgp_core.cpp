@@ -273,7 +273,8 @@ Rcpp::List alfak2_graph_posterior_cpp(Rcpp::IntegerMatrix karyotypes,
                                       Rcpp::NumericVector lambda_l_grid,
                                       Rcpp::NumericVector lambda_e_grid,
                                       Rcpp::NumericVector sigma_obs_grid,
-                                      double eps = 1e-5) {
+                                      double eps = 1e-5,
+                                      bool compute_variance = true) {
   if (anchor_index.size() == 0) Rcpp::stop("At least one local anchor is required.");
   if (anchor_mean.size() != anchor_index.size() || anchor_var.size() != anchor_index.size()) {
     Rcpp::stop("Anchor index, mean, and variance vectors must have equal length.");
@@ -346,13 +347,13 @@ Rcpp::List alfak2_graph_posterior_cpp(Rcpp::IntegerMatrix karyotypes,
 
   GraphSolveResult final = solve_graph(karyotypes, edge_from, edge_to, edge_weight,
                                        anchor0, anchor_mean, anchor_var,
-                                       best_l, best_e, best_s, eps, true);
+                                       best_l, best_e, best_s, eps, compute_variance);
   if (!final.ok) Rcpp::stop(final.status);
 
   Rcpp::NumericVector mean(final.mean.size()), sd(final.variance.size());
   for (int i = 0; i < final.mean.size(); ++i) {
     mean[i] = final.mean(i);
-    sd[i] = std::sqrt(std::max(0.0, final.variance(i)));
+    sd[i] = compute_variance ? std::sqrt(std::max(0.0, final.variance(i))) : NA_REAL;
   }
   return Rcpp::List::create(
     Rcpp::Named("mean") = mean,
@@ -370,6 +371,233 @@ Rcpp::List alfak2_graph_posterior_cpp(Rcpp::IntegerMatrix karyotypes,
       Rcpp::Named("sigma_obs") = gs,
       Rcpp::Named("score") = score
     ),
-    Rcpp::Named("factorization_status") = final.status
+    Rcpp::Named("factorization_status") = final.status,
+    Rcpp::Named("compute_variance") = compute_variance
+  );
+}
+
+static std::vector< std::vector<int> > build_undirected_adjacency(int n,
+                                                                  const Rcpp::IntegerVector& edge_from,
+                                                                  const Rcpp::IntegerVector& edge_to) {
+  std::vector< std::vector<int> > adj(n);
+  for (int e = 0; e < edge_from.size(); ++e) {
+    int i = edge_from[e] - 1;
+    int j = edge_to[e] - 1;
+    if (i < 0 || i >= n || j < 0 || j >= n || i == j) continue;
+    adj[i].push_back(j);
+    adj[j].push_back(i);
+  }
+  for (int i = 0; i < n; ++i) {
+    std::sort(adj[i].begin(), adj[i].end());
+    adj[i].erase(std::unique(adj[i].begin(), adj[i].end()), adj[i].end());
+  }
+  return adj;
+}
+
+static void fill_bfs_distances(const std::vector< std::vector<int> >& adj,
+                               int source,
+                               int column,
+                               Eigen::MatrixXd& distances) {
+  int n = adj.size();
+  double inf = std::numeric_limits<double>::infinity();
+  for (int i = 0; i < n; ++i) distances(i, column) = inf;
+  if (source < 0 || source >= n) return;
+  std::vector<int> queue(n);
+  int head = 0, tail = 0;
+  queue[tail++] = source;
+  distances(source, column) = 0.0;
+  while (head < tail) {
+    int cur = queue[head++];
+    double next_dist = distances(cur, column) + 1.0;
+    for (int nb : adj[cur]) {
+      if (std::isfinite(distances(nb, column))) continue;
+      distances(nb, column) = next_dist;
+      queue[tail++] = nb;
+    }
+  }
+}
+
+static double native_exp_kernel(double distance, double range, double sigma2) {
+  if (!std::isfinite(distance)) return 0.0;
+  return sigma2 * std::exp(-distance / range);
+}
+
+static double median_positive_anchor_distance(const Eigen::MatrixXd& distances,
+                                              const std::vector<int>& anchor0) {
+  std::vector<double> values;
+  int m = anchor0.size();
+  values.reserve(static_cast<size_t>(m) * static_cast<size_t>(std::max(0, m - 1)));
+  for (int row = 0; row < m; ++row) {
+    int idx = anchor0[row];
+    if (idx < 0 || idx >= distances.rows()) continue;
+    for (int col = 0; col < m; ++col) {
+      double d = distances(idx, col);
+      if (std::isfinite(d) && d > 0.0) values.push_back(d);
+    }
+  }
+  if (values.empty()) return NA_REAL;
+  size_t mid = values.size() / 2;
+  std::nth_element(values.begin(), values.begin() + mid, values.end());
+  double med = values[mid];
+  if (values.size() % 2 == 0) {
+    std::nth_element(values.begin(), values.begin() + mid - 1, values.end());
+    med = 0.5 * (med + values[mid - 1]);
+  }
+  return med;
+}
+
+static double row_mean_finite(const Rcpp::NumericMatrix& x, int row) {
+  double sum = 0.0;
+  int n = 0;
+  for (int j = 0; j < x.ncol(); ++j) {
+    double v = x(row, j);
+    if (!R_finite(v)) continue;
+    sum += v;
+    ++n;
+  }
+  if (n == 0) return NA_REAL;
+  return sum / static_cast<double>(n);
+}
+
+static double row_variance_finite(const Rcpp::NumericMatrix& x, int row) {
+  double mu = row_mean_finite(x, row);
+  if (!R_finite(mu)) return NA_REAL;
+  double ss = 0.0;
+  int n = 0;
+  for (int j = 0; j < x.ncol(); ++j) {
+    double v = x(row, j);
+    if (!R_finite(v)) continue;
+    double r = v - mu;
+    ss += r * r;
+    ++n;
+  }
+  if (n < 2) return NA_REAL;
+  return ss / static_cast<double>(n - 1);
+}
+
+// [[Rcpp::export]]
+Rcpp::List alfak2_native_kriging_cpp(int n_nodes,
+                                     Rcpp::IntegerVector edge_from,
+                                     Rcpp::IntegerVector edge_to,
+                                     Rcpp::IntegerVector anchor_index,
+                                     Rcpp::NumericMatrix anchor_values,
+                                     Rcpp::NumericVector anchor_sd,
+                                     double range = NA_REAL,
+                                     double sigma2 = NA_REAL,
+                                     double nugget = 1e-4,
+                                     bool compute_variance = true) {
+  if (n_nodes <= 0) Rcpp::stop("`n_nodes` must be positive.");
+  int m = anchor_index.size();
+  if (m < 2) Rcpp::stop("Native Kriging requires at least two anchors.");
+  if (anchor_values.ncol() != m) Rcpp::stop("`anchor_values` must have one column per anchor.");
+  if (anchor_values.nrow() < 1) Rcpp::stop("`anchor_values` must contain at least one row.");
+  if (anchor_sd.size() != m) Rcpp::stop("`anchor_sd` must have one value per anchor.");
+  if (!R_finite(nugget) || nugget <= 0.0) nugget = 1e-4;
+
+  std::vector<int> anchor0(m);
+  for (int j = 0; j < m; ++j) {
+    anchor0[j] = anchor_index[j] - 1;
+    if (anchor0[j] < 0 || anchor0[j] >= n_nodes) {
+      Rcpp::stop("Anchor index outside graph node range.");
+    }
+    if (!R_finite(anchor_values(0, j))) {
+      Rcpp::stop("The first row of `anchor_values` must contain finite point estimates.");
+    }
+  }
+
+  std::vector< std::vector<int> > adj = build_undirected_adjacency(n_nodes, edge_from, edge_to);
+  Eigen::MatrixXd distances(n_nodes, m);
+  for (int j = 0; j < m; ++j) {
+    if (j % 16 == 0) Rcpp::checkUserInterrupt();
+    fill_bfs_distances(adj, anchor0[j], j, distances);
+  }
+
+  double auto_range = median_positive_anchor_distance(distances, anchor0);
+  if (!R_finite(range) || range <= 0.0) range = R_finite(auto_range) && auto_range > 0.0 ? auto_range : 1.0;
+  if (!R_finite(sigma2) || sigma2 <= 0.0) sigma2 = row_variance_finite(anchor_values, 0);
+  if (!R_finite(sigma2) || sigma2 <= 0.0) sigma2 = 1e-4;
+
+  Eigen::MatrixXd kpo(n_nodes, m);
+  for (int i = 0; i < n_nodes; ++i) {
+    for (int j = 0; j < m; ++j) {
+      kpo(i, j) = native_exp_kernel(distances(i, j), range, sigma2);
+    }
+  }
+
+  Eigen::MatrixXd koo(m, m);
+  for (int r = 0; r < m; ++r) {
+    int node = anchor0[r];
+    for (int c = 0; c < m; ++c) {
+      koo(r, c) = native_exp_kernel(distances(node, c), range, sigma2);
+    }
+  }
+  for (int j = 0; j < m; ++j) {
+    double sd = anchor_sd[j];
+    double obs_var = (R_finite(sd) && sd > 0.0) ? sd * sd : nugget;
+    koo(j, j) += std::max(obs_var, nugget);
+  }
+
+  Eigen::MatrixXd koo_solve = koo;
+  Eigen::LDLT<Eigen::MatrixXd> solver;
+  solver.compute(koo_solve);
+  std::string solve_status = "ldlt";
+  if (solver.info() != Eigen::Success) {
+    double jitter = std::max(1e-8, nugget * 10.0);
+    bool ok = false;
+    for (int attempt = 1; attempt <= 5; ++attempt) {
+      koo_solve = koo;
+      koo_solve.diagonal().array() += jitter;
+      solver.compute(koo_solve);
+      if (solver.info() == Eigen::Success) {
+        ok = true;
+        solve_status = "ldlt_jittered";
+        break;
+      }
+      jitter *= 10.0;
+    }
+    if (!ok) Rcpp::stop("Native Kriging LDLT factorization failed.");
+  }
+
+  int n_draw = anchor_values.nrow();
+  Rcpp::NumericMatrix predictions(n_draw, n_nodes);
+  for (int r = 0; r < n_draw; ++r) {
+    double mu = row_mean_finite(anchor_values, r);
+    if (!R_finite(mu)) mu = row_mean_finite(anchor_values, 0);
+    Eigen::VectorXd y_centered(m);
+    for (int j = 0; j < m; ++j) {
+      double v = anchor_values(r, j);
+      if (!R_finite(v)) v = anchor_values(0, j);
+      y_centered(j) = v - mu;
+    }
+    Eigen::VectorXd alpha = solver.solve(y_centered);
+    Eigen::VectorXd pred = Eigen::VectorXd::Constant(n_nodes, mu) + kpo * alpha;
+    for (int i = 0; i < n_nodes; ++i) predictions(r, i) = pred(i);
+  }
+
+  Rcpp::NumericVector mean(n_nodes), sd(n_nodes);
+  for (int i = 0; i < n_nodes; ++i) mean[i] = predictions(0, i);
+  if (compute_variance) {
+    Eigen::MatrixXd solved = solver.solve(kpo.transpose());
+    for (int i = 0; i < n_nodes; ++i) {
+      double v = sigma2 + nugget - kpo.row(i).dot(solved.col(i));
+      if (!std::isfinite(v)) v = sigma2 + nugget;
+      sd[i] = std::sqrt(std::max(v, nugget));
+    }
+  } else {
+    for (int i = 0; i < n_nodes; ++i) sd[i] = NA_REAL;
+  }
+
+  return Rcpp::List::create(
+    Rcpp::Named("mean") = mean,
+    Rcpp::Named("sd") = sd,
+    Rcpp::Named("predictions") = predictions,
+    Rcpp::Named("range") = range,
+    Rcpp::Named("sigma2") = sigma2,
+    Rcpp::Named("nugget") = nugget,
+    Rcpp::Named("n_anchors") = m,
+    Rcpp::Named("auto_range") = auto_range,
+    Rcpp::Named("solve_status") = solve_status,
+    Rcpp::Named("engine") = "cpp",
+    Rcpp::Named("compute_variance") = compute_variance
   );
 }

@@ -25,7 +25,11 @@ run_local_tmb_attempt <- function(obj, par, control, n) {
     opt = opt,
     sdrep = if (inherits(sdrep, "try-error")) NULL else sdrep,
     sdreport_error = if (inherits(sdrep, "try-error")) conditionMessage(attr(sdrep, "condition")) else NULL,
-    frep = extract_tmb_vector(sdrep, "f", n),
+    frep = {
+      out <- extract_tmb_vector(sdrep, "f_report", n)
+      if (is.null(out)) out <- extract_tmb_vector(sdrep, "f", n)
+      out
+    },
     gradient_norm = gradient$value,
     gradient_error = gradient$error
   )
@@ -85,6 +89,176 @@ support_mass_by_tier <- function(values, support_tier) {
   out
 }
 
+resolve_support_tier_multiplier <- function(graph, support_tier_f_sd_multiplier = NULL) {
+  out <- rep(1, length(graph$labels))
+  if (is.null(support_tier_f_sd_multiplier)) return(out)
+  if (is.null(names(support_tier_f_sd_multiplier)) || any(!nzchar(names(support_tier_f_sd_multiplier)))) {
+    stop("`support_tier_f_sd_multiplier` must be a named numeric vector.", call. = FALSE)
+  }
+  support_tier_f_sd_multiplier <- as.numeric(support_tier_f_sd_multiplier)
+  names(support_tier_f_sd_multiplier) <- names(support_tier_f_sd_multiplier)
+  if (any(!is.finite(support_tier_f_sd_multiplier) | support_tier_f_sd_multiplier <= 0)) {
+    stop("`support_tier_f_sd_multiplier` values must be positive finite numbers.", call. = FALSE)
+  }
+  idx <- match(as.character(graph$support_tier), names(support_tier_f_sd_multiplier))
+  out[!is.na(idx)] <- support_tier_f_sd_multiplier[idx[!is.na(idx)]]
+  out
+}
+
+resolve_residual_prior_sd <- function(graph, borrowed_residual_sd = NULL, weakly_supported_residual_sd = NULL) {
+  out <- rep(0, length(graph$labels))
+  if (!is.null(borrowed_residual_sd)) {
+    validate_scalar(as.numeric(borrowed_residual_sd), "borrowed_residual_sd", lower = .Machine$double.eps)
+    out[graph$support_distance > 0L] <- as.numeric(borrowed_residual_sd)
+  }
+  if (!is.null(weakly_supported_residual_sd)) {
+    validate_scalar(as.numeric(weakly_supported_residual_sd), "weakly_supported_residual_sd", lower = .Machine$double.eps)
+    out[as.character(graph$support_tier) == "weakly_supported"] <- as.numeric(weakly_supported_residual_sd)
+  }
+  out
+}
+
+resolve_f_center_weights <- function(local_centering, local_centering_weight_mode,
+                                     graph, y0, y1, effective_count_total) {
+  local_centering <- match.arg(local_centering, c("none", "direct_weighted_mean", "reference_direct", "observed_weighted_mean"))
+  local_centering_weight_mode <- match.arg(local_centering_weight_mode, c("effective_count", "count_total", "uniform"))
+  n <- length(graph$labels)
+  out <- rep(0, n)
+  if (identical(local_centering, "none")) return(out)
+  base_weight <- switch(
+    local_centering_weight_mode,
+    effective_count = as.numeric(effective_count_total),
+    count_total = as.numeric(y0 + y1),
+    uniform = rep(1, n)
+  )
+  base_weight[!is.finite(base_weight) | base_weight < 0] <- 0
+  support_tier <- as.character(graph$support_tier)
+  direct <- support_tier == "directly_informed" | as.integer(graph$support_distance) == 0L
+  observed <- (y0 + y1) > 0
+  if (identical(local_centering, "direct_weighted_mean")) {
+    out[direct] <- base_weight[direct]
+  } else if (identical(local_centering, "observed_weighted_mean")) {
+    out[observed] <- base_weight[observed]
+  } else if (identical(local_centering, "reference_direct")) {
+    candidates <- which(direct)
+    if (length(candidates)) {
+      ref <- candidates[which.max(base_weight[candidates])]
+      out[ref] <- 1
+    }
+  }
+  if (!any(out > 0)) out[] <- 0
+  out
+}
+
+safe_rowsum_local <- function(x, group, n) {
+  out <- numeric(n)
+  if (!length(x) || !length(group)) return(out)
+  tab <- rowsum(as.numeric(x), group = as.integer(group), reorder = FALSE)
+  out[as.integer(rownames(tab))] <- as.numeric(tab[, 1])
+  out
+}
+
+local_gradient_diagnostics <- function(obj, opt, graph, y0, y1, effective_count_total,
+                                       eta_prior_mean, eta_prior_sd_vec, report,
+                                       summary = NULL, top_n = 20) {
+  grad <- try(obj$gr(opt$par), silent = TRUE)
+  if (inherits(grad, "try-error")) {
+    return(list(error = conditionMessage(attr(grad, "condition"))))
+  }
+  gpl <- obj$env$parList(grad)
+  par <- obj$env$parList(opt$par)
+  max_abs <- function(x) if (length(x) && any(is.finite(x))) max(abs(as.numeric(x)), na.rm = TRUE) else NA_real_
+  block <- data.frame(
+    grad_eta_max_abs = max_abs(gpl$eta),
+    grad_f_max_abs = max_abs(gpl$f),
+    grad_delta_context_max_abs = max_abs(gpl$delta_context),
+    grad_mu_group_max_abs = max_abs(gpl$mu_group),
+    grad_log_sigma_neighbor_abs = max_abs(gpl$log_sigma_neighbor),
+    grad_log_sigma_anchor_abs = max_abs(gpl$log_sigma_anchor),
+    grad_log_tau_group_max_abs = max_abs(gpl$log_tau_group),
+    global_gradient_norm = max_abs(grad),
+    stringsAsFactors = FALSE
+  )
+  block_names <- c("eta", "f", "delta_context", "mu_group", "log_sigma_neighbor", "log_sigma_anchor", "log_tau_group")
+  block_values <- c(
+    block$grad_eta_max_abs,
+    block$grad_f_max_abs,
+    block$grad_delta_context_max_abs,
+    block$grad_mu_group_max_abs,
+    block$grad_log_sigma_neighbor_abs,
+    block$grad_log_sigma_anchor_abs,
+    block$grad_log_tau_group_max_abs
+  )
+  block$max_gradient_block_name <- block_names[which.max(replace(block_values, !is.finite(block_values), -Inf))]
+
+  support_tier <- as.character(graph$support_tier)
+  support_distance <- as.integer(graph$support_distance)
+  support_scope <- ifelse(support_tier == "directly_informed", "direct",
+                          ifelse(support_tier == "local_borrowed", "local_borrowed",
+                                 ifelse(support_tier == "weakly_supported", "weakly_supported", "other")))
+  grad_f <- as.numeric(gpl$f)
+  by_tier <- do.call(rbind, lapply(split(seq_along(grad_f), interaction(support_tier, support_scope, drop = TRUE)), function(ii) {
+    data.frame(
+      support_tier = support_tier[ii[[1]]],
+      support_scope = support_scope[ii[[1]]],
+      n_nodes = length(ii),
+      grad_f_max_abs = max(abs(grad_f[ii]), na.rm = TRUE),
+      grad_f_median_abs = stats::median(abs(grad_f[ii]), na.rm = TRUE),
+      stringsAsFactors = FALSE
+    )
+  }))
+  block$grad_f_direct_max_abs <- max_abs(grad_f[support_scope == "direct"])
+  block$grad_f_local_borrowed_max_abs <- max_abs(grad_f[support_scope == "local_borrowed"])
+  block$grad_f_weakly_supported_max_abs <- max_abs(grad_f[support_scope == "weakly_supported"])
+  block$grad_f_graph_borrowed_max_abs <- max_abs(grad_f[support_scope == "other"])
+
+  n <- length(graph$labels)
+  parent_count <- tabulate(as.integer(unlist(graph$parent_to0)) + 1L, nbins = n)
+  child_count <- tabulate(as.integer(unlist(graph$parent_from0)) + 1L, nbins = n)
+  parent_weight_sum <- safe_rowsum_local(as.numeric(unlist(graph$parent_weight)), as.integer(unlist(graph$parent_to0)) + 1L, n)
+  child_weight_sum <- safe_rowsum_local(as.numeric(unlist(graph$parent_weight)), as.integer(unlist(graph$parent_from0)) + 1L, n)
+  n_transition_in <- tabulate(as.integer(unlist(graph$transition_to0)) + 1L, nbins = n)
+  n_transition_out <- tabulate(as.integer(unlist(graph$transition_from0)) + 1L, nbins = n)
+  ord <- order(abs(grad_f), decreasing = TRUE)
+  ord <- ord[seq_len(min(top_n, length(ord)))]
+  fitness_mean <- if (!is.null(summary) && "fitness_mean" %in% names(summary)) as.numeric(summary$fitness_mean) else as.numeric(report$f_report)
+  fitness_sd <- if (!is.null(summary) && "fitness_sd" %in% names(summary)) as.numeric(summary$fitness_sd) else rep(NA_real_, n)
+  top <- data.frame(
+    node_id = ord,
+    karyotype = as.character(graph$labels)[ord],
+    support_tier = support_tier[ord],
+    support_distance = support_distance[ord],
+    count_t0 = as.numeric(y0)[ord],
+    count_t1 = as.numeric(y1)[ord],
+    count_total = as.numeric(y0 + y1)[ord],
+    effective_count_total = as.numeric(effective_count_total)[ord],
+    pi0 = as.numeric(report$pi0)[ord],
+    pi1 = as.numeric(report$pi1)[ord],
+    fitness_mean = fitness_mean[ord],
+    fitness_sd = fitness_sd[ord],
+    grad_f = grad_f[ord],
+    eta = as.numeric(par$eta)[ord],
+    grad_eta = as.numeric(gpl$eta)[ord],
+    eta_prior_mean = as.numeric(eta_prior_mean)[ord],
+    eta_prior_sd = as.numeric(eta_prior_sd_vec)[ord],
+    parent_count = parent_count[ord],
+    parent_weight_sum = parent_weight_sum[ord],
+    child_count = child_count[ord],
+    child_weight_sum = child_weight_sum[ord],
+    n_transition_in = n_transition_in[ord],
+    n_transition_out = n_transition_out[ord],
+    is_observed = as.logical((y0 + y1) > 0)[ord],
+    stringsAsFactors = FALSE
+  )
+  list(
+    gradient = as.numeric(grad),
+    parameter_block_gradient = gpl,
+    gradient_block_summary = block,
+    grad_f_by_support_tier = by_tier,
+    top_gradient_nodes = top
+  )
+}
+
 #' Fit the local hierarchical posterior
 #'
 #' The likelihood and hierarchical prior objective are implemented in TMB. This
@@ -117,6 +291,31 @@ support_mass_by_tier <- function(values, support_tier) {
 #'   initial log-abundances.
 #' @param eta_distance_penalty Additional negative prior-mean shift per support
 #'   shell beyond the first borrowed shell.
+#' @param local_parameterization Local TMB fitness parameterization. `"f"` uses
+#'   per-time fitness directly. `"g_equivalent"` optimizes `g = dt * f` but
+#'   reports fitness on the original per-time scale.
+#' @param return_optimizer_diagnostics Whether to attach gradient block and top
+#'   node diagnostics to `diagnostics`.
+#' @param return_tmb_objects Whether to attach TMB optimizer objects to the
+#'   returned fit. Defaults to `FALSE` because these objects are large.
+#' @param support_tier_f_sd_multiplier Optional named multiplier for local
+#'   fitness prior standard deviations by support tier.
+#' @param borrowed_residual_sd Optional extra residual prior standard deviation
+#'   around parent-propagated means for borrowed nodes.
+#' @param weakly_supported_residual_sd Optional extra residual prior standard
+#'   deviation for weakly supported nodes.
+#' @param local_centering Optional strong fitness centering penalty for local
+#'   identifiability probes.
+#' @param local_centering_weight Penalty weight used when `local_centering` is
+#'   not `"none"`.
+#' @param local_centering_weight_mode Weighting scheme for centering penalties.
+#' @param fixed_sigma_anchor,fixed_sigma_neighbor,fixed_tau_group Optional fixed
+#'   local scale values. `NA` keeps the corresponding scale estimated.
+#' @param sdreport_mode TMB ADREPORT selection used for covariance diagnostics.
+#'   Defaults to the historical all-fitness plus probability reports.
+#' @param initial_jitter_sd Optional standard deviation for benchmark/debug
+#'   multistart jitter applied to eta, fitness, and context-effect initial values.
+#' @param initial_seed Optional seed used when `initial_jitter_sd > 0`.
 #'
 #' @return An `alfak2_local_fit` object.
 #' @export
@@ -132,12 +331,55 @@ fit_local_posterior <- function(data,
                                 eta_prior_sd = 5,
                                 eta_borrowed_prior_mean = -6,
                                 eta_borrowed_prior_sd = 1.5,
-                                eta_distance_penalty = 0.75) {
+                                eta_distance_penalty = 0.75,
+                                local_parameterization = c("f", "g_equivalent"),
+                                return_optimizer_diagnostics = FALSE,
+                                return_tmb_objects = FALSE,
+                                support_tier_f_sd_multiplier = NULL,
+                                borrowed_residual_sd = NULL,
+                                weakly_supported_residual_sd = NULL,
+                                local_centering = c("none", "direct_weighted_mean", "reference_direct", "observed_weighted_mean"),
+                                local_centering_weight = 0,
+                                local_centering_weight_mode = c("effective_count", "count_total", "uniform"),
+                                fixed_sigma_anchor = NA_real_,
+                                fixed_sigma_neighbor = NA_real_,
+                                fixed_tau_group = NA_real_,
+                                sdreport_mode = c("all_f_current", "none", "direct_f_only", "direct_and_local_borrowed_f", "pi0_pi1_only"),
+                                initial_jitter_sd = 0,
+                                initial_seed = NULL) {
   if (!inherits(data, "alfak2_data")) {
     stop("`data` must be an alfak2_data object.", call. = FALSE)
   }
   observation_model <- match_observation_model(observation_model)
   observation_weight_mode <- match_observation_weight_mode(observation_weight_mode)
+  local_parameterization <- match.arg(local_parameterization)
+  local_centering <- match.arg(local_centering)
+  local_centering_weight_mode <- match.arg(local_centering_weight_mode)
+  sdreport_mode <- match.arg(sdreport_mode)
+  validate_scalar(as.numeric(local_centering_weight), "local_centering_weight", lower = 0)
+  validate_scalar(as.numeric(initial_jitter_sd), "initial_jitter_sd", lower = 0)
+  initial_jitter_sd <- as.numeric(initial_jitter_sd)
+  if (!is.null(initial_seed)) {
+    if (!is.numeric(initial_seed) || length(initial_seed) != 1L || !is.finite(initial_seed)) {
+      stop("`initial_seed` must be NULL or one finite numeric seed.", call. = FALSE)
+    }
+    initial_seed <- as.integer(initial_seed)
+  }
+  validate_optional_positive <- function(x, name) {
+    if (is.null(x) || length(x) != 1L || is.na(x)) return(NA_real_)
+    validate_scalar(as.numeric(x), name, lower = .Machine$double.eps)
+    as.numeric(x)
+  }
+  fixed_sigma_anchor <- validate_optional_positive(fixed_sigma_anchor, "fixed_sigma_anchor")
+  fixed_sigma_neighbor <- validate_optional_positive(fixed_sigma_neighbor, "fixed_sigma_neighbor")
+  fixed_tau_group <- validate_optional_positive(fixed_tau_group, "fixed_tau_group")
+  sdreport_mode_code <- match(sdreport_mode, c("none", "direct_f_only", "direct_and_local_borrowed_f", "all_f_current", "pi0_pi1_only")) - 1L
+  if (!is.logical(return_optimizer_diagnostics) || length(return_optimizer_diagnostics) != 1L || is.na(return_optimizer_diagnostics)) {
+    stop("`return_optimizer_diagnostics` must be TRUE or FALSE.", call. = FALSE)
+  }
+  if (!is.logical(return_tmb_objects) || length(return_tmb_objects) != 1L || is.na(return_tmb_objects)) {
+    stop("`return_tmb_objects` must be TRUE or FALSE.", call. = FALSE)
+  }
   dm_concentration_grid <- validate_positive_grid(dm_concentration, "dm_concentration")
   if (!is.numeric(gradient_tolerance) || length(gradient_tolerance) != 1L ||
       is.na(gradient_tolerance) || gradient_tolerance <= 0) {
@@ -196,21 +438,41 @@ fit_local_posterior <- function(data,
   eta_prior_mean[borrowed_eta] <- as.numeric(eta_borrowed_prior_mean) -
     as.numeric(eta_distance_penalty) * pmax(0, as.integer(graph$support_distance[borrowed_eta]) - 1L)
   eta_prior_sd_vec[borrowed_eta] <- as.numeric(eta_borrowed_prior_sd)
+  f_prior_sd_multiplier <- resolve_support_tier_multiplier(graph, support_tier_f_sd_multiplier)
+  residual_prior_sd <- resolve_residual_prior_sd(graph, borrowed_residual_sd, weakly_supported_residual_sd)
+  f_center_weights <- resolve_f_center_weights(local_centering, local_centering_weight_mode, graph, y0, y1, effective_count_total)
   p0 <- (y0_init + 0.5) / sum(y0_init + 0.5)
   p1 <- (y1_init + 0.5) / sum(y1_init + 0.5)
   f0 <- log(p1) - log(p0)
   f0 <- f0 - mean(f0)
+  f0_scale <- f0 / max(data$dt, .Machine$double.eps)
   n_context <- length(graph$context_label)
   n_group <- max(unlist(graph$context_group0), 0L) + 1L
   parameters <- list(
     eta = log(p0),
-    f = f0 / max(data$dt, .Machine$double.eps),
+    f = if (identical(local_parameterization, "g_equivalent")) f0 else f0_scale,
     delta_context = rep(0, n_context),
     mu_group = rep(0, n_group),
-    log_sigma_neighbor = log(0.35),
-    log_sigma_anchor = log(0.6),
-    log_tau_group = rep(log(0.2), n_group)
+    log_sigma_neighbor = log(if (is.finite(fixed_sigma_neighbor)) pmax(fixed_sigma_neighbor - 1e-5, 1e-8) else 0.35),
+    log_sigma_anchor = log(if (is.finite(fixed_sigma_anchor)) pmax(fixed_sigma_anchor - 1e-5, 1e-8) else 0.6),
+    log_tau_group = rep(log(if (is.finite(fixed_tau_group)) pmax(fixed_tau_group - 1e-5, 1e-8) else 0.2), n_group)
   )
+  if (initial_jitter_sd > 0) {
+    if (!is.null(initial_seed)) {
+      old_seed <- if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) get(".Random.seed", envir = .GlobalEnv) else NULL
+      on.exit({
+        if (is.null(old_seed)) {
+          if (exists(".Random.seed", envir = .GlobalEnv, inherits = FALSE)) rm(".Random.seed", envir = .GlobalEnv)
+        } else {
+          assign(".Random.seed", old_seed, envir = .GlobalEnv)
+        }
+      }, add = TRUE)
+      set.seed(initial_seed)
+    }
+    parameters$eta <- parameters$eta + stats::rnorm(length(parameters$eta), 0, initial_jitter_sd)
+    parameters$f <- parameters$f + stats::rnorm(length(parameters$f), 0, initial_jitter_sd)
+    parameters$delta_context <- parameters$delta_context + stats::rnorm(length(parameters$delta_context), 0, initial_jitter_sd)
+  }
   tmb_data <- list(
     y0 = as.numeric(y0),
     y1 = as.numeric(y1),
@@ -235,7 +497,16 @@ fit_local_posterior <- function(data,
     scale_prior_scale = 1.0,
     observation_model = as.integer(observation_model == "dirichlet_multinomial"),
     observation_weight_mode = as.integer(observation_weight_mode == "likelihood"),
-    dm_concentration = as.numeric(dm_concentration_grid[1])
+    dm_concentration = as.numeric(dm_concentration_grid[1]),
+    local_parameterization = as.integer(identical(local_parameterization, "g_equivalent")),
+    f_prior_sd_multiplier = as.numeric(f_prior_sd_multiplier),
+    residual_prior_sd = as.numeric(residual_prior_sd),
+    f_center_weights = as.numeric(f_center_weights),
+    f_centering_weight = as.numeric(local_centering_weight),
+    fixed_sigma_neighbor = if (is.finite(fixed_sigma_neighbor)) as.numeric(fixed_sigma_neighbor) else -1,
+    fixed_sigma_anchor = if (is.finite(fixed_sigma_anchor)) as.numeric(fixed_sigma_anchor) else -1,
+    fixed_tau_group = if (is.finite(fixed_tau_group)) as.numeric(fixed_tau_group) else -1,
+    sdreport_mode = as.integer(sdreport_mode_code)
   )
 
   concentration_results <- lapply(dm_concentration_grid, function(phi) {
@@ -397,8 +668,11 @@ fit_local_posterior <- function(data,
   dm_concentration_selected <- selected$dm_concentration
   opt <- attempt$opt
   plist <- obj$env$parList(opt$par)
-  f_mean <- as.numeric(plist$f)
   report <- selected$report
+  f_mean <- if (!is.null(report$f_report)) as.numeric(report$f_report) else as.numeric(plist$f)
+  plist_raw <- plist
+  plist$f_raw <- plist_raw$f
+  plist$f <- f_mean
   pi0_report <- as.numeric(report$pi0)
   pi1_report <- as.numeric(report$pi1)
   f_sd <- selected$f_sd
@@ -443,6 +717,7 @@ fit_local_posterior <- function(data,
     observation_model = observation_model,
     observation_weight_mode = observation_weight_mode,
     likelihood_model = likelihood_model,
+    local_parameterization = local_parameterization,
     dm_concentration = dm_concentration_selected,
     dm_concentration_grid = as.numeric(dm_concentration_grid),
     dm_concentration_objective = stats::setNames(objectives, as.character(dm_concentration_grid)),
@@ -455,10 +730,45 @@ fit_local_posterior <- function(data,
       distance_penalty = as.numeric(eta_distance_penalty),
       n_borrowed_shrunk = sum(borrowed_eta)
     ),
+    f_prior = list(
+      support_tier_sd_multiplier = support_tier_f_sd_multiplier,
+      borrowed_residual_sd = borrowed_residual_sd,
+      weakly_supported_residual_sd = weakly_supported_residual_sd
+    ),
+    local_centering = list(
+      mode = local_centering,
+      weight = as.numeric(local_centering_weight),
+      weight_mode = local_centering_weight_mode,
+      n_weighted_nodes = sum(f_center_weights > 0)
+    ),
+    fixed_scale = list(
+      sigma_anchor = fixed_sigma_anchor,
+      sigma_neighbor = fixed_sigma_neighbor,
+      tau_group = fixed_tau_group
+    ),
+    sdreport_mode = sdreport_mode,
+    initial_jitter = list(
+      sd = initial_jitter_sd,
+      seed = initial_seed
+    ),
     pi0_support_mass = support_mass_by_tier(pi0_report, graph$support_tier),
     pi1_support_mass = support_mass_by_tier(pi1_report, graph$support_tier)
   )
-  new_alfak2_local_fit(list(
+  if (isTRUE(return_optimizer_diagnostics)) {
+    diagnostics$optimizer <- local_gradient_diagnostics(
+      obj = obj,
+      opt = opt,
+      graph = graph,
+      y0 = y0,
+      y1 = y1,
+      effective_count_total = effective_count_total,
+      eta_prior_mean = eta_prior_mean,
+      eta_prior_sd_vec = eta_prior_sd_vec,
+      report = report,
+      summary = summary
+    )
+  }
+  out <- list(
     data = data,
     graph = graph,
     summary = summary,
@@ -466,5 +776,14 @@ fit_local_posterior <- function(data,
     sdreport = attempt$sdrep,
     posterior_predictive = report[c("pi0", "pi1")],
     diagnostics = diagnostics
-  ))
+  )
+  if (isTRUE(return_tmb_objects)) {
+    out$optimizer <- list(
+      obj = obj,
+      opt = opt,
+      par = opt$par,
+      gradient = try(obj$gr(opt$par), silent = TRUE)
+    )
+  }
+  new_alfak2_local_fit(out)
 }
