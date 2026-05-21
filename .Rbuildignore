@@ -10,7 +10,8 @@
 ^src/.*\.(o|so|dll|dylib)$
 ^src/.*\.tmp$
 ^src/symbols\.rds$
-^benchmark$
+^benchmark/results(/|$)
+^benchmark/data$
 ^doc$
 ^Meta$
 ^build$

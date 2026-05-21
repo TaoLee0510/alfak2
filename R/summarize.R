@@ -26,3 +26,8 @@ summary.alfak2_fit <- function(object, ...) {
 summary.alfak2_local_fit <- function(object, ...) {
   summarize_alfak2(object, ...)
 }
+
+#' @export
+summary.alfak2_global_fit <- function(object, ...) {
+  summarize_alfak2(object, ...)
+}

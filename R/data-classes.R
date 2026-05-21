@@ -21,6 +21,11 @@ new_alfak2_local_fit <- function(x) {
   x
 }
 
+new_alfak2_global_fit <- function(x) {
+  class(x) <- c("alfak2_global_fit", setdiff(class(x), "alfak2_global_fit"))
+  x
+}
+
 new_alfak2_fit <- function(x) {
   class(x) <- "alfak2_fit"
   x

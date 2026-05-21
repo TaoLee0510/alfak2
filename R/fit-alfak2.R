@@ -16,6 +16,13 @@
 #' @param lambda_l_grid,lambda_e_grid,sigma_obs_grid Hyperparameter grids passed
 #'   to the compiled graph posterior.
 #' @param graph_edge_weight Edge weighting used by the global graph prior.
+#' @param extrapolation_method Second-layer extrapolation method. The default
+#'   `"graph_gaussian_baseline"` preserves the historical global graph posterior
+#'   path. The legacy alias `"graph_gaussian"` is still accepted.
+#' @param max_prediction_distance Maximum support distance reported as reliable
+#'   for near-field extrapolation methods.
+#' @param extrapolation_control Optional named list of method-specific controls
+#'   passed to `fit_extrapolation_layer()`.
 #' @param anchor_support_tiers Local support tiers used as global graph anchors;
 #'   defaults to `"all"` to preserve the legacy public API behavior.
 #' @param anchor_exclude Optional karyotype labels to exclude from the global
@@ -78,6 +85,19 @@ fit_alfak2 <- function(counts,
                        lambda_e_grid = c(0.05, 0.25, 1),
                        sigma_obs_grid = c(0.02, 0.05, 0.1),
                        graph_edge_weight = c("mutation", "unit", "normalized"),
+                       extrapolation_method = c(
+                         "graph_gaussian_baseline",
+                         "edge_effect_empirical_bayes",
+                         "edge_effect_interaction_path_ensemble",
+                         "kronecker_or_graph_trend_filtering",
+                         "local_NNGP_or_GPnn",
+                         "delta_tree_ensemble",
+                         "tabpfn_nearfield_feature_model",
+                         "truncated_nearfield_gmrf",
+                         "local_polynomial_stencil"
+                       ),
+                       max_prediction_distance = 2,
+                       extrapolation_control = list(),
                        anchor_support_tiers = "all",
                        anchor_exclude = character(),
                        anchor_covariance_inflation = c(
@@ -112,6 +132,12 @@ fit_alfak2 <- function(counts,
   input_depth <- modes$input_depth
   effective_depth_mode <- modes$effective_depth_mode
   graph_edge_weight <- match.arg(graph_edge_weight)
+  extrapolation_method <- match_extrapolation_method(extrapolation_method)
+  max_prediction_distance <- validate_prediction_distance(max_prediction_distance)
+  if (!is.list(extrapolation_control) ||
+      (length(extrapolation_control) && (is.null(names(extrapolation_control)) || any(!nzchar(names(extrapolation_control)))))) {
+    stop("`extrapolation_control` must be a named list.", call. = FALSE)
+  }
   transition_kernel <- match.arg(transition_kernel)
   effective_depth_rounding <- match.arg(effective_depth_rounding)
   observation_weight_mode <- match_observation_weight_mode(observation_weight_mode)
@@ -152,20 +178,26 @@ fit_alfak2 <- function(counts,
     max_cn = max_cn,
     max_nodes = max_nodes
   )
-  global <- fit_graph_posterior(
-    local,
-    global_graph,
-    lambda_l_grid = lambda_l_grid,
-    lambda_e_grid = lambda_e_grid,
-    sigma_obs_grid = sigma_obs_grid,
-    graph_edge_weight = graph_edge_weight,
-    anchor_support_tiers = anchor_support_tiers,
-    anchor_exclude = anchor_exclude,
-    anchor_covariance_inflation = anchor_covariance_inflation,
-    anchor_count_reference = anchor_count_reference,
-    anchor_count_power = anchor_count_power,
-    anchor_min_effective_count = anchor_min_effective_count
+  global_args <- c(
+    list(
+      local_fit = local,
+      graph = global_graph,
+      method = extrapolation_method,
+      max_prediction_distance = max_prediction_distance,
+      lambda_l_grid = lambda_l_grid,
+      lambda_e_grid = lambda_e_grid,
+      sigma_obs_grid = sigma_obs_grid,
+      graph_edge_weight = graph_edge_weight,
+      anchor_support_tiers = anchor_support_tiers,
+      anchor_exclude = anchor_exclude,
+      anchor_covariance_inflation = anchor_covariance_inflation,
+      anchor_count_reference = anchor_count_reference,
+      anchor_count_power = anchor_count_power,
+      anchor_min_effective_count = anchor_min_effective_count
+    ),
+    extrapolation_control
   )
+  global <- do.call(fit_extrapolation_layer, global_args)
   input_depth_diag <- data$metadata$input_depth
   if (is.null(input_depth_diag)) input_depth_diag <- list(input_depth = "raw")
   fit <- list(
@@ -183,6 +215,8 @@ fit_alfak2 <- function(counts,
       dm_concentration_grid = obs_controls$dm_concentration,
       transition_kernel = transition_kernel,
       graph_edge_weight = graph_edge_weight,
+      extrapolation_method = extrapolation_method,
+      max_prediction_distance = max_prediction_distance,
       anchor_support_tiers = anchor_support_tiers,
       anchor_exclude = as.character(anchor_exclude),
       anchor_count_reference = anchor_count_reference,

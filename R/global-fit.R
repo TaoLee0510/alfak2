@@ -107,6 +107,8 @@ resolve_anchor_tiers <- function(anchor_support_tiers) {
 #'   finite local rows.
 #' @param anchor_exclude Optional karyotype labels to exclude from the anchor
 #'   set, used for neighbor-holdout validation.
+#' @param compute_sd Whether to compute diagonal posterior standard deviations.
+#'   Set to `FALSE` for mean-only global scoring on large benchmark graphs.
 #'
 #' @return A list containing node summaries and tuning diagnostics.
 #' @export
@@ -129,13 +131,17 @@ fit_graph_posterior <- function(local_fit,
                                 anchor_count_reference = NULL,
                                 anchor_count_power = 1,
                                 anchor_min_effective_count = 0,
-                                anchor_exclude = character()) {
+                                anchor_exclude = character(),
+                                compute_sd = TRUE) {
   if (!inherits(local_fit, "alfak2_local_fit")) {
     stop("`local_fit` must be an alfak2_local_fit object.", call. = FALSE)
   }
   if (is.null(graph)) graph <- local_fit$graph
   if (!inherits(graph, "alfak2_graph")) stop("`graph` must be an alfak2_graph object.", call. = FALSE)
   graph_edge_weight <- match.arg(graph_edge_weight)
+  if (!is.logical(compute_sd) || length(compute_sd) != 1L || is.na(compute_sd)) {
+    stop("`compute_sd` must be TRUE or FALSE.", call. = FALSE)
+  }
   anchor_tiers <- resolve_anchor_tiers(anchor_support_tiers)
   if (!is.null(anchor_min_effective_count)) {
     validate_scalar(as.numeric(anchor_min_effective_count), "anchor_min_effective_count", lower = 0)
@@ -221,7 +227,8 @@ fit_graph_posterior <- function(local_fit,
       lambda_l_grid = as.numeric(lambda_l_grid),
       lambda_e_grid = as.numeric(lambda_e_grid),
       sigma_obs_grid = as.numeric(sigma_obs_grid),
-      eps = eps
+      eps = eps,
+      compute_variance = isTRUE(compute_sd)
     ),
     error = function(e) {
       alfak2_abort(
@@ -240,9 +247,11 @@ fit_graph_posterior <- function(local_fit,
 
   tier <- as.character(graph$support_tier)
   tier[graph$support_distance > 2L] <- "graph_borrowed"
-  prior_dominated <- res$sd > stats::quantile(res$sd, 0.9, na.rm = TRUE) &
-    !(tier %in% c("directly_informed", "local_borrowed", "weakly_supported"))
-  tier[prior_dominated] <- "prior_dominated"
+  if (isTRUE(compute_sd) && any(is.finite(res$sd))) {
+    prior_dominated <- res$sd > stats::quantile(res$sd, 0.9, na.rm = TRUE) &
+      !(tier %in% c("directly_informed", "local_borrowed", "weakly_supported"))
+    tier[prior_dominated] <- "prior_dominated"
+  }
   summary <- data.frame(
     node_id = seq_along(graph$labels),
     karyotype = as.character(graph$labels),
@@ -283,7 +292,8 @@ fit_graph_posterior <- function(local_fit,
       anchor_count_reference = anchor_count_reference,
       anchor_count_power = anchor_count_power,
       anchor_min_effective_count = anchor_min_effective_count,
-      anchor_excluded = length(anchor_exclude)
+      anchor_excluded = length(anchor_exclude),
+      compute_sd = isTRUE(compute_sd)
     ),
     tuning_grid = res$grid,
     diagnostics = list(
@@ -296,7 +306,9 @@ fit_graph_posterior <- function(local_fit,
       anchor_excluded = as.character(anchor_exclude),
       anchor_count_excluded = sum(!count_ok & !is.na(anchor_match) & is.finite(local_fit$summary$fitness_mean) & tier_ok),
       anchor_min_effective_count = anchor_min_effective_count,
-      anchor_variance_multiplier_summary = summary(anchor_var_multiplier)
+      anchor_variance_multiplier_summary = summary(anchor_var_multiplier),
+      compute_sd = isTRUE(compute_sd),
+      posterior_sd_mode = if (isTRUE(compute_sd)) "diagonal" else "none"
     )
   )
 }

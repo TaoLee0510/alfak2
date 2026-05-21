@@ -18,6 +18,13 @@ fit_alfak2(
   lambda_e_grid = c(0.05, 0.25, 1),
   sigma_obs_grid = c(0.02, 0.05, 0.1),
   graph_edge_weight = c("mutation", "unit", "normalized"),
+  extrapolation_method = c("graph_gaussian_baseline",
+    "edge_effect_empirical_bayes", "edge_effect_interaction_path_ensemble",
+    "kronecker_or_graph_trend_filtering", "local_NNGP_or_GPnn",
+    "delta_tree_ensemble", "tabpfn_nearfield_feature_model",
+    "truncated_nearfield_gmrf", "local_polynomial_stencil"),
+  max_prediction_distance = 2,
+  extrapolation_control = list(),
   anchor_support_tiers = "all",
   anchor_exclude = character(),
   anchor_covariance_inflation = c(TMB_sdreport = 1, untrusted_gradient = 4,
@@ -65,6 +72,16 @@ transport. \code{"exact"} uses chromosome-level missegregation probabilities;
 to the compiled graph posterior.}
 
 \item{graph_edge_weight}{Edge weighting used by the global graph prior.}
+
+\item{extrapolation_method}{Second-layer extrapolation method. The default
+\code{"graph_gaussian_baseline"} preserves the historical global graph posterior
+path. The legacy alias \code{"graph_gaussian"} is still accepted.}
+
+\item{max_prediction_distance}{Maximum support distance reported as reliable
+for near-field extrapolation methods.}
+
+\item{extrapolation_control}{Optional named list of method-specific controls
+passed to \code{fit_extrapolation_layer()}.}
 
 \item{anchor_support_tiers}{Local support tiers used as global graph anchors;
 defaults to \code{"all"} to preserve the legacy public API behavior.}

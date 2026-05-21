@@ -19,7 +19,8 @@ fit_graph_posterior(
   anchor_count_reference = NULL,
   anchor_count_power = 1,
   anchor_min_effective_count = 0,
-  anchor_exclude = character()
+  anchor_exclude = character(),
+  compute_sd = TRUE
 )
 }
 \arguments{
@@ -57,6 +58,9 @@ finite local rows.}
 
 \item{anchor_exclude}{Optional karyotype labels to exclude from the anchor
 set, used for neighbor-holdout validation.}
+
+\item{compute_sd}{Whether to compute diagonal posterior standard deviations.
+Set to \code{FALSE} for mean-only global scoring on large benchmark graphs.}
 }
 \value{
 A list containing node summaries and tuning diagnostics.

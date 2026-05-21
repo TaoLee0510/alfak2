@@ -273,7 +273,8 @@ Rcpp::List alfak2_graph_posterior_cpp(Rcpp::IntegerMatrix karyotypes,
                                       Rcpp::NumericVector lambda_l_grid,
                                       Rcpp::NumericVector lambda_e_grid,
                                       Rcpp::NumericVector sigma_obs_grid,
-                                      double eps = 1e-5) {
+                                      double eps = 1e-5,
+                                      bool compute_variance = true) {
   if (anchor_index.size() == 0) Rcpp::stop("At least one local anchor is required.");
   if (anchor_mean.size() != anchor_index.size() || anchor_var.size() != anchor_index.size()) {
     Rcpp::stop("Anchor index, mean, and variance vectors must have equal length.");
@@ -346,13 +347,13 @@ Rcpp::List alfak2_graph_posterior_cpp(Rcpp::IntegerMatrix karyotypes,
 
   GraphSolveResult final = solve_graph(karyotypes, edge_from, edge_to, edge_weight,
                                        anchor0, anchor_mean, anchor_var,
-                                       best_l, best_e, best_s, eps, true);
+                                       best_l, best_e, best_s, eps, compute_variance);
   if (!final.ok) Rcpp::stop(final.status);
 
   Rcpp::NumericVector mean(final.mean.size()), sd(final.variance.size());
   for (int i = 0; i < final.mean.size(); ++i) {
     mean[i] = final.mean(i);
-    sd[i] = std::sqrt(std::max(0.0, final.variance(i)));
+    sd[i] = compute_variance ? std::sqrt(std::max(0.0, final.variance(i))) : NA_REAL;
   }
   return Rcpp::List::create(
     Rcpp::Named("mean") = mean,
@@ -370,6 +371,7 @@ Rcpp::List alfak2_graph_posterior_cpp(Rcpp::IntegerMatrix karyotypes,
       Rcpp::Named("sigma_obs") = gs,
       Rcpp::Named("score") = score
     ),
-    Rcpp::Named("factorization_status") = final.status
+    Rcpp::Named("factorization_status") = final.status,
+    Rcpp::Named("compute_variance") = compute_variance
   );
 }

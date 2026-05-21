@@ -17,7 +17,24 @@ fit_local_posterior(
   eta_prior_sd = 5,
   eta_borrowed_prior_mean = -6,
   eta_borrowed_prior_sd = 1.5,
-  eta_distance_penalty = 0.75
+  eta_distance_penalty = 0.75,
+  local_parameterization = c("f", "g_equivalent"),
+  return_optimizer_diagnostics = FALSE,
+  return_tmb_objects = FALSE,
+  support_tier_f_sd_multiplier = NULL,
+  borrowed_residual_sd = NULL,
+  weakly_supported_residual_sd = NULL,
+  local_centering = c("none", "direct_weighted_mean", "reference_direct",
+    "observed_weighted_mean"),
+  local_centering_weight = 0,
+  local_centering_weight_mode = c("effective_count", "count_total", "uniform"),
+  fixed_sigma_anchor = NA_real_,
+  fixed_sigma_neighbor = NA_real_,
+  fixed_tau_group = NA_real_,
+  sdreport_mode = c("all_f_current", "none", "direct_f_only",
+    "direct_and_local_borrowed_f", "pi0_pi1_only"),
+  initial_jitter_sd = 0,
+  initial_seed = NULL
 )
 }
 \arguments{
@@ -59,6 +76,37 @@ initial log-abundances.}
 
 \item{eta_distance_penalty}{Additional negative prior-mean shift per support
 shell beyond the first borrowed shell.}
+
+\item{local_parameterization}{Local TMB fitness parameterization.}
+
+\item{return_optimizer_diagnostics}{Whether to attach gradient block and top
+node diagnostics.}
+
+\item{return_tmb_objects}{Whether to attach TMB optimizer objects.}
+
+\item{support_tier_f_sd_multiplier}{Optional named multiplier for local
+fitness prior standard deviations by support tier.}
+
+\item{borrowed_residual_sd}{Optional residual prior standard deviation for
+borrowed nodes.}
+
+\item{weakly_supported_residual_sd}{Optional residual prior standard deviation
+for weakly supported nodes.}
+
+\item{local_centering}{Optional fitness centering penalty mode.}
+
+\item{local_centering_weight}{Penalty weight for local centering.}
+
+\item{local_centering_weight_mode}{Weighting scheme for centering penalties.}
+
+\item{fixed_sigma_anchor, fixed_sigma_neighbor, fixed_tau_group}{Optional fixed
+local scale values.}
+
+\item{sdreport_mode}{TMB ADREPORT selection used for covariance diagnostics.}
+
+\item{initial_jitter_sd}{Optional multistart jitter standard deviation.}
+
+\item{initial_seed}{Optional seed used when \code{initial_jitter_sd > 0}.}
 }
 \value{
 An \code{alfak2_local_fit} object.
