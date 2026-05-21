@@ -80,6 +80,24 @@ package_version_safe <- function(pkg) {
   tryCatch(as.character(utils::packageVersion(pkg)), error = function(e) NA_character_)
 }
 
+benchmark_graph_controls <- function(row) {
+  n_chr <- if ("n_chr" %in% names(row) && is.finite(as.numeric(row$n_chr))) as.integer(row$n_chr) else 4L
+  if (n_chr >= 20L) {
+    return(list(
+      local_shell_depth = 1L,
+      global_extra_shell = 1L,
+      eval_max_nodes = 1000000L,
+      fit_max_nodes = 1000000L
+    ))
+  }
+  list(
+    local_shell_depth = 2L,
+    global_extra_shell = 1L,
+    eval_max_nodes = 5000L,
+    fit_max_nodes = 5000L
+  )
+}
+
 simulate_shared_input <- function(row, output_dir) {
   n_chr <- if ("n_chr" %in% names(row) && is.finite(as.numeric(row$n_chr))) {
     as.integer(row$n_chr)
@@ -169,6 +187,7 @@ coerce_alfakR_predictions <- function(path) {
 
 run_alfak2_one <- function(row, shared, run_dir) {
   cfg <- alfak2_counts_for_mode(shared$counts, row$input_mode)
+  graph_controls <- benchmark_graph_controls(row)
   started <- proc.time()[["elapsed"]]
   if ("fit_seed" %in% names(row) && is.finite(as.numeric(row$fit_seed))) {
     set.seed(as.integer(row$fit_seed))
@@ -180,11 +199,11 @@ run_alfak2_one <- function(row, shared, run_dir) {
     dt = 1,
     beta = 0.01,
     transition_kernel = "exact",
-    local_shell_depth = 2,
-    global_extra_shell = 1,
+    local_shell_depth = graph_controls$local_shell_depth,
+    global_extra_shell = graph_controls$global_extra_shell,
     min_cn = shared$landscape$min_cn,
     max_cn = shared$landscape$max_cn,
-    max_nodes = 5000,
+    max_nodes = graph_controls$fit_max_nodes,
     lambda_l_grid = 1,
     lambda_e_grid = 0.1,
     sigma_obs_grid = 0.05,
@@ -256,6 +275,7 @@ run_one <- function(row, output_dir, resume = FALSE, alfakR_loaded = TRUE) {
   run_dir <- file.path(output_dir, "runs", row$run_id)
   dir.create(run_dir, recursive = TRUE, showWarnings = FALSE)
   shared <- simulate_shared_input(row, output_dir)
+  graph_controls <- benchmark_graph_controls(row)
   eval_graph <- alfak2:::second_layer_canonical_eval_graph(
     counts = shared$counts,
     landscape = shared$landscape,
@@ -263,7 +283,7 @@ run_one <- function(row, output_dir, resume = FALSE, alfakR_loaded = TRUE) {
     beta = 0.01,
     min_cn = shared$landscape$min_cn,
     max_cn = shared$landscape$max_cn,
-    max_nodes = 5000
+    max_nodes = graph_controls$eval_max_nodes
   )
   result <- tryCatch({
     if (identical(row$package, "alfak2")) {
