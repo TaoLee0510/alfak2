@@ -20,10 +20,13 @@ usage <- function() {
     "  --alfakR-repo=/share/lab_crd/lab_crd/taoli/Project/alfakR\n",
     "  --sample-depths=1000,200\n",
     "  --wavelengths=0.2,0.4,0.8,1.6\n",
+    "  --ground-truth-times=0,180\n",
+    "  --passage-times=0,180\n",
     "  --ground-truth-reps=1:5\n",
     "  --fit-repeats=1:5\n",
     "  --soft-minobs=5,10,20\n",
     "  --ntp=2\n",
+    "  --alfakR-dt=1\n",
     "  --nboot=45\n",
     "  --force=false\n",
     sep = ""
@@ -161,6 +164,29 @@ pad2 <- function(x) sprintf("%02d", as.integer(x))
 safe_read_rds <- function(path) {
   if (!file.exists(path)) return(NULL)
   tryCatch(readRDS(path), error = function(e) NULL)
+}
+
+numeric_vec_equal <- function(x, y, tol = 1e-8) {
+  x <- suppressWarnings(as.numeric(x))
+  y <- suppressWarnings(as.numeric(y))
+  length(x) == length(y) &&
+    all(is.finite(x)) &&
+    all(is.finite(y)) &&
+    all(abs(x - y) <= tol)
+}
+
+required_benchmark_times <- function() c(0, 180)
+
+validate_exact_benchmark_times <- function(x, label) {
+  required <- required_benchmark_times()
+  if (!numeric_vec_equal(x, required)) {
+    stop(
+      label, " must be exactly ", paste(required, collapse = ","),
+      " for alfa2_benchmark_ground_true.",
+      call. = FALSE
+    )
+  }
+  invisible(TRUE)
 }
 
 default_alfak2_methods <- function() {
@@ -345,7 +371,8 @@ prepare_indices <- function(cfg, dirs) {
   write_tsv(data.frame(
     key = c(
       "sample_depths", "wavelengths", "ground_truth_reps", "fit_repeats",
-      "soft_minobs", "alfakR_priors", "ntp", "nboot", "pmis",
+      "ground_truth_times", "passage_times", "soft_minobs", "alfakR_priors",
+      "ntp", "alfakR_dt", "nboot", "pmis",
       "n0", "nb", "alfak2_local_shell_depth", "alfak2_global_extra_shell",
       "alfak2_max_nodes"
     ),
@@ -354,9 +381,12 @@ prepare_indices <- function(cfg, dirs) {
       paste(cfg$wavelengths, collapse = ","),
       paste(cfg$ground_truth_reps, collapse = ","),
       paste(cfg$fit_repeats, collapse = ","),
+      paste(cfg$ground_truth_times, collapse = ","),
+      paste(cfg$passage_times, collapse = ","),
       paste(cfg$soft_minobs, collapse = ","),
       paste(cfg$alfakR_priors, collapse = ","),
       cfg$ntp,
+      cfg$alfakR_dt,
       cfg$nboot,
       cfg$pmis,
       cfg$n0,
@@ -428,14 +458,23 @@ load_repositories <- function(repo_dir, alfakR_repo) {
   invisible(TRUE)
 }
 
-generate_ground_truth <- function(row, force = FALSE) {
+ground_truth_has_times <- function(path, expected_times) {
+  xi <- safe_read_rds(path)
+  if (is.null(xi) || is.null(xi$abm_output) || is.null(xi$abm_output$x)) return(FALSE)
+  actual_times <- suppressWarnings(as.numeric(colnames(xi$abm_output$x)))
+  numeric_vec_equal(actual_times, expected_times)
+}
+
+generate_ground_truth <- function(row, ground_truth_times = c(0, 180), force = FALSE) {
   out_path <- as.character(row$ground_truth_rds[[1L]])
-  if (!force && file.exists(out_path)) return(out_path)
+  ground_truth_times <- as.numeric(ground_truth_times)
+  validate_exact_benchmark_times(ground_truth_times, "ground_truth_times")
+  if (!force && ground_truth_has_times(out_path, ground_truth_times)) return(out_path)
   dir.create(dirname(out_path), recursive = TRUE, showWarnings = FALSE)
   lock_dir <- paste0(out_path, ".lock")
   lock_start <- Sys.time()
   while (!dir.create(lock_dir, showWarnings = FALSE)) {
-    if (!force && file.exists(out_path)) return(out_path)
+    if (!force && ground_truth_has_times(out_path, ground_truth_times)) return(out_path)
     waited <- as.numeric(difftime(Sys.time(), lock_start, units = "mins"))
     if (is.finite(waited) && waited > 180) {
       stop("Timed out waiting for ground-truth lock: ", lock_dir, call. = FALSE)
@@ -443,7 +482,7 @@ generate_ground_truth <- function(row, force = FALSE) {
     Sys.sleep(10)
   }
   on.exit(unlink(lock_dir, recursive = TRUE, force = TRUE), add = TRUE)
-  if (!force && file.exists(out_path)) return(out_path)
+  if (!force && ground_truth_has_times(out_path, ground_truth_times)) return(out_path)
 
   set.seed(as.integer(row$landscape_seed[[1L]]))
 
@@ -463,21 +502,35 @@ generate_ground_truth <- function(row, force = FALSE) {
     do.call(rbind, pk)
   }
 
-  resample_sim <- function(sim, n_samples) {
-    mat <- t(as.matrix(sim[, -1]))
-    colnames(mat) <- sim$time
+  resample_sim <- function(sim, n_samples, output_times) {
+    sim_times <- suppressWarnings(as.numeric(sim$time))
+    if (!length(sim_times) || any(!is.finite(sim_times))) {
+      stop("ABM output has non-finite simulation times.", call. = FALSE)
+    }
+    output_times <- as.numeric(output_times)
+    time_idx <- vapply(output_times, function(target) {
+      exact <- which(abs(sim_times - target) <= 1e-8)
+      if (length(exact)) exact[[1L]] else which.min(abs(sim_times - target))
+    }, integer(1L))
+    if (length(unique(time_idx)) != length(output_times)) {
+      stop("Could not map requested benchmark times to distinct ABM snapshots.", call. = FALSE)
+    }
+    mat <- t(as.matrix(sim[time_idx, -1, drop = FALSE]))
+    colnames(mat) <- as.character(output_times)
     mat <- apply(mat, 2, function(p) rmultinom(1, n_samples, prob = p / sum(p)))
     keep <- rowSums(mat) > 0
     rownames(mat) <- colnames(sim)[-1]
     mat <- mat[keep, , drop = FALSE]
     mat <- mat[order(rowSums(mat), decreasing = TRUE), ]
+    attr(mat, "actual_abm_times") <- sim_times[time_idx]
+    mat
   }
 
   founder <- rep(2, 22)
   Nwaves <- 10
   wavelength <- as.numeric(row$wavelength[[1L]])
   l <- gen_randscape(founder, Nwaves, wavelength = wavelength)
-  times <- c(0, 300)
+  times <- ground_truth_times
   x0 <- c(1)
   names(x0) <- paste(founder, collapse = ".")
   pmis <- as.numeric(row$pmis[[1L]])
@@ -497,9 +550,14 @@ generate_ground_truth <- function(row, force = FALSE) {
     normalize_freq = FALSE
   )
 
-  sim_rs <- resample_sim(sim, as.integer(row$sample_depth[[1L]]))
+  sim_rs <- resample_sim(sim, as.integer(row$sample_depth[[1L]]), output_times = times)
   yi <- list(x = data.frame(sim_rs, check.names = FALSE), dt = 1)
-  out <- list(abm_output = yi, true_landscape = l)
+  out <- list(
+    abm_output = yi,
+    true_landscape = l,
+    ground_truth_times = times,
+    actual_abm_times = as.numeric(attr(sim_rs, "actual_abm_times"))
+  )
   tmp_path <- paste0(out_path, ".tmp.", Sys.getpid(), ".Rds")
   saveRDS(out, tmp_path)
   if (!file.rename(tmp_path, out_path)) {
@@ -509,25 +567,59 @@ generate_ground_truth <- function(row, force = FALSE) {
   out_path
 }
 
-select_passage_counts <- function(xi, ntp = 2L) {
+select_passage_counts <- function(xi, passage_times = c(0, 180), ntp = length(passage_times)) {
   yi <- xi$abm_output
   pass_times_all <- suppressWarnings(as.numeric(colnames(yi$x)))
   if (!length(pass_times_all) || any(!is.finite(pass_times_all))) {
     stop("Ground-truth count matrix has non-numeric timepoint columns.", call. = FALSE)
   }
-  pass_times <- pass_times_all[pass_times_all < 120]
-  pass_times <- tail(pass_times, as.integer(ntp))
+  pass_times <- as.numeric(passage_times)
+  validate_exact_benchmark_times(pass_times, "passage_times")
   if (length(pass_times) != as.integer(ntp)) {
-    stop("Could not select ", ntp, " passage times before 120.", call. = FALSE)
+    stop(
+      "Requested passage_times length is ", length(pass_times),
+      " but ntp is ", as.integer(ntp), ".",
+      call. = FALSE
+    )
   }
-  keep <- pass_times_all %in% pass_times
+  keep <- match(pass_times, pass_times_all)
+  if (anyNA(keep)) {
+    stop(
+      "Could not select required passage times ",
+      paste(pass_times, collapse = ","),
+      " from ground truth with times ",
+      paste(pass_times_all, collapse = ","),
+      ".",
+      call. = FALSE
+    )
+  }
   counts <- as.matrix(yi$x[, keep, drop = FALSE])
+  colnames(counts) <- as.character(pass_times)
   storage.mode(counts) <- "integer"
   list(
     counts = counts,
     passage_times = pass_times,
     dt = if (length(pass_times) >= 2L) diff(range(pass_times)) else yi$dt %||% 1
   )
+}
+
+cache_matches_current_config <- function(x, cfg) {
+  if (is.null(x) || is.null(x$benchmark_config)) return(FALSE)
+  numeric_vec_equal(x$benchmark_config$ground_truth_times, cfg$ground_truth_times) &&
+    numeric_vec_equal(x$benchmark_config$passage_times, cfg$passage_times) &&
+    numeric_vec_equal(x$benchmark_config$alfakR_dt, cfg$alfakR_dt)
+}
+
+validate_benchmark_time_config <- function(cfg) {
+  validate_exact_benchmark_times(cfg$ground_truth_times, "ground_truth_times")
+  validate_exact_benchmark_times(cfg$passage_times, "passage_times")
+  if (!identical(as.integer(cfg$ntp), 2L)) {
+    stop("ntp must be exactly 2 for alfa2_benchmark_ground_true.", call. = FALSE)
+  }
+  if (!numeric_vec_equal(cfg$alfakR_dt, 1)) {
+    stop("alfakR_dt must be exactly 1 for alfa2_benchmark_ground_true.", call. = FALSE)
+  }
+  invisible(TRUE)
 }
 
 parse_karyotype_matrix <- function(labels) {
@@ -760,7 +852,7 @@ run_alfak2_one <- function(row, selected, cfg, run_dir) {
 run_alfakR_one <- function(row, selected, cfg, run_dir) {
   started <- proc.time()[["elapsed"]]
   set.seed(as.integer(row$fit_seed[[1L]]))
-  yi <- list(x = data.frame(selected$counts, check.names = FALSE), dt = 1)
+  yi <- list(x = data.frame(selected$counts, check.names = FALSE), dt = cfg$alfakR_dt)
   suppressMessages(
     alfakR::alfak(
       yi = yi,
@@ -798,12 +890,15 @@ add_row_metadata <- function(metrics, row, result) {
 
 run_one_task <- function(row, cfg, dirs, force = FALSE) {
   cache_path <- file.path(dirs$cache, paste0(as.character(row$run_id[[1L]]), ".rds"))
-  if (!force && file.exists(cache_path)) return(readRDS(cache_path))
+  if (!force && file.exists(cache_path)) {
+    cached <- safe_read_rds(cache_path)
+    if (cache_matches_current_config(cached, cfg)) return(cached)
+  }
 
   gt_path <- as.character(row$ground_truth_rds[[1L]])
-  if (!file.exists(gt_path)) generate_ground_truth(row, force = FALSE)
+  generate_ground_truth(row, ground_truth_times = cfg$ground_truth_times, force = FALSE)
   xi <- readRDS(gt_path)
-  selected <- select_passage_counts(xi, ntp = cfg$ntp)
+  selected <- select_passage_counts(xi, passage_times = cfg$passage_times, ntp = cfg$ntp)
 
   run_dir <- file.path(dirs$runs, as.character(row$run_id[[1L]]))
   dir.create(run_dir, recursive = TRUE, showWarnings = FALSE)
@@ -855,7 +950,21 @@ run_one_task <- function(row, cfg, dirs, force = FALSE) {
   )
   metrics <- rbind_fill(list(metrics_eval, metrics_full))
   metrics <- add_row_metadata(metrics, row, result)
-  out <- list(row = row, result = result, metrics = metrics)
+  out <- list(
+    row = row,
+    result = result,
+    metrics = metrics,
+    selected_metadata = list(
+      passage_times = selected$passage_times,
+      dt = selected$dt,
+      n_karyotypes = nrow(selected$counts)
+    ),
+    benchmark_config = list(
+      ground_truth_times = cfg$ground_truth_times,
+      passage_times = cfg$passage_times,
+      alfakR_dt = cfg$alfakR_dt
+    )
+  )
   saveRDS(out, cache_path)
   out
 }
@@ -866,12 +975,12 @@ generate_ground_truth_mode <- function(indices, cfg, force = FALSE) {
   if (is.finite(idx)) {
     row <- gt[gt$ground_truth_index == idx, , drop = FALSE]
     if (!nrow(row)) stop("No ground-truth row for --ground-truth-index=", idx, call. = FALSE)
-    generate_ground_truth(row, force = force)
+    generate_ground_truth(row, ground_truth_times = cfg$ground_truth_times, force = force)
     return(invisible(TRUE))
   }
   for (i in seq_len(nrow(gt))) {
     message(sprintf("Generating ground truth %d/%d: %s", i, nrow(gt), gt$ground_truth_id[[i]]))
-    generate_ground_truth(gt[i, , drop = FALSE], force = force)
+    generate_ground_truth(gt[i, , drop = FALSE], ground_truth_times = cfg$ground_truth_times, force = force)
   }
   invisible(TRUE)
 }
@@ -946,7 +1055,7 @@ summarize_mode <- function(indices, dirs) {
 
 build_config <- function(args, repo_dir) {
   output_dir <- normalize_output_dir(repo_dir, arg_value(args, "output_dir", "benchmark/results/alfa2_benchmark_ground_true"))
-  list(
+  cfg <- list(
     args = args,
     repo_dir = repo_dir,
     output_dir = output_dir,
@@ -954,11 +1063,14 @@ build_config <- function(args, repo_dir) {
                                 winslash = "/", mustWork = FALSE),
     sample_depths = as.integer(arg_integer_vec(args, "sample_depths", c(1000L, 200L))),
     wavelengths = as.numeric(arg_numeric_vec(args, "wavelengths", c(0.2, 0.4, 0.8, 1.6))),
+    ground_truth_times = as.numeric(arg_numeric_vec(args, "ground_truth_times", c(0, 180))),
+    passage_times = as.numeric(arg_numeric_vec(args, "passage_times", c(0, 180))),
     ground_truth_reps = as.integer(arg_integer_vec(args, "ground_truth_reps", 1:5)),
     fit_repeats = as.integer(arg_integer_vec(args, "fit_repeats", 1:5)),
     soft_minobs = as.integer(arg_integer_vec(args, "soft_minobs", c(5L, 10L, 20L))),
     alfakR_priors = c("none", "empirical", "empirical_censored", "empirical_censored_weighted"),
     ntp = arg_integer(args, "ntp", 2L),
+    alfakR_dt = arg_numeric(args, "alfakR_dt", 1),
     nboot = arg_integer(args, "nboot", 45L),
     pmis = arg_numeric(args, "pmis", 5e-05),
     n0 = arg_numeric(args, "n0", 2e5),
@@ -976,6 +1088,8 @@ build_config <- function(args, repo_dir) {
     alfak2_lambda_e_grid = as.numeric(arg_numeric_vec(args, "alfak2_lambda_e_grid", 0.01)),
     alfak2_sigma_obs_grid = as.numeric(arg_numeric_vec(args, "alfak2_sigma_obs_grid", 0.05))
   )
+  validate_benchmark_time_config(cfg)
+  cfg
 }
 
 main <- function() {
