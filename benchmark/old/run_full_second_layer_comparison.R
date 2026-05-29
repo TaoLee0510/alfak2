@@ -305,12 +305,21 @@ run_one <- function(row, output_dir, resume = FALSE, alfakR_loaded = TRUE) {
     )
   })
   attached <- alfak2:::second_layer_attach_predictions(eval_graph, result$predictions)
-  metrics <- alfak2:::second_layer_metric_table(
+  metrics_eval <- alfak2:::second_layer_metric_table(
     attached$nodes,
     attached$edges,
     runtime_seconds = result$runtime_seconds,
     failure_status = result$failure_status
   )
+  full_eval <- alfak2:::second_layer_full_lscape_eval(result$predictions, shared$landscape)
+  metrics_full <- alfak2:::second_layer_metric_table(
+    full_eval$nodes,
+    full_eval$edges,
+    shells = "full_lscape",
+    runtime_seconds = result$runtime_seconds,
+    failure_status = result$failure_status
+  )
+  metrics <- rbind_fill(list(metrics_eval, metrics_full))
   metrics$failure_status <- result$failure_status
   metrics$fit_status <- result$status
   metrics$error_message <- result$error_message
@@ -324,10 +333,11 @@ run_one <- function(row, output_dir, resume = FALSE, alfakR_loaded = TRUE) {
 }
 
 method_label <- function(x) {
+  pkg <- ifelse(x$package == "alfak2", "alfak_V2", ifelse(x$package == "alfakR", "alfak", x$package))
   ifelse(
     x$package == "alfak2",
-    paste(x$package, x$input_mode, x$extrapolation_method, sep = ":"),
-    paste(x$package, paste0("minobs", x$minobs), x$NN_prior_slot, sep = ":")
+    paste(pkg, x$input_mode, x$extrapolation_method, sep = ":"),
+    paste(pkg, paste0("minobs", x$minobs), x$NN_prior_slot, sep = ":")
   )
 }
 
@@ -336,7 +346,7 @@ metric_higher_is_better <- function(metric) {
     "pearson", "spearman", "edge_gradient_spearman", "sign_accuracy",
     "beneficial_sign_accuracy", "deleterious_sign_accuracy",
     "top_k_overlap_count", "top_k_overlap_fraction",
-    "coverage", "uncalibrated_r2"
+    "coverage", "uncalibrated_r2", "rescaled_r2"
   )
 }
 
@@ -380,7 +390,7 @@ build_paired_comparison <- function(metrics) {
     better <- ifelse(a_better, df$method_label[ia], df$method_label[ib])
     rows[[length(rows) + 1L]] <- data.frame(
       df[1, unit_cols, drop = FALSE],
-      comparison_scope = ifelse(df$package[ia] == df$package[ib], paste0(df$package[ia], "_internal"), "alfak2_vs_alfakR"),
+      comparison_scope = ifelse(df$package[ia] == df$package[ib], paste0(df$package[ia], "_internal"), "alfak_V2_vs_alfak"),
       package_a = df$package[ia],
       package_b = df$package[ib],
       method_a = df$method_label[ia],
@@ -406,7 +416,7 @@ build_paired_comparison <- function(metrics) {
 build_baseline_delta <- function(metrics) {
   if (!nrow(metrics)) return(data.frame())
   metrics$method_label <- method_label(metrics)
-  baseline_label <- "alfak2:full:graph_gaussian_baseline"
+  baseline_label <- "alfak_V2:full:graph_gaussian_baseline"
   key_cols <- benchmark_unit_cols(metrics, include_metric = TRUE)
   row_cols <- present_cols(
     metrics,
@@ -442,13 +452,13 @@ build_landscape_rankings <- function(metrics) {
     rmse = 0.18, mae = 0.10, relative_rmse = 0.07, bias_abs = 0.04,
     q90_absolute_error = 0.04, uncalibrated_r2 = 0.02,
     edge_gradient_rmse = 0.12, edge_gradient_spearman = 0.08,
-    centered_rmse = 0.07, spearman = 0.06, sign_accuracy = 0.04,
+    centered_rmse = 0.07, rescaled_r2 = 0.04, spearman = 0.06, sign_accuracy = 0.04,
     top_k_overlap_fraction = 0.03,
     interval_coverage_95_closeness = 0.04, standardized_rmse = 0.03,
     coverage = 0.03, runtime_seconds = 0.02, failure_rate = 0.03
   )
   numerical <- c("rmse", "mae", "relative_rmse", "bias_abs", "q90_absolute_error", "uncalibrated_r2")
-  shape <- c("edge_gradient_rmse", "edge_gradient_spearman", "centered_rmse", "spearman", "sign_accuracy", "top_k_overlap_fraction")
+  shape <- c("edge_gradient_rmse", "edge_gradient_spearman", "centered_rmse", "rescaled_r2", "spearman", "sign_accuracy", "top_k_overlap_fraction")
   uncertainty <- c("interval_coverage_95_closeness", "standardized_rmse", "coverage")
   runtime <- c("runtime_seconds", "failure_rate")
   key_metrics <- names(weights)
@@ -684,36 +694,36 @@ write_report <- function(paths, cfg, run_index, run_results, metrics, lambda_sum
     "## Run configuration",
     sprintf("- Date/time: %s", format(Sys.time(), "%Y-%m-%d %H:%M:%S %Z")),
     sprintf("- R version: `%s`", R.version.string),
-    sprintf("- alfak2 git commit: `%s`", cfg$alfak2_git),
-    sprintf("- alfakR git commit: `%s`", cfg$alfakR_git),
-    sprintf("- alfak2 version: `%s`", cfg$alfak2_version),
-    sprintf("- alfakR version: `%s`", cfg$alfakR_version),
+    sprintf("- alfak_V2 git commit: `%s`", cfg$alfak2_git),
+    sprintf("- alfak git commit: `%s`", cfg$alfakR_git),
+    sprintf("- alfak_V2 version: `%s`", cfg$alfak2_version),
+    sprintf("- alfak version: `%s`", cfg$alfakR_version),
     sprintf("- Python/TabPFN status: `%s`", cfg$tabpfn_status),
     sprintf("- tree backend status: `%s`", cfg$tree_backend_status),
     sprintf("- grf_lambda_values: %s", paste(sort(unique(run_index$grf_lambda)), collapse = ", ")),
     sprintf("- number of landscapes: %d", length(unique(run_index$landscape_id))),
-    sprintf("- alfak2 input modes: %s", paste(unique(stats::na.omit(run_index$input_mode)), collapse = ", ")),
-    sprintf("- alfak2 extrapolation methods: %s", paste(alfak2:::second_layer_alfak2_methods(), collapse = ", ")),
-    sprintf("- alfakR minobs values: %s", paste(unique(stats::na.omit(run_index$minobs)), collapse = ", ")),
-    sprintf("- alfakR NN_prior slots: %s", paste(alfak2:::second_layer_alfakR_slots()$NN_prior_slot, collapse = ", ")),
-    sprintf("- expected_alfak2_runs: %d", expected_alfak2),
-    sprintf("- expected_alfakR_runs: %d", expected_alfakR),
+    sprintf("- alfak_V2 input modes: %s", paste(unique(stats::na.omit(run_index$input_mode)), collapse = ", ")),
+    sprintf("- alfak_V2 extrapolation methods: %s", paste(alfak2:::second_layer_alfak2_methods(), collapse = ", ")),
+    sprintf("- alfak minobs values: %s", paste(unique(stats::na.omit(run_index$minobs)), collapse = ", ")),
+    sprintf("- alfak NN_prior slots: %s", paste(alfak2:::second_layer_alfakR_slots()$NN_prior_slot, collapse = ", ")),
+    sprintf("- expected_alfak_V2_runs: %d", expected_alfak2),
+    sprintf("- expected_alfak_runs: %d", expected_alfakR),
     sprintf("- expected_total_runs: %d", nrow(run_index)),
     sprintf("- actual_started_runs: %d", length(run_results)),
     sprintf("- actual_completed_runs: %d", length(run_results)),
     sprintf("- actual_successful_runs: %d", success),
     sprintf("- actual_failed_runs: %d", failed),
     "",
-    "## alfak2 results",
-    "- Lambda-level summaries are written to `lambda_summary.csv` for the 27 alfak2 fitting families.",
+    "## alfak_V2 results",
+    "- Lambda-level summaries are written to `lambda_summary.csv` for the 27 alfak_V2 fitting families.",
     "- Paired graph_gaussian_baseline deltas for the eight new methods are written to `baseline_delta.csv`.",
     "- d1/d2/all_nearfield numerical and shape results are available in `metrics_by_run.csv`, `numerical_summary.csv`, and `shape_summary.csv`.",
     "",
-    "## alfakR results",
+    "## alfak results",
     "- The 15 minobs/NN_prior slot families are included in `lambda_summary.csv`.",
-    "- The duplicated weighted NN_prior slots are preserved as slot4 and slot5 while passing the same alfakR argument value.",
+    "- The duplicated weighted NN_prior slots are preserved as slot4 and slot5 while passing the same alfak argument value.",
     "",
-    "## alfak2 vs alfakR",
+    "## alfak_V2 vs alfak",
     "- All methods are evaluated on the same canonical support-distance <= 2 graph per truth landscape, so landscape-level paired metric comparison is available in `paired_landscape_comparison.csv`.",
     "",
     "## Recommendation",
@@ -890,7 +900,7 @@ main <- function() {
     v <- agg[[col]][agg$method_label == method]
     if (length(v)) v[[1]] else NA_real_
   }
-  baseline <- "alfak2:full:graph_gaussian_baseline"
+  baseline <- "alfak_V2:full:graph_gaussian_baseline"
   best_balanced_for_shell <- function(shell) {
     x <- unique(rankings[rankings$shell == shell & rankings$prediction_scale == "raw", c("method_label", "balanced_weighted_rank")])
     if (nrow(x)) {

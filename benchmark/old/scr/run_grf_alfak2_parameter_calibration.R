@@ -1,7 +1,17 @@
 #!/usr/bin/env Rscript
 
 script_file <- grep("^--file=", commandArgs(FALSE), value = TRUE)
-script_file <- if (length(script_file)) sub("^--file=", "", script_file[[1L]]) else "benchmark/scr/run_grf_alfak2_parameter_calibration.R"
+script_file <- if (length(script_file)) {
+  sub("^--file=", "", script_file[[1L]])
+} else {
+  script_candidates <- c(
+    "benchmark/scr/run_grf_alfak2_parameter_calibration.R",
+    "../benchmark/scr/run_grf_alfak2_parameter_calibration.R",
+    "../../benchmark/scr/run_grf_alfak2_parameter_calibration.R"
+  )
+  existing <- script_candidates[file.exists(script_candidates)]
+  if (length(existing)) existing[[1L]] else script_candidates[[1L]]
+}
 script_file <- normalizePath(script_file, winslash = "/", mustWork = FALSE)
 repo_guess <- normalizePath(file.path(dirname(script_file), "../.."), winslash = "/", mustWork = FALSE)
 source(file.path(repo_guess, "benchmark", "scr", "run_grf_alfak2_vs_alfakR_benchmark.R"))
@@ -1049,17 +1059,28 @@ summarize_calibration_results <- function(cfg, dirs) {
 
   ranked <- rank_calibration_parameters(metric_tbl, fit_tbl, cfg)
   write_tsv(ranked, file.path(dirs$tables, "calibration_ranked_params.tsv"))
-  best <- ranked[ranked$rank == 1L, , drop = FALSE]
+  gate_summary <- calibration_gate_summary(ranked)
+  write_tsv(gate_summary, file.path(dirs$tables, "calibration_gate_summary.tsv"))
+  write_tsv(gate_summary[, c("recommended_status", "reason"), drop = FALSE],
+            file.path(dirs$tables, "calibration_recommended_status.tsv"))
+  best_numeric_only <- ranked[ranked$recommended_status != "valid_shape_config", , drop = FALSE]
+  if (nrow(best_numeric_only)) best_numeric_only <- best_numeric_only[order(best_numeric_only$calibration_score, best_numeric_only$rank), , drop = FALSE][1L, , drop = FALSE]
+  write_tsv(best_numeric_only, file.path(dirs$tables, "best_numeric_only_params.tsv"))
+  best <- ranked[ranked$recommended_status == "valid_shape_config" & ranked$shape_rank == 1L, , drop = FALSE]
   write_tsv(best, file.path(dirs$tables, "best_params.tsv"))
-  if (nrow(best)) {
+  if (nrow(best) && identical(as.character(gate_summary$recommended_status[[1L]]), "valid_shape_config")) {
     writeLines(best_param_cli(best), file.path(dirs$tables, "best_params_cli_args.txt"))
+  } else {
+    writeLines("no_valid_shape_configuration", file.path(dirs$tables, "best_params_cli_args.txt"))
   }
   saveRDS(
-    list(config = cfg, task_table = task_tbl, fit_results = fit_tbl, metrics = metric_tbl, ranked = ranked, best = best),
+    list(config = cfg, task_table = task_tbl, fit_results = fit_tbl, metrics = metric_tbl,
+         ranked = ranked, best = best, best_numeric_only = best_numeric_only, gate_summary = gate_summary),
     file.path(dirs$root, "grf_alfak2_parameter_calibration.rds")
   )
   message("Wrote calibration summaries under: ", dirs$tables)
-  invisible(list(fit_results = fit_tbl, metrics = metric_tbl, ranked = ranked, best = best, missing = missing))
+  invisible(list(fit_results = fit_tbl, metrics = metric_tbl, ranked = ranked, best = best,
+                 best_numeric_only = best_numeric_only, gate_summary = gate_summary, missing = missing))
 }
 
 rank_calibration_parameters <- function(metric_tbl, fit_tbl, cfg) {
@@ -1125,6 +1146,7 @@ rank_calibration_parameters <- function(metric_tbl, fit_tbl, cfg) {
         setNames(list(median(z$centered_rmse, na.rm = TRUE)), paste0(prefix, "_median_centered_rmse")),
         setNames(list(median(z$centered_mae, na.rm = TRUE)), paste0(prefix, "_median_centered_mae")),
         setNames(list(median(abs(z$signed_bias), na.rm = TRUE)), paste0(prefix, "_median_abs_bias")),
+        setNames(list(median(z$pearson, na.rm = TRUE)), paste0(prefix, "_median_pearson")),
         setNames(list(median(z$spearman, na.rm = TRUE)), paste0(prefix, "_median_spearman")),
         setNames(list(median(z$false_high_rate, na.rm = TRUE)), paste0(prefix, "_median_false_high_rate")),
         setNames(list(median(z$sign_accuracy, na.rm = TRUE)), paste0(prefix, "_median_sign_accuracy")),
@@ -1158,7 +1180,7 @@ rank_calibration_parameters <- function(metric_tbl, fit_tbl, cfg) {
   for (nm in c(
     "objective_median_centered_rmse", "direct_median_centered_rmse",
     "holdout_median_centered_rmse",
-    "objective_median_spearman", "objective_median_false_high_rate",
+    "objective_median_pearson", "objective_median_spearman", "objective_median_false_high_rate",
     "objective_median_estimate_sd_ratio"
   )) {
     if (!nm %in% names(out)) out[[nm]] <- NA_real_
@@ -1214,9 +1236,85 @@ rank_calibration_parameters <- function(metric_tbl, fit_tbl, cfg) {
   out$bias_weight <- cfg$bias_weight
   out$spearman_weight <- cfg$spearman_weight
   out$false_high_weight <- cfg$false_high_weight
+  out$shape_classification <- classify_calibration_shape(out)
+  out$amplitude_gate_passed <- is.finite(out$objective_median_estimate_sd_ratio) & out$objective_median_estimate_sd_ratio >= 0.02
+  out$rank_gate_passed <- is.finite(out$objective_median_pearson) & is.finite(out$objective_median_spearman) &
+    out$objective_median_pearson > 0 & out$objective_median_spearman > 0
+  out$edge_delta_gate_passed <- TRUE
+  out$deployment_gate_passed <- TRUE
+  out$cv_gate_passed <- is.finite(out$holdout_failure_fraction) & out$holdout_failure_fraction < 1
+  out$delta_untrusted <- FALSE
+  out$recommended_status <- ifelse(
+    out$delta_untrusted,
+    "delta_untrusted",
+    ifelse(
+      !out$amplitude_gate_passed,
+      "amplitude_collapse",
+      ifelse(
+        !out$rank_gate_passed,
+        "wrong_direction",
+        ifelse(out$deployment_gate_passed, "valid_shape_config", "delta_untrusted")
+      )
+    )
+  )
+  out$failure_reason <- ifelse(
+    out$recommended_status == "valid_shape_config",
+    "passed_shape_gates",
+    ifelse(
+      out$recommended_status == "amplitude_collapse",
+      "estimate_sd_ratio_below_0.02",
+      ifelse(
+        out$recommended_status == "wrong_direction",
+        "pearson_or_spearman_nonpositive",
+        "delta_or_deployment_gate_failed"
+      )
+    )
+  )
   out <- out[order(out$calibration_score, out[[objective_order_col]], out$param_id), , drop = FALSE]
   out$rank <- seq_len(nrow(out))
+  valid_idx <- which(out$recommended_status == "valid_shape_config")
+  out$shape_rank <- NA_integer_
+  if (length(valid_idx)) out$shape_rank[valid_idx] <- seq_along(valid_idx)
   out
+}
+
+classify_calibration_shape <- function(out) {
+  cls <- rep("numeric_only", nrow(out))
+  amp <- is.finite(out$objective_median_estimate_sd_ratio) & out$objective_median_estimate_sd_ratio >= 0.02
+  cls[!amp] <- "collapsed_shrinkage"
+  pear <- if ("objective_median_pearson" %in% names(out)) out$objective_median_pearson else NA_real_
+  spear <- if ("objective_median_spearman" %in% names(out)) out$objective_median_spearman else NA_real_
+  cls[amp & (pear < 0 | spear < 0)] <- "noncollapsed_wrong_direction"
+  cls[amp & pear > 0 & spear > 0] <- "valid_shape"
+  cls
+}
+
+calibration_gate_summary <- function(ranked) {
+  if (!nrow(ranked)) {
+    return(data.frame(
+      n_total_configs = 0L,
+      n_valid_shape_configs = 0L,
+      n_numeric_only_configs = 0L,
+      n_amplitude_collapse = 0L,
+      n_wrong_direction = 0L,
+      n_delta_untrusted = 0L,
+      recommended_status = "no_valid_shape_configuration",
+      reason = "no_ranked_configs",
+      stringsAsFactors = FALSE
+    ))
+  }
+  n_valid <- sum(ranked$recommended_status == "valid_shape_config", na.rm = TRUE)
+  data.frame(
+    n_total_configs = nrow(ranked),
+    n_valid_shape_configs = n_valid,
+    n_numeric_only_configs = sum(ranked$recommended_status == "numeric_only_config", na.rm = TRUE),
+    n_amplitude_collapse = sum(ranked$recommended_status == "amplitude_collapse", na.rm = TRUE),
+    n_wrong_direction = sum(ranked$recommended_status == "wrong_direction", na.rm = TRUE),
+    n_delta_untrusted = sum(ranked$recommended_status == "delta_untrusted", na.rm = TRUE),
+    recommended_status = if (n_valid > 0) "valid_shape_config" else "no_valid_shape_configuration",
+    reason = if (n_valid > 0) "at_least_one_config_passed_shape_gates" else "no_config_passed_shape_gates",
+    stringsAsFactors = FALSE
+  )
 }
 
 best_param_cli <- function(best) {

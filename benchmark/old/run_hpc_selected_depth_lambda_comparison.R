@@ -347,9 +347,66 @@ combine_results <- function(runner, output_dir, threads = hpc_worker_threads()) 
   run_index <- read.csv(run_index_path, stringsAsFactors = FALSE)
   cache_paths <- file.path(output_dir, "run_cache", paste0(run_index$run_id, ".rds"))
   message("Combining ", nrow(run_index), " run caches with ", threads, " worker(s).")
+  metric_cache_needs_refresh <- function(x) {
+    metrics <- x$metrics
+    if (is.null(metrics) || !nrow(metrics)) return(TRUE)
+    !("rescaled_r2" %in% metrics$metric) ||
+      !("all_eval" %in% metrics$shell) ||
+      !("full_lscape" %in% metrics$shell)
+  }
+  refresh_metrics <- function(x, cache_path) {
+    tryCatch({
+      shared <- runner$simulate_shared_input(x$row, output_dir)
+      graph_controls <- runner$benchmark_graph_controls(x$row)
+      eval_graph <- alfak2:::second_layer_canonical_eval_graph(
+        counts = shared$counts,
+        landscape = shared$landscape,
+        dt = 1,
+        beta = 0.01,
+        min_cn = shared$landscape$min_cn,
+        max_cn = shared$landscape$max_cn,
+        max_nodes = graph_controls$eval_max_nodes
+      )
+      result <- x$result
+      attached <- alfak2:::second_layer_attach_predictions(eval_graph, result$predictions)
+      metrics_eval <- alfak2:::second_layer_metric_table(
+        attached$nodes,
+        attached$edges,
+        runtime_seconds = result$runtime_seconds,
+        failure_status = result$failure_status
+      )
+      full_eval <- alfak2:::second_layer_full_lscape_eval(result$predictions, shared$landscape)
+      metrics_full <- alfak2:::second_layer_metric_table(
+        full_eval$nodes,
+        full_eval$edges,
+        shells = "full_lscape",
+        runtime_seconds = result$runtime_seconds,
+        failure_status = result$failure_status
+      )
+      metrics <- runner$rbind_fill(list(metrics_eval, metrics_full))
+      metrics$failure_status <- result$failure_status
+      metrics$fit_status <- result$status
+      metrics$error_message <- result$error_message
+      metrics$output_path <- result$fit_path
+      metrics$dependency_status <- result$dependency_status %||% NA_character_
+      row_df <- as.data.frame(x$row, stringsAsFactors = FALSE)
+      rownames(row_df) <- NULL
+      rownames(metrics) <- NULL
+      x$metrics <- cbind(row_df, metrics)
+      saveRDS(x, cache_path)
+      x
+    }, error = function(e) {
+      warning("Could not refresh metrics for ", basename(cache_path), ": ", conditionMessage(e), call. = FALSE)
+      x
+    })
+  }
   read_one_result <- function(i) {
     if (file.exists(cache_paths[[i]])) {
-      readRDS(cache_paths[[i]])
+      x <- readRDS(cache_paths[[i]])
+      if (metric_cache_needs_refresh(x)) {
+        x <- refresh_metrics(x, cache_paths[[i]])
+      }
+      x
     } else {
       row <- run_index[i, , drop = FALSE]
       list(
@@ -405,15 +462,18 @@ combine_results <- function(runner, output_dir, threads = hpc_worker_threads()) 
     baseline <- runner$build_baseline_delta(metrics)
     rankings <- runner$build_landscape_rankings(metrics)
     pareto <- runner$build_pareto_front(metrics)
-    summary_by <- c(
+    summary_by <- runner$present_cols(metrics, c(
       "n_chr", "sample_depth", "grf_lambda", "package", "input_mode",
       "extrapolation_method", "minobs", "NN_prior_slot", "shell",
       "prediction_scale", "metric"
-    )
+    ))
     depth_lambda_summary <- runner$summary_stats(metrics, summary_by)
     overall_summary <- runner$summary_stats(
       metrics,
-      c("n_chr", "package", "input_mode", "extrapolation_method", "minobs", "NN_prior_slot", "shell", "prediction_scale", "metric")
+      runner$present_cols(metrics, c(
+        "n_chr", "package", "input_mode", "extrapolation_method", "minobs",
+        "NN_prior_slot", "shell", "prediction_scale", "metric"
+      ))
     )
     rank_summary <- runner$build_rank_summary(rankings)
     write_csv(paired, file.path(output_dir, "paired_landscape_comparison.csv"))
@@ -446,8 +506,8 @@ combine_results <- function(runner, output_dir, threads = hpc_worker_threads()) 
     "# HPC Selected Depth/Lambda Comparison",
     "",
     sprintf("- expected_total_runs: %d", nrow(run_index_done)),
-    sprintf("- expected_alfak2_runs: %d", sum(run_index_done$package == "alfak2")),
-    sprintf("- expected_alfakR_runs: %d", sum(run_index_done$package == "alfakR")),
+    sprintf("- expected_alfak_V2_runs: %d", sum(run_index_done$package == "alfak2")),
+    sprintf("- expected_alfak_runs: %d", sum(run_index_done$package == "alfakR")),
     sprintf("- actual_completed_runs: %d", sum(run_index_done$fit_status != "missing")),
     sprintf("- actual_successful_runs: %d", sum(run_index_done$fit_status == "ok")),
     sprintf("- actual_failed_or_missing_runs: %d", sum(run_index_done$fit_status != "ok")),
@@ -457,11 +517,11 @@ combine_results <- function(runner, output_dir, threads = hpc_worker_threads()) 
     sprintf("- landscape_reps: %s", paste(sort(unique(run_index_done$landscape_rep)), collapse = ", ")),
     sprintf("- fit_repeats: %s", paste(sort(unique(run_index_done$fit_repeat)), collapse = ", ")),
     "",
-    "## alfak2 combinations",
-    "- All 9 extrapolation methods are evaluated under each of the three alfak2 input modes: `full`, `minobs_matched`, and `soft_minobs`.",
+    "## alfak_V2 combinations",
+    "- All 9 extrapolation methods are evaluated under each of the three alfak_V2 input modes: `full`, `minobs_matched`, and `soft_minobs`.",
     paste(sprintf("- `%s:%s`", hpc_selected_alfak2_grid()$input_mode, hpc_selected_alfak2_grid()$extrapolation_method), collapse = "\n"),
     "",
-    "## alfakR settings",
+    "## alfak settings",
     "- All current 15 minobs / NN_prior slots are included.",
     "",
     "## Outputs",
@@ -523,8 +583,8 @@ main <- function() {
     cat(
       "initialized run_index:", file.path(output_dir, "run_index.csv"), "\n",
       "expected_total_runs:", nrow(run_index), "\n",
-      "expected_alfak2_runs:", sum(run_index$package == "alfak2"), "\n",
-      "expected_alfakR_runs:", sum(run_index$package == "alfakR"), "\n",
+      "expected_alfak_V2_runs:", sum(run_index$package == "alfak2"), "\n",
+      "expected_alfak_runs:", sum(run_index$package == "alfakR"), "\n",
       "slurm_script:", slurm_script, "\n",
       "summary_slurm_script:", summary_script, "\n",
       sep = ""
@@ -550,6 +610,13 @@ main <- function() {
   }
 
   if (isTRUE(args$combine)) {
+    if (!"alfak2" %in% loadedNamespaces()) {
+      if (requireNamespace("pkgload", quietly = TRUE)) {
+        pkgload::load_all(repo_dir, quiet = TRUE)
+      } else {
+        suppressPackageStartupMessages(library(alfak2))
+      }
+    }
     combine_results(runner, output_dir, threads = hpc_worker_threads())
   }
 }
