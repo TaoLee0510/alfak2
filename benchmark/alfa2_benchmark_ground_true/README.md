@@ -77,7 +77,8 @@ On HPC, the submitter uses:
 
 - `ALFAK2_REPO=/share/lab_crd/lab_crd/taoli/Project/alfak2`
 - `ALFAKR_REPO=/share/lab_crd/lab_crd/taoli/Project/alfakR`
+- `MODULES=R/4.4`
 
-The R runner requires `pkgload` and loads both packages with `pkgload::load_all()` from those source repositories. It validates the loaded namespace paths and fails instead of falling back to any `alfakR` installed in the active R module library.
+The Slurm script loads the `R/4.4` module before running `Rscript`. The R runner then requires `pkgload` and loads both packages with `pkgload::load_all()` from those source repositories. It validates the loaded namespace paths and fails instead of falling back to any `alfakR` installed in the active R module library.
 
 Outputs default to `benchmark/results/alfa2_benchmark_ground_true`.
