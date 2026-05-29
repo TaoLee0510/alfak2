@@ -610,6 +610,15 @@ cache_matches_current_config <- function(x, cfg) {
     numeric_vec_equal(x$benchmark_config$alfakR_dt, cfg$alfakR_dt)
 }
 
+supported_second_layer_shells <- function(candidates) {
+  choices <- tryCatch(
+    eval(formals(alfak2:::second_layer_metric_values)$shell),
+    error = function(e) character()
+  )
+  if (!length(choices)) return(candidates)
+  intersect(candidates, choices)
+}
+
 validate_benchmark_time_config <- function(cfg) {
   validate_exact_benchmark_times(cfg$ground_truth_times, "ground_truth_times")
   validate_exact_benchmark_times(cfg$passage_times, "passage_times")
@@ -933,21 +942,31 @@ run_one_task <- function(row, cfg, dirs, force = FALSE) {
   })
 
   attached <- attach_predictions(eval_graph, result$predictions)
-  metrics_eval <- alfak2:::second_layer_metric_table(
-    attached$nodes,
-    attached$edges,
-    shells = c("all_eval", "all_nearfield", "d0", "d1", "d2"),
-    runtime_seconds = result$runtime_seconds,
-    failure_status = result$failure_status
-  )
+  eval_shells <- supported_second_layer_shells(c("all_eval", "all_nearfield", "d0", "d1", "d2"))
+  metrics_eval <- if (length(eval_shells)) {
+    alfak2:::second_layer_metric_table(
+      attached$nodes,
+      attached$edges,
+      shells = eval_shells,
+      runtime_seconds = result$runtime_seconds,
+      failure_status = result$failure_status
+    )
+  } else {
+    data.frame()
+  }
   full_eval <- full_landscape_eval(result$predictions, as.numeric(row$wavelength[[1L]]), xi$true_landscape)
-  metrics_full <- alfak2:::second_layer_metric_table(
-    full_eval$nodes,
-    full_eval$edges,
-    shells = "full_lscape",
-    runtime_seconds = result$runtime_seconds,
-    failure_status = result$failure_status
-  )
+  full_shells <- supported_second_layer_shells("full_lscape")
+  metrics_full <- if (length(full_shells)) {
+    alfak2:::second_layer_metric_table(
+      full_eval$nodes,
+      full_eval$edges,
+      shells = full_shells,
+      runtime_seconds = result$runtime_seconds,
+      failure_status = result$failure_status
+    )
+  } else {
+    data.frame()
+  }
   metrics <- rbind_fill(list(metrics_eval, metrics_full))
   metrics <- add_row_metadata(metrics, row, result)
   out <- list(
