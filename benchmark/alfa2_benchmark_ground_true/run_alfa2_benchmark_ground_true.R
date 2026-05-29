@@ -16,7 +16,8 @@ usage <- function() {
     "  all           Prepare, generate all ground truth, run all tasks sequentially, and summarize.\n\n",
     "Core options:\n",
     "  --output-dir=benchmark/results/alfa2_benchmark_ground_true\n",
-    "  --alfakR-repo=/Users/4482173/Documents/GitHub/alfakR\n",
+    "  --alfak2-repo=/share/lab_crd/lab_crd/taoli/Project/alfak2\n",
+    "  --alfakR-repo=/share/lab_crd/lab_crd/taoli/Project/alfakR\n",
     "  --sample-depths=1000,200\n",
     "  --wavelengths=0.2,0.4,0.8,1.6\n",
     "  --ground-truth-reps=1:5\n",
@@ -381,18 +382,49 @@ load_indices <- function(dirs) {
   )
 }
 
-load_repositories <- function(repo_dir, alfakR_repo) {
-  if (requireNamespace("pkgload", quietly = TRUE)) {
-    pkgload::load_all(repo_dir, quiet = TRUE)
-    if (dir.exists(alfakR_repo)) {
-      pkgload::load_all(alfakR_repo, quiet = TRUE)
-    } else {
-      suppressPackageStartupMessages(library(alfakR))
-    }
-  } else {
-    suppressPackageStartupMessages(library(alfak2))
-    suppressPackageStartupMessages(library(alfakR))
+validate_source_repo <- function(path, package) {
+  path <- normalizePath(path, winslash = "/", mustWork = TRUE)
+  desc <- file.path(path, "DESCRIPTION")
+  if (!file.exists(desc)) {
+    stop("Missing DESCRIPTION for ", package, " source repo: ", path, call. = FALSE)
   }
+  dcf <- read.dcf(desc)
+  pkg <- as.character(dcf[1L, "Package"])
+  if (!identical(pkg, package)) {
+    stop("Expected package `", package, "` at ", path, " but DESCRIPTION says `", pkg, "`.", call. = FALSE)
+  }
+  path
+}
+
+loaded_namespace_path <- function(package) {
+  normalizePath(getNamespaceInfo(package, "path"), winslash = "/", mustWork = TRUE)
+}
+
+load_repositories <- function(repo_dir, alfakR_repo) {
+  repo_dir <- validate_source_repo(repo_dir, "alfak2")
+  alfakR_repo <- validate_source_repo(alfakR_repo, "alfakR")
+  if (!requireNamespace("pkgload", quietly = TRUE)) {
+    stop(
+      "Package `pkgload` is required so the benchmark loads alfak2/alfakR from source repos, ",
+      "not from the active R module library.",
+      call. = FALSE
+    )
+  }
+
+  pkgload::load_all(repo_dir, quiet = TRUE)
+  pkgload::load_all(alfakR_repo, quiet = TRUE)
+
+  loaded_alfak2 <- loaded_namespace_path("alfak2")
+  loaded_alfakR <- loaded_namespace_path("alfakR")
+  if (!identical(loaded_alfak2, repo_dir)) {
+    stop("alfak2 was loaded from ", loaded_alfak2, " instead of ", repo_dir, call. = FALSE)
+  }
+  if (!identical(loaded_alfakR, alfakR_repo)) {
+    stop("alfakR was loaded from ", loaded_alfakR, " instead of ", alfakR_repo, call. = FALSE)
+  }
+
+  message("Loaded alfak2 source repo: ", loaded_alfak2)
+  message("Loaded alfakR source repo: ", loaded_alfakR)
   invisible(TRUE)
 }
 
@@ -952,7 +984,7 @@ main <- function() {
     usage()
     quit(save = "no", status = 0)
   }
-  repo_dir <- resolve_repo_dir()
+  repo_dir <- normalizePath(arg_value(args, "alfak2_repo", resolve_repo_dir()), winslash = "/", mustWork = TRUE)
   cfg <- build_config(args, repo_dir)
   dirs <- make_dirs(cfg$output_dir)
   mode <- arg_value(args, "mode", "prepare")

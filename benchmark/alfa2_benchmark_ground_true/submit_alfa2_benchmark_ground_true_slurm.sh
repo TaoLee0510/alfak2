@@ -53,6 +53,7 @@ run_task_stage() {
     "--mode=fit-task" \
     "--task-index=${task_index}" \
     "--output-dir=${OUTPUT_DIR}" \
+    "--alfak2-repo=${ALFAK2_REPO}" \
     "--alfakR-repo=${ALFAKR_REPO}" \
     "--sample-depths=${SAMPLE_DEPTHS}" \
     "--wavelengths=${WAVELENGTHS}" \
@@ -129,6 +130,7 @@ cd "${ALFAK2_REPO}"
 "${R_BIN}" "${RUNNER}" \
   "--mode=prepare" \
   "--output-dir=${OUTPUT_DIR}" \
+  "--alfak2-repo=${ALFAK2_REPO}" \
   "--alfakR-repo=${ALFAKR_REPO}" \
   "--sample-depths=${SAMPLE_DEPTHS}" \
   "--wavelengths=${WAVELENGTHS}" \

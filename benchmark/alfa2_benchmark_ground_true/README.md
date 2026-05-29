@@ -73,4 +73,11 @@ bash benchmark/alfa2_benchmark_ground_true/submit_alfa2_benchmark_ground_true_sl
 
 The Slurm submitter assigns each run task 1 CPU, 256G memory, and 7 days. It writes logs to `benchmark/results/alfa2_benchmark_ground_true/slurm_logs`.
 
+On HPC, the submitter uses:
+
+- `ALFAK2_REPO=/share/lab_crd/lab_crd/taoli/Project/alfak2`
+- `ALFAKR_REPO=/share/lab_crd/lab_crd/taoli/Project/alfakR`
+
+The R runner requires `pkgload` and loads both packages with `pkgload::load_all()` from those source repositories. It validates the loaded namespace paths and fails instead of falling back to any `alfakR` installed in the active R module library.
+
 Outputs default to `benchmark/results/alfa2_benchmark_ground_true`.
