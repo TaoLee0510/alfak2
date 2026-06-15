@@ -17,6 +17,12 @@ load_requested_modules() {
     return 0
   fi
 
+  local nounset_was_enabled=0
+  if [[ "$-" == *u* ]]; then
+    nounset_was_enabled=1
+    set +u
+  fi
+
   if ! type module >/dev/null 2>&1 && ! type ml >/dev/null 2>&1; then
     for init_script in \
       /etc/profile.d/modules.sh \
@@ -45,6 +51,10 @@ load_requested_modules() {
     echo "Unable to load required module(s): ${MODULES}" >&2
     echo "Neither module nor ml is available in this shell." >&2
     exit 2
+  fi
+
+  if (( nounset_was_enabled )); then
+    set -u
   fi
 
   if ! command -v "${R_BIN:-Rscript}" >/dev/null 2>&1; then
