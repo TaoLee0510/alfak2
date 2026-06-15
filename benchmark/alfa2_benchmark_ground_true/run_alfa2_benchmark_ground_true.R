@@ -1026,26 +1026,63 @@ method_label <- function(x) {
   )
 }
 
+read_cache_metrics <- function(cache_paths) {
+  metrics <- vector("list", length(cache_paths))
+  for (i in seq_along(cache_paths)) {
+    x <- safe_read_rds(cache_paths[[i]])
+    if (!is.null(x) && is.data.frame(x$metrics) && nrow(x$metrics)) {
+      metrics[[i]] <- x$metrics
+    }
+    if (i %% 500L == 0L) {
+      message(sprintf("Read metrics from %d/%d run caches", i, length(cache_paths)))
+    }
+  }
+  rbind_fill(metrics)
+}
+
+make_group_key <- function(x, group_cols) {
+  key_data <- x[, group_cols, drop = FALSE]
+  for (nm in names(key_data)) {
+    value <- key_data[[nm]]
+    value <- as.character(value)
+    value[is.na(value) | !nzchar(value)] <- "<NA>"
+    key_data[[nm]] <- value
+  }
+  interaction(key_data, drop = TRUE, lex.order = TRUE)
+}
+
+metric_value_column <- function(metrics) {
+  candidates <- c("value", "metric_value")
+  hit <- candidates[candidates %in% names(metrics)]
+  if (!length(hit)) {
+    stop("Metrics table has no numeric metric value column. Expected one of: ", paste(candidates, collapse = ", "), call. = FALSE)
+  }
+  hit[[1L]]
+}
+
 summarize_mode <- function(indices, dirs) {
   cache_paths <- list.files(dirs$cache, pattern = "[.]rds$", full.names = TRUE)
-  runs <- lapply(cache_paths, safe_read_rds)
-  metrics <- rbind_fill(lapply(runs, function(x) x$metrics))
+  metrics <- read_cache_metrics(cache_paths)
   write_tsv(metrics, file.path(dirs$tables, "metrics_long.tsv"))
   if (!nrow(metrics)) {
     warning("No completed metrics found.")
     return(invisible(metrics))
   }
   metrics$method_label <- method_label(metrics)
+  value_col <- metric_value_column(metrics)
+  metric_values <- suppressWarnings(as.numeric(metrics[[value_col]]))
+  finite_metric <- is.finite(metric_values)
   group_cols <- c(
     "sample_depth", "wavelength", "package", "input_mode", "soft_minobs",
     "extrapolation_method", "minobs", "NN_prior", "method_label",
     "shell", "prediction_scale", "metric"
   )
-  key <- interaction(metrics[group_cols], drop = TRUE, lex.order = TRUE)
+  key <- make_group_key(metrics, group_cols)
   rows <- lapply(levels(key), function(k) {
-    x <- metrics[key == k & is.finite(metrics$value), , drop = FALSE]
-    all_x <- metrics[key == k, , drop = FALSE]
-    vals <- x$value
+    idx_all <- which(key == k)
+    idx <- idx_all[finite_metric[idx_all]]
+    all_x <- metrics[idx_all, , drop = FALSE]
+    vals <- metric_values[idx]
     data.frame(
       all_x[1, group_cols, drop = FALSE],
       n_runs = length(unique(all_x$run_id)),
@@ -1063,7 +1100,7 @@ summarize_mode <- function(indices, dirs) {
   write_tsv(summary, file.path(dirs$tables, "summary_by_depth_wavelength_method_metric.tsv"))
 
   status_cols <- c("sample_depth", "wavelength", "package", "method_label", "fit_status", "failure_status")
-  status_key <- interaction(metrics[status_cols], drop = TRUE, lex.order = TRUE)
+  status_key <- make_group_key(metrics, status_cols)
   status <- do.call(rbind, lapply(levels(status_key), function(k) {
     x <- metrics[status_key == k, , drop = FALSE]
     data.frame(x[1, status_cols, drop = FALSE], n_runs = length(unique(x$run_id)), stringsAsFactors = FALSE)
