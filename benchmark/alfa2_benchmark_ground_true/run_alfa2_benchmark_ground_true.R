@@ -1060,23 +1060,31 @@ metric_value_column <- function(metrics) {
   hit[[1L]]
 }
 
-summarize_mode <- function(indices, dirs) {
-  cache_paths <- list.files(dirs$cache, pattern = "[.]rds$", full.names = TRUE)
-  metrics <- read_cache_metrics(cache_paths)
-  write_tsv(metrics, file.path(dirs$tables, "metrics_long.tsv"))
-  if (!nrow(metrics)) {
-    warning("No completed metrics found.")
-    return(invisible(metrics))
+summarize_metric_groups <- function(metrics, group_cols, value_col) {
+  if (requireNamespace("data.table", quietly = TRUE)) {
+    dt <- data.table::as.data.table(metrics)
+    dt[, .metric_value := suppressWarnings(as.numeric(get(value_col)))]
+    dt[, .finite_metric := is.finite(.metric_value)]
+    out <- dt[, {
+      vals <- .metric_value[.finite_metric]
+      list(
+        n_runs = data.table::uniqueN(run_id),
+        n_success = data.table::uniqueN(run_id[fit_status == "ok"]),
+        n_values = length(vals),
+        mean = if (length(vals)) mean(vals) else NA_real_,
+        sd = if (length(vals) > 1L) stats::sd(vals) else NA_real_,
+        median = if (length(vals)) stats::median(vals) else NA_real_,
+        q25 = if (length(vals)) stats::quantile(vals, 0.25, names = FALSE) else NA_real_,
+        q75 = if (length(vals)) stats::quantile(vals, 0.75, names = FALSE) else NA_real_
+      )
+    }, by = group_cols]
+    drop_cols <- intersect(c(".metric_value", ".finite_metric"), names(out))
+    if (length(drop_cols)) out[, (drop_cols) := NULL]
+    return(as.data.frame(out))
   }
-  metrics$method_label <- method_label(metrics)
-  value_col <- metric_value_column(metrics)
+
   metric_values <- suppressWarnings(as.numeric(metrics[[value_col]]))
   finite_metric <- is.finite(metric_values)
-  group_cols <- c(
-    "sample_depth", "wavelength", "package", "input_mode", "soft_minobs",
-    "extrapolation_method", "minobs", "NN_prior", "method_label",
-    "shell", "prediction_scale", "metric"
-  )
   key <- make_group_key(metrics, group_cols)
   rows <- lapply(levels(key), function(k) {
     idx_all <- which(key == k)
@@ -1096,15 +1104,42 @@ summarize_mode <- function(indices, dirs) {
       stringsAsFactors = FALSE
     )
   })
-  summary <- rbind_fill(rows)
-  write_tsv(summary, file.path(dirs$tables, "summary_by_depth_wavelength_method_metric.tsv"))
+  rbind_fill(rows)
+}
 
-  status_cols <- c("sample_depth", "wavelength", "package", "method_label", "fit_status", "failure_status")
+summarize_status_groups <- function(metrics, status_cols) {
+  if (requireNamespace("data.table", quietly = TRUE)) {
+    dt <- data.table::as.data.table(metrics)
+    out <- dt[, list(n_runs = data.table::uniqueN(run_id)), by = status_cols]
+    return(as.data.frame(out))
+  }
   status_key <- make_group_key(metrics, status_cols)
-  status <- do.call(rbind, lapply(levels(status_key), function(k) {
+  do.call(rbind, lapply(levels(status_key), function(k) {
     x <- metrics[status_key == k, , drop = FALSE]
     data.frame(x[1, status_cols, drop = FALSE], n_runs = length(unique(x$run_id)), stringsAsFactors = FALSE)
   }))
+}
+
+summarize_mode <- function(indices, dirs) {
+  cache_paths <- list.files(dirs$cache, pattern = "[.]rds$", full.names = TRUE)
+  metrics <- read_cache_metrics(cache_paths)
+  write_tsv(metrics, file.path(dirs$tables, "metrics_long.tsv"))
+  if (!nrow(metrics)) {
+    warning("No completed metrics found.")
+    return(invisible(metrics))
+  }
+  metrics$method_label <- method_label(metrics)
+  value_col <- metric_value_column(metrics)
+  group_cols <- c(
+    "sample_depth", "wavelength", "package", "input_mode", "soft_minobs",
+    "extrapolation_method", "minobs", "NN_prior", "method_label",
+    "shell", "prediction_scale", "metric"
+  )
+  summary <- summarize_metric_groups(metrics, group_cols, value_col)
+  write_tsv(summary, file.path(dirs$tables, "summary_by_depth_wavelength_method_metric.tsv"))
+
+  status_cols <- c("sample_depth", "wavelength", "package", "method_label", "fit_status", "failure_status")
+  status <- summarize_status_groups(metrics, status_cols)
   write_tsv(status, file.path(dirs$tables, "fit_status_counts.tsv"))
   invisible(metrics)
 }
