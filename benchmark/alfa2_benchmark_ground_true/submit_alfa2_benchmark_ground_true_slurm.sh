@@ -111,6 +111,7 @@ run_task_stage() {
     "--ntp=${NTP}" \
     "--alfakR-dt=${ALFAKR_DT}" \
     "--nboot=${NBOOT}" \
+    "--forward-prediction-reps=${FORWARD_PREDICTION_REPS}" \
     "--pmis=${PMIS}" \
     "--n0=${N0}" \
     "--nb=${NB}" \
@@ -150,6 +151,7 @@ SOFT_MINOBS="${SOFT_MINOBS:-5,10,20}"
 NTP="${NTP:-2}"
 ALFAKR_DT="${ALFAKR_DT:-1}"
 NBOOT="${NBOOT:-45}"
+FORWARD_PREDICTION_REPS="${FORWARD_PREDICTION_REPS:-5}"
 PMIS="${PMIS:-5e-05}"
 N0="${N0:-2e5}"
 NB="${NB:-2e7}"
@@ -200,6 +202,7 @@ cd "${ALFAK2_REPO}"
   "--ntp=${NTP}" \
   "--alfakR-dt=${ALFAKR_DT}" \
   "--nboot=${NBOOT}" \
+  "--forward-prediction-reps=${FORWARD_PREDICTION_REPS}" \
   "--pmis=${PMIS}" \
   "--n0=${N0}" \
   "--nb=${NB}" \
@@ -244,6 +247,7 @@ write_export "${ENV_FILE}" "SOFT_MINOBS" "${SOFT_MINOBS}"
 write_export "${ENV_FILE}" "NTP" "${NTP}"
 write_export "${ENV_FILE}" "ALFAKR_DT" "${ALFAKR_DT}"
 write_export "${ENV_FILE}" "NBOOT" "${NBOOT}"
+write_export "${ENV_FILE}" "FORWARD_PREDICTION_REPS" "${FORWARD_PREDICTION_REPS}"
 write_export "${ENV_FILE}" "PMIS" "${PMIS}"
 write_export "${ENV_FILE}" "N0" "${N0}"
 write_export "${ENV_FILE}" "NB" "${NB}"

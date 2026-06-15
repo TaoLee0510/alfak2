@@ -23,6 +23,7 @@ The generator follows `/Users/4482173/Downloads/ALFA-K_orignal/scripts/S01_run_a
 - `select_passage_counts()` uses exactly passage times `0, 180`
 - `alfakR` receives `yi$dt = 1`, so `dt = 1` represents 1 day
 - The runner rejects any override that changes these benchmark time settings
+- ALFA-K-style evaluation uses the same two fitted time points. Forward prediction metrics are therefore computed for `0 -> 180`; the benchmark does not use the original ALFA-K `<120` training-window rule.
 
 The extension is `sample_depth = 1000, 200`. The original wavelengths `0.2, 0.4, 0.8, 1.6` are retained, with 5 ground-truth repeats per depth and wavelength.
 
@@ -41,6 +42,34 @@ Per `sample_depth`, `alfakR` has 3 `minobs` settings times 4 `NN_prior` settings
 - `NN_prior = None, empirical, empirical_censored, empirical_censored_weighted`
 
 Each method parameter pair is run 5 fit repeats for every ground truth.
+
+## ALFA-K-Aligned Evaluation
+
+The original alfak2 second-layer metric tables are still produced:
+
+- `metrics_long.tsv`
+- `summary_by_depth_wavelength_method_metric.tsv`
+- `fit_status_counts.tsv`
+
+The runner also writes ALFA-K-style ABM evaluation tables:
+
+- `alfak_original_landscape_by_run.tsv`
+- `alfak_original_landscape_long.tsv`
+- `alfak_original_landscape_summary.tsv`
+- `alfak_original_forward_prediction_metrics.tsv`
+- `alfak_original_forward_prediction_long.tsv`
+- `alfak_original_forward_prediction_summary.tsv`
+- `alfak_original_forward_win_summary.tsv`
+
+Landscape metrics follow the original `S04_process_abm_results.R` names:
+
+- Pearson correlation: `r`, `rfq`, `rnn`, `rd2`
+- Spearman correlation: `rho`, `rhofq`, `rhonn`, `rhod2`
+- centered R2: `R`, `Rfq`, `Rnn`, `Rd2`
+- cross-validation R2 when available: `Rxv`
+- observed/frequent count: `nfq`
+
+Forward prediction metrics follow the original `overlap`, `cosine`, `euclidean`, `wasserstein`, `angle`, and `win` definitions, using 5 ABM prediction repeats by default. Set `FORWARD_PREDICTION_REPS=0` or `--forward-prediction-reps=0` to skip this heavier evaluation stage.
 
 ## Commands
 

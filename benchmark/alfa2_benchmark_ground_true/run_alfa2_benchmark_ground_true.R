@@ -28,6 +28,7 @@ usage <- function() {
     "  --ntp=2\n",
     "  --alfakR-dt=1\n",
     "  --nboot=45\n",
+    "  --forward-prediction-reps=5\n",
     "  --force=false\n",
     sep = ""
   )
@@ -372,7 +373,7 @@ prepare_indices <- function(cfg, dirs) {
     key = c(
       "sample_depths", "wavelengths", "ground_truth_reps", "fit_repeats",
       "ground_truth_times", "passage_times", "soft_minobs", "alfakR_priors",
-      "ntp", "alfakR_dt", "nboot", "pmis",
+      "ntp", "alfakR_dt", "nboot", "forward_prediction_reps", "pmis",
       "n0", "nb", "alfak2_local_shell_depth", "alfak2_global_extra_shell",
       "alfak2_max_nodes"
     ),
@@ -388,6 +389,7 @@ prepare_indices <- function(cfg, dirs) {
       cfg$ntp,
       cfg$alfakR_dt,
       cfg$nboot,
+      cfg$forward_prediction_reps,
       cfg$pmis,
       cfg$n0,
       cfg$nb,
@@ -607,7 +609,8 @@ cache_matches_current_config <- function(x, cfg) {
   if (is.null(x) || is.null(x$benchmark_config)) return(FALSE)
   numeric_vec_equal(x$benchmark_config$ground_truth_times, cfg$ground_truth_times) &&
     numeric_vec_equal(x$benchmark_config$passage_times, cfg$passage_times) &&
-    numeric_vec_equal(x$benchmark_config$alfakR_dt, cfg$alfakR_dt)
+    numeric_vec_equal(x$benchmark_config$alfakR_dt, cfg$alfakR_dt) &&
+    numeric_vec_equal(x$benchmark_config$forward_prediction_reps, cfg$forward_prediction_reps)
 }
 
 supported_second_layer_shells <- function(candidates) {
@@ -627,6 +630,10 @@ validate_benchmark_time_config <- function(cfg) {
   }
   if (!numeric_vec_equal(cfg$alfakR_dt, 1)) {
     stop("alfakR_dt must be exactly 1 for alfa2_benchmark_ground_true.", call. = FALSE)
+  }
+  forward_prediction_reps <- as.integer(cfg$forward_prediction_reps)
+  if (!is.finite(forward_prediction_reps) || forward_prediction_reps < 0L) {
+    stop("forward_prediction_reps must be non-negative.", call. = FALSE)
   }
   invisible(TRUE)
 }
@@ -809,6 +816,258 @@ coerce_alfakR_predictions <- function(landscape_path) {
   )
 }
 
+alfak_original_safe_cor <- function(x, y, method = "pearson") {
+  ok <- is.finite(x) & is.finite(y)
+  x <- x[ok]
+  y <- y[ok]
+  if (length(x) < 2L || stats::sd(x) == 0 || stats::sd(y) == 0) return(NA_real_)
+  suppressWarnings(stats::cor(x, y, method = method))
+}
+
+alfak_original_R2R <- function(obs, pred) {
+  ok <- is.finite(obs) & is.finite(pred)
+  obs <- obs[ok]
+  pred <- pred[ok]
+  if (length(obs) < 2L) return(NA_real_)
+  obs <- obs - mean(obs)
+  pred <- pred - mean(pred)
+  denom <- sum((obs - mean(obs))^2)
+  if (!is.finite(denom) || denom <= 0) return(NA_real_)
+  1 - sum((pred - obs)^2) / denom
+}
+
+alfak_original_subset_metrics <- function(truth, pred, keep) {
+  keep <- keep & is.finite(truth) & is.finite(pred)
+  list(
+    r = alfak_original_safe_cor(pred[keep], truth[keep], method = "pearson"),
+    rho = alfak_original_safe_cor(pred[keep], truth[keep], method = "spearman"),
+    R = alfak_original_R2R(truth[keep], pred[keep])
+  )
+}
+
+alfak_original_landscape_summary <- function(nodes, result) {
+  if (!is.data.frame(nodes) || !nrow(nodes)) return(data.frame())
+  if (!all(c("truth", "pred", "support_distance") %in% names(nodes))) return(data.frame())
+  truth <- as.numeric(nodes$truth)
+  pred <- as.numeric(nodes$pred)
+  d <- suppressWarnings(as.integer(nodes$support_distance))
+  finite <- is.finite(truth) & is.finite(pred)
+  fq <- finite & d == 0L
+  nn <- finite & d == 1L
+  d2 <- finite & !(d %in% c(0L, 1L))
+  all_m <- alfak_original_subset_metrics(truth, pred, finite)
+  fq_m <- alfak_original_subset_metrics(truth, pred, fq)
+  nn_m <- alfak_original_subset_metrics(truth, pred, nn)
+  d2_m <- alfak_original_subset_metrics(truth, pred, d2)
+  data.frame(
+    r = all_m$r,
+    rfq = fq_m$r,
+    rnn = nn_m$r,
+    rd2 = d2_m$r,
+    rho = all_m$rho,
+    rhofq = fq_m$rho,
+    rhonn = nn_m$rho,
+    rhod2 = d2_m$rho,
+    R = all_m$R,
+    Rfq = fq_m$R,
+    Rnn = nn_m$R,
+    Rd2 = d2_m$R,
+    Rxv = suppressWarnings(as.numeric(result$cross_validation_R2 %||% NA_real_))[1L],
+    nfq = sum(fq, na.rm = TRUE),
+    nall = sum(finite, na.rm = TRUE),
+    nnn = sum(nn, na.rm = TRUE),
+    nd2 = sum(d2, na.rm = TRUE),
+    stringsAsFactors = FALSE
+  )
+}
+
+prediction_lscape <- function(predictions) {
+  if (!is.data.frame(predictions) || !nrow(predictions)) return(data.frame())
+  out <- data.frame(
+    k = as.character(predictions$karyotype),
+    mean = as.numeric(predictions$fitness_mean),
+    stringsAsFactors = FALSE
+  )
+  out <- out[is.finite(out$mean) & !is.na(out$k) & nzchar(out$k), , drop = FALSE]
+  out <- out[!duplicated(out$k), , drop = FALSE]
+  out
+}
+
+match_time_columns <- function(times_needed, available_times) {
+  vapply(times_needed, function(target) {
+    exact <- which(abs(available_times - target) <= 1e-8)
+    if (length(exact)) exact[[1L]] else which.min(abs(available_times - target))
+  }, integer(1L))
+}
+
+normalize_count_vector <- function(x) {
+  nm <- names(x)
+  x <- suppressWarnings(as.numeric(x))
+  names(x) <- nm
+  x[!is.finite(x)] <- 0
+  total <- sum(x)
+  if (!is.finite(total) || total <= 0) {
+    out <- rep(0, length(x))
+    names(out) <- nm
+    return(out)
+  }
+  x / total
+}
+
+safe_centroid_angle <- function(a, b) {
+  ma <- sqrt(sum(a^2))
+  mb <- sqrt(sum(b^2))
+  if (!is.finite(ma) || !is.finite(mb) || ma == 0 || mb == 0) return(NaN)
+  cosv <- sum(a * b) / (ma * mb)
+  cosv <- max(-1, min(1, cosv))
+  180 * acos(cosv) / pi
+}
+
+safe_cosine <- function(a, b) {
+  ma <- sqrt(sum(a^2))
+  mb <- sqrt(sum(b^2))
+  if (!is.finite(ma) || !is.finite(mb) || ma == 0 || mb == 0) return(NaN)
+  sum(a * b) / (ma * mb)
+}
+
+safe_overlap <- function(a, b) {
+  denom <- min(sum(a), sum(b))
+  if (!is.finite(denom) || denom <= 0) return(NaN)
+  sum(pmin(a, b)) / denom
+}
+
+safe_wasserstein <- function(k, a, b) {
+  if (!requireNamespace("transport", quietly = TRUE)) return(NaN)
+  tryCatch({
+    transport::wasserstein(
+      transport::wpp(k, mass = a),
+      transport::wpp(k, mass = b)
+    )
+  }, error = function(e) NaN)
+}
+
+average_prediction_outputs <- function(preds, lscape_k, measure_tps) {
+  mats <- lapply(preds, function(y) {
+    y_times <- suppressWarnings(as.numeric(y$time))
+    idx <- match_time_columns(measure_tps - measure_tps[[1L]], y_times)
+    if (anyNA(idx)) stop("Could not match ABM prediction output times.", call. = FALSE)
+    mat <- as.matrix(y[idx, setdiff(colnames(y), "time"), drop = FALSE])
+    out <- matrix(0, nrow = length(measure_tps), ncol = length(lscape_k),
+                  dimnames = list(as.character(measure_tps), lscape_k))
+    common <- intersect(colnames(mat), lscape_k)
+    if (length(common)) out[, common] <- mat[, common, drop = FALSE]
+    out
+  })
+  Reduce(`+`, mats) / length(mats)
+}
+
+alfak_original_forward_metrics <- function(predictions, xi, cfg, run_dir) {
+  reps <- as.integer(cfg$forward_prediction_reps %||% 0L)
+  if (!is.finite(reps) || reps <= 0L) return(data.frame())
+  lscape <- prediction_lscape(predictions)
+  if (!nrow(lscape)) return(data.frame())
+  all_times <- suppressWarnings(as.numeric(colnames(xi$abm_output$x)))
+  measure_tps <- as.numeric(cfg$passage_times)
+  if (length(measure_tps) != 2L || !numeric_vec_equal(measure_tps, c(0, 180))) {
+    stop("ALFA-K aligned forward metrics require passage_times exactly 0,180.", call. = FALSE)
+  }
+  idx <- match_time_columns(measure_tps, all_times)
+  if (anyNA(idx)) {
+    stop("Could not match passage_times to ground-truth count columns for forward metrics.", call. = FALSE)
+  }
+  start_time <- measure_tps[[1L]]
+  report_times <- measure_tps[measure_tps > start_time] - start_time
+  counts <- as.matrix(xi$abm_output$x[, idx, drop = FALSE])
+  colnames(counts) <- as.character(measure_tps)
+
+  x0_counts <- counts[, 1L]
+  names(x0_counts) <- rownames(counts)
+  x0_counts <- x0_counts[names(x0_counts) %in% lscape$k]
+  x0_counts <- normalize_count_vector(x0_counts)
+  x0 <- rep(0, nrow(lscape))
+  names(x0) <- lscape$k
+  if (length(x0_counts)) x0[names(x0_counts)] <- x0_counts
+
+  pred_dir <- file.path(run_dir, "abm_preds_aligned")
+  dir.create(pred_dir, recursive = TRUE, showWarnings = FALSE)
+  pred_outputs <- vector("list", reps)
+  for (rep_idx in seq_len(reps)) {
+    pred_path <- file.path(pred_dir, paste0("rep_", pad2(rep_idx), ".Rds"))
+    if (file.exists(pred_path)) {
+      pred_outputs[[rep_idx]] <- readRDS(pred_path)
+    } else {
+      y <- alfakR::predict_evo(
+        lscape = lscape,
+        p = cfg$pmis,
+        times = c(0, report_times),
+        x0 = x0,
+        prediction_type = "ABM",
+        abm_pop_size = 2e5,
+        abm_max_pop = 2e7,
+        abm_delta_t = 0.1,
+        abm_culling_survival = 0.01,
+        abm_record_interval = 10,
+        abm_seed = rep_idx
+      )
+      saveRDS(y, pred_path)
+      pred_outputs[[rep_idx]] <- y
+    }
+  }
+
+  pred_mat <- average_prediction_outputs(pred_outputs, lscape$k, measure_tps)
+  truth_mat <- matrix(0, nrow = length(measure_tps), ncol = nrow(lscape),
+                      dimnames = list(as.character(measure_tps), lscape$k))
+  common_truth <- intersect(rownames(counts), lscape$k)
+  for (i in seq_along(measure_tps)) {
+    if (length(common_truth)) {
+      truth_mat[i, common_truth] <- normalize_count_vector(counts[common_truth, i])
+    }
+  }
+
+  y0 <- truth_mat[1L, ]
+  k <- parse_karyotype_matrix(lscape$k)
+  k0 <- colSums(as.numeric(y0) * k)
+  rows <- vector("list", length(measure_tps))
+  for (i in seq_along(measure_tps)) {
+    y_true <- truth_mat[i, ]
+    y_pred <- pred_mat[i, ]
+    ky <- colSums(as.numeric(y_true) * k)
+    kp <- colSums(as.numeric(y_pred) * k)
+    rows[[i]] <- data.frame(
+      passage = i - 1L,
+      eval_time = measure_tps[[i]],
+      overlap_prediction = safe_overlap(y_pred, y_true),
+      overlap_baseline = safe_overlap(y0, y_true),
+      cosine_prediction = safe_cosine(y_pred, y_true),
+      cosine_baseline = safe_cosine(y0, y_true),
+      euclidean_prediction = sqrt(sum((kp - ky)^2)),
+      euclidean_baseline = sqrt(sum((k0 - ky)^2)),
+      wasserstein_prediction = safe_wasserstein(k, y_pred, y_true),
+      wasserstein_baseline = safe_wasserstein(k, y0, y_true),
+      angle = safe_centroid_angle(ky - k0, kp - k0),
+      stringsAsFactors = FALSE
+    )
+  }
+  wide <- rbind_fill(rows)
+  metrics <- c("overlap", "cosine", "euclidean", "wasserstein")
+  out <- lapply(metrics, function(metric) {
+    prediction <- wide[[paste0(metric, "_prediction")]]
+    baseline <- wide[[paste0(metric, "_baseline")]]
+    win <- if (metric %in% c("overlap", "cosine")) prediction > baseline else prediction < baseline
+    data.frame(
+      passage = wide$passage,
+      eval_time = wide$eval_time,
+      metric = metric,
+      prediction = prediction,
+      baseline = baseline,
+      angle = wide$angle,
+      win = win,
+      stringsAsFactors = FALSE
+    )
+  })
+  rbind_fill(out)
+}
+
 run_alfak2_one <- function(row, selected, cfg, run_dir) {
   counts <- prepare_alfak2_counts(
     selected$counts,
@@ -854,7 +1113,8 @@ run_alfak2_one <- function(row, selected, cfg, run_dir) {
     runtime_seconds = proc.time()[["elapsed"]] - started,
     predictions = coerce_alfak2_predictions(fit),
     fit_path = fit_path,
-    dependency_status = fit$global$diagnostics$dependency_status %||% "ok"
+    dependency_status = fit$global$diagnostics$dependency_status %||% "ok",
+    cross_validation_R2 = NA_real_
   )
 }
 
@@ -876,6 +1136,7 @@ run_alfakR_one <- function(row, selected, cfg, run_dir) {
     )
   )
   landscape_path <- file.path(run_dir, "landscape.Rds")
+  xval <- safe_read_rds(file.path(run_dir, "xval.Rds"))
   list(
     status = "ok",
     failure_status = "ok",
@@ -883,7 +1144,8 @@ run_alfakR_one <- function(row, selected, cfg, run_dir) {
     runtime_seconds = proc.time()[["elapsed"]] - started,
     predictions = coerce_alfakR_predictions(landscape_path),
     fit_path = landscape_path,
-    dependency_status = "ok"
+    dependency_status = "ok",
+    cross_validation_R2 = suppressWarnings(as.numeric(xval))[1L] %||% NA_real_
   )
 }
 
@@ -937,7 +1199,8 @@ run_one_task <- function(row, cfg, dirs, force = FALSE) {
       runtime_seconds = NA_real_,
       predictions = data.frame(karyotype = character(), fitness_mean = numeric(), fitness_sd = numeric()),
       fit_path = NA_character_,
-      dependency_status = "failed"
+      dependency_status = "failed",
+      cross_validation_R2 = NA_real_
     )
   })
 
@@ -969,10 +1232,29 @@ run_one_task <- function(row, cfg, dirs, force = FALSE) {
   }
   metrics <- rbind_fill(list(metrics_eval, metrics_full))
   metrics <- add_row_metadata(metrics, row, result)
+  alfak_landscape <- alfak_original_landscape_summary(attached$nodes, result)
+  alfak_landscape <- add_row_metadata(alfak_landscape, row, result)
+  alfak_forward <- tryCatch({
+    alfak_original_forward_metrics(result$predictions, xi, cfg, run_dir)
+  }, error = function(e) {
+    data.frame(
+      passage = integer(),
+      eval_time = numeric(),
+      metric = character(),
+      prediction = numeric(),
+      baseline = numeric(),
+      angle = numeric(),
+      win = logical(),
+      stringsAsFactors = FALSE
+    )
+  })
+  alfak_forward <- add_row_metadata(alfak_forward, row, result)
   out <- list(
     row = row,
     result = result,
     metrics = metrics,
+    alfak_original_landscape = alfak_landscape,
+    alfak_original_forward = alfak_forward,
     selected_metadata = list(
       passage_times = selected$passage_times,
       dt = selected$dt,
@@ -981,7 +1263,8 @@ run_one_task <- function(row, cfg, dirs, force = FALSE) {
     benchmark_config = list(
       ground_truth_times = cfg$ground_truth_times,
       passage_times = cfg$passage_times,
-      alfakR_dt = cfg$alfakR_dt
+      alfakR_dt = cfg$alfakR_dt,
+      forward_prediction_reps = cfg$forward_prediction_reps
     )
   )
   saveRDS(out, cache_path)
@@ -1038,6 +1321,46 @@ read_cache_metrics <- function(cache_paths) {
     }
   }
   rbind_fill(metrics)
+}
+
+read_cache_table <- function(cache_paths, field) {
+  out <- vector("list", length(cache_paths))
+  for (i in seq_along(cache_paths)) {
+    x <- safe_read_rds(cache_paths[[i]])
+    if (!is.null(x) && is.data.frame(x[[field]]) && nrow(x[[field]])) {
+      out[[i]] <- x[[field]]
+    }
+    if (i %% 500L == 0L) {
+      message(sprintf("Read %s from %d/%d run caches", field, i, length(cache_paths)))
+    }
+  }
+  rbind_fill(out)
+}
+
+landscape_wide_to_long <- function(x) {
+  metric_cols <- intersect(
+    c("r", "rfq", "rnn", "rd2", "rho", "rhofq", "rhonn", "rhod2", "R", "Rfq", "Rnn", "Rd2", "Rxv", "nfq"),
+    names(x)
+  )
+  meta_cols <- setdiff(names(x), metric_cols)
+  rows <- lapply(metric_cols, function(metric) {
+    y <- x
+    y$metric <- metric
+    y$value <- suppressWarnings(as.numeric(y[[metric]]))
+    y[, c(meta_cols, "metric", "value"), drop = FALSE]
+  })
+  rbind_fill(rows)
+}
+
+forward_wide_to_long <- function(x) {
+  if (!nrow(x)) return(data.frame())
+  prediction <- x
+  prediction$value_type <- "prediction"
+  prediction$value <- suppressWarnings(as.numeric(prediction$prediction))
+  baseline <- x
+  baseline$value_type <- "baseline"
+  baseline$value <- suppressWarnings(as.numeric(baseline$baseline))
+  rbind_fill(list(prediction, baseline))
 }
 
 make_group_key <- function(x, group_cols) {
@@ -1141,6 +1464,44 @@ summarize_mode <- function(indices, dirs) {
   status_cols <- c("sample_depth", "wavelength", "package", "method_label", "fit_status", "failure_status")
   status <- summarize_status_groups(metrics, status_cols)
   write_tsv(status, file.path(dirs$tables, "fit_status_counts.tsv"))
+
+  alfak_landscape <- read_cache_table(cache_paths, "alfak_original_landscape")
+  write_tsv(alfak_landscape, file.path(dirs$tables, "alfak_original_landscape_by_run.tsv"))
+  if (nrow(alfak_landscape)) {
+    alfak_landscape$method_label <- method_label(alfak_landscape)
+    alfak_landscape_long <- landscape_wide_to_long(alfak_landscape)
+    write_tsv(alfak_landscape_long, file.path(dirs$tables, "alfak_original_landscape_long.tsv"))
+    landscape_group_cols <- c(
+      "sample_depth", "wavelength", "package", "input_mode", "soft_minobs",
+      "extrapolation_method", "minobs", "NN_prior", "method_label", "metric"
+    )
+    landscape_summary <- summarize_metric_groups(alfak_landscape_long, landscape_group_cols, "value")
+    write_tsv(landscape_summary, file.path(dirs$tables, "alfak_original_landscape_summary.tsv"))
+  }
+
+  alfak_forward <- read_cache_table(cache_paths, "alfak_original_forward")
+  write_tsv(alfak_forward, file.path(dirs$tables, "alfak_original_forward_prediction_metrics.tsv"))
+  if (nrow(alfak_forward)) {
+    alfak_forward$method_label <- method_label(alfak_forward)
+    alfak_forward_long <- forward_wide_to_long(alfak_forward)
+    write_tsv(alfak_forward_long, file.path(dirs$tables, "alfak_original_forward_prediction_long.tsv"))
+    forward_group_cols <- c(
+      "sample_depth", "wavelength", "package", "input_mode", "soft_minobs",
+      "extrapolation_method", "minobs", "NN_prior", "method_label",
+      "metric", "passage", "eval_time", "value_type"
+    )
+    forward_summary <- summarize_metric_groups(alfak_forward_long, forward_group_cols, "value")
+    write_tsv(forward_summary, file.path(dirs$tables, "alfak_original_forward_prediction_summary.tsv"))
+    alfak_forward_win <- alfak_forward
+    alfak_forward_win$value <- as.numeric(alfak_forward_win$win)
+    win_group_cols <- c(
+      "sample_depth", "wavelength", "package", "input_mode", "soft_minobs",
+      "extrapolation_method", "minobs", "NN_prior", "method_label",
+      "metric", "passage", "eval_time"
+    )
+    win_summary <- summarize_metric_groups(alfak_forward_win, win_group_cols, "value")
+    write_tsv(win_summary, file.path(dirs$tables, "alfak_original_forward_win_summary.tsv"))
+  }
   invisible(metrics)
 }
 
@@ -1163,6 +1524,7 @@ build_config <- function(args, repo_dir) {
     ntp = arg_integer(args, "ntp", 2L),
     alfakR_dt = arg_numeric(args, "alfakR_dt", 1),
     nboot = arg_integer(args, "nboot", 45L),
+    forward_prediction_reps = arg_integer(args, "forward_prediction_reps", 5L),
     pmis = arg_numeric(args, "pmis", 5e-05),
     n0 = arg_numeric(args, "n0", 2e5),
     nb = arg_numeric(args, "nb", 2e7),
