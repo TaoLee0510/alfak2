@@ -35,9 +35,11 @@ load_requested_modules() {
 
   if type ml >/dev/null 2>&1; then
     ml purge
-    ml R/4.4
+    for module_name in ${MODULES}; do
+      ml "${module_name}"
+    done
   else
-    echo "Unable to load required module: ml R/4.4" >&2
+    echo "Unable to load required module(s): ${MODULES}" >&2
     echo "ml is unavailable in this shell." >&2
     exit 2
   fi
@@ -47,7 +49,7 @@ load_requested_modules() {
   fi
 
   if ! command -v "${R_BIN:-Rscript}" >/dev/null 2>&1; then
-    echo "Rscript is unavailable after loading module: ml R/4.4" >&2
+    echo "Rscript is unavailable after loading module(s): ${MODULES}" >&2
     exit 2
   fi
 }
@@ -138,7 +140,7 @@ ALFAKR_REPO="${ALFAKR_REPO:-$(cd "${ALFAK2_REPO}/.." && pwd)/alfakR}"
 OUTPUT_DIR="${OUTPUT_DIR:-${ALFAK2_REPO}/benchmark/results/alfa2_benchmark_ground_true}"
 RUNNER="${RUNNER:-${ALFAK2_REPO}/benchmark/alfa2_benchmark_ground_true/run_alfa2_benchmark_ground_true.R}"
 R_BIN="${R_BIN:-Rscript}"
-MODULES="R/4.4"
+MODULES="${MODULES:-R/4.4.2-gfbf-2024a}"
 
 SAMPLE_DEPTHS="${SAMPLE_DEPTHS:-1000,200}"
 WAVELENGTHS="${WAVELENGTHS:-0.2,0.4,0.8,1.6}"
