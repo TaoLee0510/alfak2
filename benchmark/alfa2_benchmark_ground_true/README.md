@@ -4,26 +4,28 @@ This benchmark reproduces the ALFA-K original ABM ground-truth generation proces
 
 ## Ground Truth
 
-The generator follows `/Users/4482173/Downloads/ALFA-K_orignal/scripts/S01_run_abm_sims.R`, with the benchmark time horizon set to 180 days:
+The generator follows `/Users/4482173/Downloads/ALFA-K_orignal/scripts/S01_run_abm_sims.R`, with a late-window fitting design:
 
 - founder karyotype: 22 chromosomes, all copy number 2
 - `Nwaves = 10`
 - `gen_randscape()` logic unchanged
-- `times = c(0, 180)`
+- ABM simulation window: `0 -> 3600`
+- ABM fitting snapshots: `3000, 3180`
+- model input passage labels: `3000 -> 0`, `3180 -> 180`
 - `pmis = 5e-05`
-- `run_abm_simulation_grf()` settings unchanged:
+- `run_abm_simulation_grf()` settings:
   - `abm_pop_size = 5e4`
   - `abm_max_pop = 2e6`
   - `abm_delta_t = 0.1`
   - `abm_culling_survival = 0.01`
-  - `abm_record_interval = -1`
+  - `abm_record_interval = 600`, recording every 60 days so `3000` and `3180` are exact ABM snapshots
   - `abm_seed = 42`
   - `normalize_freq = FALSE`
-- `resample_sim()` logic unchanged
+- `resample_sim()` samples the ABM `3000` and `3180` snapshots and relabels them to `0` and `180`
 - `select_passage_counts()` uses exactly passage times `0, 180`
 - `alfakR` receives `yi$dt = 1`, so `dt = 1` represents 1 day
 - The runner rejects any override that changes these benchmark time settings
-- ALFA-K-style evaluation uses the same two fitted time points. Forward prediction metrics are therefore computed for `0 -> 180`; the benchmark does not use the original ALFA-K `<120` training-window rule.
+- ALFA-K-style evaluation uses the same two fitted time points. Forward prediction metrics are computed for the model-labeled `0 -> 180`, corresponding to the true ABM window `3000 -> 3180`; the benchmark does not use the original ALFA-K `<120` training-window rule.
 
 The extension is `sample_depth = 1000, 200`. The original wavelengths `0.2, 0.4, 0.8, 1.6` are retained, with 5 ground-truth repeats per depth and wavelength.
 
@@ -70,6 +72,13 @@ Landscape metrics follow the original `S04_process_abm_results.R` names:
 - observed/frequent count: `nfq`
 
 Forward prediction metrics follow the original `overlap`, `cosine`, `euclidean`, `wasserstein`, `angle`, and `win` definitions, using 5 ABM prediction repeats by default. Set `FORWARD_PREDICTION_REPS=0` or `--forward-prediction-reps=0` to skip this heavier evaluation stage.
+
+The runner stores the true ABM window in each ground-truth RDS:
+
+- `abm_simulation_times = c(0, 3600)`
+- `abm_fit_times = c(3000, 3180)`
+- `actual_abm_fit_times`, which must match the fitted snapshots under the default record interval
+- `passage_times = c(0, 180)`, the labels presented to `alfak2` and `alfakR`
 
 ## Commands
 

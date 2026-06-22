@@ -93,6 +93,8 @@ run_task_stage() {
   echo "  repo:        ${ALFAK2_REPO}"
   echo "  alfakR repo: ${ALFAKR_REPO}"
   echo "  output dir:  ${OUTPUT_DIR}"
+  echo "  ABM times:   ${ABM_SIMULATION_TIMES}"
+  echo "  fit window:  ${ABM_FIT_TIMES} -> ${PASSAGE_TIMES}"
   echo "  modules:     ${MODULES}"
   echo "  Rscript:     $(command -v "${R_BIN}")"
 
@@ -104,8 +106,10 @@ run_task_stage() {
     "--alfakR-repo=${ALFAKR_REPO}" \
     "--sample-depths=${SAMPLE_DEPTHS}" \
     "--wavelengths=${WAVELENGTHS}" \
-    "--ground-truth-times=${GROUND_TRUTH_TIMES}" \
+    "--abm-simulation-times=${ABM_SIMULATION_TIMES}" \
+    "--abm-fit-times=${ABM_FIT_TIMES}" \
     "--passage-times=${PASSAGE_TIMES}" \
+    "--ground-truth-abm-record-interval=${GROUND_TRUTH_ABM_RECORD_INTERVAL}" \
     "--ground-truth-reps=${GROUND_TRUTH_REPS}" \
     "--fit-repeats=${FIT_REPEATS}" \
     "--soft-minobs=${SOFT_MINOBS}" \
@@ -144,8 +148,10 @@ MODULES="${MODULES:-R/4.4.2-gfbf-2024a}"
 
 SAMPLE_DEPTHS="${SAMPLE_DEPTHS:-1000,200}"
 WAVELENGTHS="${WAVELENGTHS:-0.2,0.4,0.8,1.6}"
-GROUND_TRUTH_TIMES="${GROUND_TRUTH_TIMES:-0,180}"
+ABM_SIMULATION_TIMES="${ABM_SIMULATION_TIMES:-0,3600}"
+ABM_FIT_TIMES="${ABM_FIT_TIMES:-3000,3180}"
 PASSAGE_TIMES="${PASSAGE_TIMES:-0,180}"
+GROUND_TRUTH_ABM_RECORD_INTERVAL="${GROUND_TRUTH_ABM_RECORD_INTERVAL:-600}"
 GROUND_TRUTH_REPS="${GROUND_TRUTH_REPS:-1:5}"
 FIT_REPEATS="${FIT_REPEATS:-1:5}"
 SOFT_MINOBS="${SOFT_MINOBS:-5,10,20}"
@@ -195,8 +201,10 @@ cd "${ALFAK2_REPO}"
   "--alfakR-repo=${ALFAKR_REPO}" \
   "--sample-depths=${SAMPLE_DEPTHS}" \
   "--wavelengths=${WAVELENGTHS}" \
-  "--ground-truth-times=${GROUND_TRUTH_TIMES}" \
+  "--abm-simulation-times=${ABM_SIMULATION_TIMES}" \
+  "--abm-fit-times=${ABM_FIT_TIMES}" \
   "--passage-times=${PASSAGE_TIMES}" \
+  "--ground-truth-abm-record-interval=${GROUND_TRUTH_ABM_RECORD_INTERVAL}" \
   "--ground-truth-reps=${GROUND_TRUTH_REPS}" \
   "--fit-repeats=${FIT_REPEATS}" \
   "--soft-minobs=${SOFT_MINOBS}" \
@@ -240,8 +248,10 @@ write_export "${ENV_FILE}" "R_BIN" "${R_BIN}"
 write_export "${ENV_FILE}" "MODULES" "${MODULES}"
 write_export "${ENV_FILE}" "SAMPLE_DEPTHS" "${SAMPLE_DEPTHS}"
 write_export "${ENV_FILE}" "WAVELENGTHS" "${WAVELENGTHS}"
-write_export "${ENV_FILE}" "GROUND_TRUTH_TIMES" "${GROUND_TRUTH_TIMES}"
+write_export "${ENV_FILE}" "ABM_SIMULATION_TIMES" "${ABM_SIMULATION_TIMES}"
+write_export "${ENV_FILE}" "ABM_FIT_TIMES" "${ABM_FIT_TIMES}"
 write_export "${ENV_FILE}" "PASSAGE_TIMES" "${PASSAGE_TIMES}"
+write_export "${ENV_FILE}" "GROUND_TRUTH_ABM_RECORD_INTERVAL" "${GROUND_TRUTH_ABM_RECORD_INTERVAL}"
 write_export "${ENV_FILE}" "GROUND_TRUTH_REPS" "${GROUND_TRUTH_REPS}"
 write_export "${ENV_FILE}" "FIT_REPEATS" "${FIT_REPEATS}"
 write_export "${ENV_FILE}" "SOFT_MINOBS" "${SOFT_MINOBS}"
@@ -374,6 +384,8 @@ echo "  total tasks: ${N_TASKS}"
 echo "  cpu/task:    ${CPUS_PER_TASK}"
 echo "  time/task:   ${TIME_LIMIT}"
 echo "  output dir:  ${OUTPUT_DIR}"
+echo "  ABM times:   ${ABM_SIMULATION_TIMES}"
+echo "  fit window:  ${ABM_FIT_TIMES} -> ${PASSAGE_TIMES}"
 echo "  env file:    ${ENV_FILE}"
 if [[ -n "${ARRAY_LIMIT}" ]]; then
   echo "  array limit: ${ARRAY_LIMIT}"
