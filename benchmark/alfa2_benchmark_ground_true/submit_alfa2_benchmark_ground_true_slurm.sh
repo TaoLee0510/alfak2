@@ -144,7 +144,7 @@ ALFAKR_REPO="${ALFAKR_REPO:-$(cd "${ALFAK2_REPO}/.." && pwd)/alfakR}"
 OUTPUT_DIR="${OUTPUT_DIR:-${ALFAK2_REPO}/benchmark/results/alfa2_benchmark_ground_true}"
 RUNNER="${RUNNER:-${ALFAK2_REPO}/benchmark/alfa2_benchmark_ground_true/run_alfa2_benchmark_ground_true.R}"
 R_BIN="${R_BIN:-Rscript}"
-MODULES="${MODULES:-R/4.4.2-gfbf-2024a}"
+MODULES="${MODULES:-R/4.4}"
 
 SAMPLE_DEPTHS="${SAMPLE_DEPTHS:-1000,200}"
 WAVELENGTHS="${WAVELENGTHS:-0.2,0.4,0.8,1.6}"
