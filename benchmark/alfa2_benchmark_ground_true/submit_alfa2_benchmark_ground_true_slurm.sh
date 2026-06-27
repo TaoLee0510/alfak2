@@ -178,8 +178,12 @@ FORCE="${FORCE:-false}"
 JOB_NAME="${JOB_NAME:-alfa2_gt_task}"
 CPUS_PER_TASK="${CPUS_PER_TASK:-1}"
 TIME_LIMIT="${TIME_LIMIT:-7-00:00:00}"
+QOS="${QOS:-${SBATCH_QOS:-}}"
 ARRAY_LIMIT="${ARRAY_LIMIT:-}"
 DRY_RUN="${DRY_RUN:-false}"
+SUBMIT_GROUPS="${SUBMIT_GROUPS:-}"
+TASK_MAP_OVERRIDE_DIR="${TASK_MAP_OVERRIDE_DIR:-}"
+SUBMITTED_JOBS_FILE="${SUBMITTED_JOBS_FILE:-submitted_job_arrays.tsv}"
 
 MEM_DEPTH200_ALFAK2_REGULAR="${MEM_DEPTH200_ALFAK2_REGULAR:-16G}"
 MEM_DEPTH200_ALFAKR="${MEM_DEPTH200_ALFAKR:-8G}"
@@ -314,6 +318,22 @@ write_task_map() {
   ' "${run_index}" > "${task_map}"
 }
 
+group_enabled() {
+  local group="$1"
+  local wanted
+  if [[ -z "${SUBMIT_GROUPS}" || "${SUBMIT_GROUPS}" == "all" ]]; then
+    return 0
+  fi
+  IFS=',' read -ra requested_groups <<< "${SUBMIT_GROUPS}"
+  for wanted in "${requested_groups[@]}"; do
+    wanted="${wanted//[[:space:]]/}"
+    if [[ "${wanted}" == "${group}" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
 submit_group() {
   local group="$1"
   local sample_depth="$2"
@@ -321,8 +341,22 @@ submit_group() {
   local mem="$4"
   local task_map task_count array_spec group_job_name job_id
 
-  task_map="${OUTPUT_DIR}/slurm/${group}.task_ids.tsv"
-  write_task_map "${RUN_INDEX}" "${sample_depth}" "${class}" "${task_map}"
+  if ! group_enabled "${group}"; then
+    echo "Skipping ${group}: not selected by SUBMIT_GROUPS=${SUBMIT_GROUPS}"
+    return 0
+  fi
+
+  if [[ -n "${TASK_MAP_OVERRIDE_DIR}" ]]; then
+    task_map="${TASK_MAP_OVERRIDE_DIR%/}/${group}.task_ids.tsv"
+    if [[ ! -f "${task_map}" ]]; then
+      echo "Skipping ${group}: missing override task map ${task_map}"
+      return 0
+    fi
+  else
+    task_map="${OUTPUT_DIR}/slurm/${group}.task_ids.tsv"
+    write_task_map "${RUN_INDEX}" "${sample_depth}" "${class}" "${task_map}"
+  fi
+
   task_count="$(awk 'END { print NR }' "${task_map}")"
   if [[ -z "${task_count}" || "${task_count}" == "0" ]]; then
     echo "Skipping ${group}: no matching tasks"
@@ -343,9 +377,18 @@ submit_group() {
   echo "  cpu/task:     ${CPUS_PER_TASK}"
   echo "  mem/task:     ${mem}"
   echo "  time/task:    ${TIME_LIMIT}"
+  if [[ -n "${QOS}" ]]; then
+    echo "  qos:          ${QOS}"
+  fi
+  if [[ -n "${TASK_MAP_OVERRIDE_DIR}" ]]; then
+    echo "  task map:     ${task_map}"
+  fi
 
-  SBATCH_ARGS=(
-    "--parsable"
+  SBATCH_ARGS=("--parsable")
+  if [[ -n "${QOS}" ]]; then
+    SBATCH_ARGS+=("--qos=${QOS}")
+  fi
+  SBATCH_ARGS+=(
     "--array=${array_spec}"
     "--cpus-per-task=${CPUS_PER_TASK}"
     "--mem=${mem}"
@@ -376,19 +419,28 @@ submit_group() {
   echo "Submitted ${group}: ${job_id}"
 }
 
-SUBMITTED_JOBS_TSV="${OUTPUT_DIR}/slurm/submitted_job_arrays.tsv"
+SUBMITTED_JOBS_TSV="${OUTPUT_DIR}/slurm/${SUBMITTED_JOBS_FILE}"
 printf 'group\tsample_depth\tclass\tmem\ttask_count\tarray_spec\ttask_map\tjob_id\n' > "${SUBMITTED_JOBS_TSV}"
 
 echo "[$(date)] submitting alfa2_benchmark_ground_true in resource groups"
 echo "  total tasks: ${N_TASKS}"
 echo "  cpu/task:    ${CPUS_PER_TASK}"
 echo "  time/task:   ${TIME_LIMIT}"
+if [[ -n "${QOS}" ]]; then
+  echo "  qos:         ${QOS}"
+fi
 echo "  output dir:  ${OUTPUT_DIR}"
 echo "  ABM times:   ${ABM_SIMULATION_TIMES}"
 echo "  fit window:  ${ABM_FIT_TIMES} -> ${PASSAGE_TIMES}"
 echo "  env file:    ${ENV_FILE}"
 if [[ -n "${ARRAY_LIMIT}" ]]; then
   echo "  array limit: ${ARRAY_LIMIT}"
+fi
+if [[ -n "${SUBMIT_GROUPS}" ]]; then
+  echo "  groups:      ${SUBMIT_GROUPS}"
+fi
+if [[ -n "${TASK_MAP_OVERRIDE_DIR}" ]]; then
+  echo "  task maps:   ${TASK_MAP_OVERRIDE_DIR}"
 fi
 
 submit_group "d200_k2_regular" 200 "alfak2_regular" "${MEM_DEPTH200_ALFAK2_REGULAR}"

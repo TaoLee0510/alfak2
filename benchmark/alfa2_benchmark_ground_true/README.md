@@ -125,6 +125,22 @@ The Slurm submitter assigns each run task 1 CPU and 7 days. It splits tasks by `
 
 It writes logs to `benchmark/results/alfa2_benchmark_ground_true/slurm_logs`, one job id file and one task-id map per group under `benchmark/results/alfa2_benchmark_ground_true/slurm`, and a combined submission table at `benchmark/results/alfa2_benchmark_ground_true/slurm/submitted_job_arrays.tsv`.
 
+Failed or timed-out tasks can be resubmitted by passing a directory of group-specific task maps. Each override map is named `<group>.task_ids.tsv` and contains one `run_index.tsv` task id per line. For example, to supplement only failed high-lambda `alfak2` tasks with a larger graph cap:
+
+```sh
+ALFAK2_MAX_NODES=2000000 \
+FORCE=true \
+QOS=small \
+TIME_LIMIT=30-00:00:00 \
+JOB_NAME=alfa2_gt_rerun_failed \
+SUBMIT_GROUPS=d200_k2_ggfull,d1000_k2_regular \
+TASK_MAP_OVERRIDE_DIR=/path/to/rerun_failed_task_maps \
+SUBMITTED_JOBS_FILE=submitted_job_arrays_rerun_failed.tsv \
+MEM_DEPTH200_ALFAK2_GGFULL=256G \
+MEM_DEPTH1000_ALFAK2_REGULAR=64G \
+bash benchmark/alfa2_benchmark_ground_true/submit_alfa2_benchmark_ground_true_slurm.sh
+```
+
 On HPC, the submitter uses:
 
 - `ALFAK2_REPO=/share/lab_crd/lab_crd/taoli/Project/alfak2`
