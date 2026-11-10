@@ -5,22 +5,96 @@ extract_tmb_vector <- function(sdrep, name, n) {
   rn <- rownames(tab)
   idx <- which(rn == name | grepl(paste0("^", name, "(\\.|\\[)"), rn))
   if (length(idx) != n) return(NULL)
-  list(mean = tab$Estimate[idx], sd = tab$`Std. Error`[idx])
+  list(mean = tab$Estimate[idx], sd = tab$`Std. Error`[idx], index = idx)
+}
+
+local_tmb_parameter_map <- function(parameters, fixed_sigma_anchor,
+                                    fixed_sigma_neighbor, fixed_tau_group) {
+  out <- list()
+  fixed <- c(log_sigma_anchor = is.finite(fixed_sigma_anchor),
+             log_sigma_neighbor = is.finite(fixed_sigma_neighbor),
+             log_tau_group = is.finite(fixed_tau_group))
+  for (nm in names(fixed)[fixed]) {
+    out[[nm]] <- factor(rep(NA_integer_, length(parameters[[nm]])))
+  }
+  out
+}
+
+local_tmb_parameter_list <- function(obj, par) {
+  # Avoid repeating an inner Newton solve when the fitted objective is already
+  # at this fixed vector (notably the zero-dimensional structured-prior case).
+  fixed_index <- setdiff(seq_along(obj$env$last.par), obj$env$random)
+  if (!identical(as.numeric(obj$env$last.par[fixed_index]), as.numeric(par))) obj$fn(par)
+  # parList fills its random entries from last.par and expects only the fixed
+  # vector as its argument, including when the fixed vector has length zero.
+  obj$env$parList(par)
+}
+
+extract_local_fitness_covariance <- function(sdrep, frep, covariance_status) {
+  if (!identical(covariance_status, "TMB_sdreport") || is.null(frep) ||
+      is.null(sdrep$cov) || is.null(frep$index)) return(NULL)
+  if (max(frep$index) > nrow(sdrep$cov)) return(NULL)
+  out <- as.matrix(sdrep$cov[frep$index, frep$index, drop = FALSE])
+  if (any(!is.finite(out))) return(NULL)
+  (out + t(out)) / 2
 }
 
 tmb_gradient_norm <- function(obj, par) {
+  if (!length(par)) return(list(value = 0, error = NULL))
   grad <- try(obj$gr(par), silent = TRUE)
   if (inherits(grad, "try-error")) {
     return(list(value = NA_real_, error = conditionMessage(attr(grad, "condition"))))
   }
-  list(value = max(abs(grad)), error = NULL)
+  list(value = if (length(grad)) max(abs(grad)) else 0, error = NULL)
 }
 
-run_local_tmb_attempt <- function(obj, par, control, n) {
-  opt <- stats::nlminb(par, obj$fn, obj$gr, control = control)
+local_conditional_gradient <- function(obj) {
+  if (!length(obj$env$random)) return(list(value = 0, gradient = numeric(), error = NULL))
+  grad <- try(as.numeric(obj$env$f(obj$env$last.par, order = 1)), silent = TRUE)
+  if (inherits(grad, "try-error")) {
+    return(list(value = NA_real_, gradient = NULL,
+                error = conditionMessage(attr(grad, "condition"))))
+  }
+  list(value = max(abs(grad[obj$env$random])), gradient = grad, error = NULL)
+}
+
+local_conditional_warmstart <- function(data, parameters, parameter_map, control) {
+  started <- proc.time()[["elapsed"]]
+  diagnostics <- list(attempted = TRUE, accepted = FALSE, status = "failed")
+  answer <- tryCatch({
+    objective <- TMB::MakeADFun(data, parameters, map = parameter_map,
+                                random = NULL, DLL = "alfak2", silent = TRUE)
+    initial_objective <- objective$fn(objective$par)
+    opt <- stats::nlminb(objective$par, objective$fn, objective$gr,
+                         control = control)
+    final_objective <- objective$fn(opt$par)
+    gradient <- as.numeric(objective$gr(opt$par))
+    accepted <- all(is.finite(opt$par)) && all(is.finite(gradient)) && is.finite(final_objective) &&
+      final_objective <= initial_objective
+    list(parameters = if (accepted) objective$env$parList(opt$par) else parameters,
+      diagnostics = list(attempted = TRUE, accepted = accepted,
+        status = if (accepted) "accepted_seed" else "rejected_seed",
+        convergence = opt$convergence, message = opt$message,
+        initial_objective = initial_objective, objective = final_objective,
+        gradient_norm = if (length(gradient)) max(abs(gradient)) else 0,
+        iterations = opt$iterations, evaluations = opt$evaluations))
+  }, error = function(e) list(parameters = parameters,
+    diagnostics = c(diagnostics, list(error = conditionMessage(e)))))
+  answer$diagnostics$elapsed_seconds <- proc.time()[["elapsed"]] - started
+  answer
+}
+
+run_local_tmb_attempt <- function(obj, par, control, n, require_latent = FALSE) {
+  opt <- if (length(par)) {
+    stats::nlminb(par, obj$fn, obj$gr, control = control)
+  } else {
+    list(par = par, objective = obj$fn(par), convergence = 0L,
+         message = "All hierarchical scales fixed; conditional random effects optimized.")
+  }
   sdrep <- try(suppressWarnings(TMB::sdreport(obj, par.fixed = opt$par, getJointPrecision = FALSE)),
                silent = TRUE)
   gradient <- tmb_gradient_norm(obj, opt$par)
+  conditional_gradient <- local_conditional_gradient(obj)
   list(
     opt = opt,
     sdrep = if (inherits(sdrep, "try-error")) NULL else sdrep,
@@ -30,8 +104,16 @@ run_local_tmb_attempt <- function(obj, par, control, n) {
       if (is.null(out)) out <- extract_tmb_vector(sdrep, "f", n)
       out
     },
+    latent_frep = extract_tmb_vector(sdrep, "f_latent", n),
+    requires_latent = require_latent,
     gradient_norm = gradient$value,
-    gradient_error = gradient$error
+    gradient_error = gradient$error,
+    has_random_effects = length(obj$env$random) > 0L,
+    conditional_gradient_norm = conditional_gradient$value,
+    conditional_gradient_error = conditional_gradient$error,
+    pd_hessian = !inherits(sdrep, "try-error") && isTRUE(sdrep$pdHess),
+    scale_boundary = names(opt$par)[grepl("^log_(sigma|tau)", names(opt$par)) &
+                                      opt$par < log(1e-4)]
   )
 }
 
@@ -41,8 +123,22 @@ assess_local_covariance <- function(attempt, gradient_tolerance) {
       (!is.finite(attempt$gradient_norm) || attempt$gradient_norm > gradient_tolerance)) {
     return("untrusted_gradient")
   }
+  if (isTRUE(attempt$has_random_effects) && is.finite(gradient_tolerance) &&
+      (!is.finite(attempt$conditional_gradient_norm) ||
+       attempt$conditional_gradient_norm > gradient_tolerance)) {
+    return("untrusted_inner_gradient")
+  }
   if (is.null(attempt$frep)) return("untrusted_sdreport_missing")
+  if (length(attempt$scale_boundary)) return("untrusted_scale_boundary")
+  if (!isTRUE(attempt$pd_hessian)) return("untrusted_hessian")
   if (any(!is.finite(attempt$frep$sd) | attempt$frep$sd <= 0)) {
+    return("untrusted_sdreport_nonfinite")
+  }
+  if (isTRUE(attempt$requires_latent) && is.null(attempt$latent_frep)) {
+    return("untrusted_sdreport_missing")
+  }
+  if (isTRUE(attempt$requires_latent) &&
+      any(!is.finite(attempt$latent_frep$sd) | attempt$latent_frep$sd <= 0)) {
     return("untrusted_sdreport_nonfinite")
   }
   "TMB_sdreport"
@@ -74,7 +170,11 @@ local_attempt_diagnostics <- function(attempt, covariance_status) {
     objective = attempt$opt$objective,
     gradient_norm = attempt$gradient_norm,
     gradient_error = attempt$gradient_error,
+    conditional_gradient_norm = attempt$conditional_gradient_norm,
+    conditional_gradient_error = attempt$conditional_gradient_error,
     sdreport_error = attempt$sdreport_error,
+    pd_hessian = attempt$pd_hessian,
+    scale_boundary = attempt$scale_boundary,
     covariance_status = covariance_status
   )
 }
@@ -95,8 +195,11 @@ resolve_support_tier_multiplier <- function(graph, support_tier_f_sd_multiplier 
   if (is.null(names(support_tier_f_sd_multiplier)) || any(!nzchar(names(support_tier_f_sd_multiplier)))) {
     stop("`support_tier_f_sd_multiplier` must be a named numeric vector.", call. = FALSE)
   }
-  support_tier_f_sd_multiplier <- as.numeric(support_tier_f_sd_multiplier)
-  names(support_tier_f_sd_multiplier) <- names(support_tier_f_sd_multiplier)
+  multiplier_names <- names(support_tier_f_sd_multiplier)
+  if (anyDuplicated(multiplier_names)) {
+    stop("`support_tier_f_sd_multiplier` names must be unique.", call. = FALSE)
+  }
+  support_tier_f_sd_multiplier <- stats::setNames(as.numeric(support_tier_f_sd_multiplier), multiplier_names)
   if (any(!is.finite(support_tier_f_sd_multiplier) | support_tier_f_sd_multiplier <= 0)) {
     stop("`support_tier_f_sd_multiplier` values must be positive finite numbers.", call. = FALSE)
   }
@@ -165,8 +268,20 @@ local_gradient_diagnostics <- function(obj, opt, graph, y0, y1, effective_count_
   if (inherits(grad, "try-error")) {
     return(list(error = conditionMessage(attr(grad, "condition"))))
   }
-  gpl <- obj$env$parList(grad)
-  par <- obj$env$parList(opt$par)
+  par <- local_tmb_parameter_list(obj, opt$par)
+  # Marginal gradients only contain free hyperparameters, rather than the full
+  # vector of conditional random-effect modes. Keep the diagnostic blocks aligned.
+  gpl <- lapply(par, function(x) rep(0, length(x)))
+  for (nm in unique(names(opt$par))) {
+    gpl[[nm]] <- as.numeric(grad)[names(opt$par) == nm]
+  }
+  conditional_gradient <- local_conditional_gradient(obj)
+  random_blocks <- unique(names(obj$env$last.par)[obj$env$random])
+  for (nm in random_blocks) {
+    gpl[[nm]] <- if (is.null(conditional_gradient$gradient)) {
+      rep(NA_real_, length(par[[nm]]))
+    } else conditional_gradient$gradient[names(obj$env$last.par) == nm]
+  }
   max_abs <- function(x) if (length(x) && any(is.finite(x))) max(abs(as.numeric(x)), na.rm = TRUE) else NA_real_
   block <- data.frame(
     grad_eta_max_abs = max_abs(gpl$eta),
@@ -176,6 +291,7 @@ local_gradient_diagnostics <- function(obj, opt, graph, y0, y1, effective_count_
     grad_log_sigma_neighbor_abs = max_abs(gpl$log_sigma_neighbor),
     grad_log_sigma_anchor_abs = max_abs(gpl$log_sigma_anchor),
     grad_log_tau_group_max_abs = max_abs(gpl$log_tau_group),
+    conditional_gradient_norm = conditional_gradient$value,
     global_gradient_norm = max_abs(grad),
     stringsAsFactors = FALSE
   )
@@ -202,8 +318,8 @@ local_gradient_diagnostics <- function(obj, opt, graph, y0, y1, effective_count_
       support_tier = support_tier[ii[[1]]],
       support_scope = support_scope[ii[[1]]],
       n_nodes = length(ii),
-      grad_f_max_abs = max(abs(grad_f[ii]), na.rm = TRUE),
-      grad_f_median_abs = stats::median(abs(grad_f[ii]), na.rm = TRUE),
+      grad_f_max_abs = max_abs(grad_f[ii]),
+      grad_f_median_abs = if (any(is.finite(grad_f[ii]))) stats::median(abs(grad_f[ii]), na.rm = TRUE) else NA_real_,
       stringsAsFactors = FALSE
     )
   }))
@@ -276,6 +392,30 @@ local_gradient_diagnostics <- function(obj, opt, graph, y0, y1, effective_count_
 #'   score that preserves the original count scale; `"fractional_count"` uses the
 #'   historical fractional-count pseudo-likelihood.
 #' @param control List passed to `stats::nlminb`.
+#' @param inner_control TMB inner Newton controls for Laplace random-effect
+#'   optimization. The default preserves a strict `tol = 1e-10`; reducing
+#'   `maxit` does not bypass conditional-gradient validity checks.
+#' @param conditional_warmstart `"auto"` uses first-derivative conditional
+#'   optimization to initialize structured Laplace fits with at least 50 nodes.
+#'   `"always"` allows smaller fixed-scale problems; `"none"` disables it.
+#'   Hierarchical scales must all be fixed for this initialization to be used.
+#' @param inference_method `"laplace"` marginalizes initial abundances, fitness,
+#'   and context effects while estimating hierarchical scales. `"joint_map"`
+#'   retains the legacy joint optimization for controlled comparisons.
+#' @param forward_model Evolution model passed to the compiled likelihood.
+#'   `"division_process"` uses repeated division-driven transport;
+#'   `"selection_transport"` retains the historical endpoint transport model.
+#' @param forward_step Maximum numerical time step for the division-process
+#'   solver. Decrease this value to check numerical convergence.
+#' @param population_sizes Optional positive numeric pair `c(N0, Nb)` containing
+#'   actual initial and final population sizes, not the numbers of sampled cells.
+#' @param population_log_growth_sd Standard deviation of the observation error
+#'   for `log(Nb/N0)`, used only when `population_sizes` is supplied.
+#' @param oracle_initial_probability Diagnostic-only named initial probability
+#'   vector on every graph node, including true zeros. When supplied, initial
+#'   frequencies are fixed exactly rather than estimated from pseudo-counts.
+#'   Results use additional oracle information and are not a fair algorithm
+#'   comparison against ordinary count-only fits.
 #' @param gradient_tolerance Maximum absolute gradient tolerated before TMB
 #'   covariance is marked untrusted. Set to `Inf` to rely on optimizer
 #'   convergence and finite `sdreport` uncertainty.
@@ -316,6 +456,8 @@ local_gradient_diagnostics <- function(obj, opt, graph, y0, y1, effective_count_
 #' @param initial_jitter_sd Optional standard deviation for benchmark/debug
 #'   multistart jitter applied to eta, fitness, and context-effect initial values.
 #' @param initial_seed Optional seed used when `initial_jitter_sd > 0`.
+#' @param structured_prior Internal joint-landscape prior specification. Ordinary
+#'   local fits leave this as `NULL`.
 #'
 #' @return An `alfak2_local_fit` object.
 #' @export
@@ -325,7 +467,15 @@ fit_local_posterior <- function(data,
                                 dm_concentration = 200,
                                 observation_weight_mode = c("likelihood", "fractional_count"),
                                 control = list(eval.max = 500, iter.max = 500),
-                                gradient_tolerance = Inf,
+                                inner_control = list(maxit = 1000, tol = 1e-10),
+                                conditional_warmstart = c("auto", "none", "always"),
+                                inference_method = c("laplace", "joint_map"),
+                                forward_model = c("selection_transport", "division_process"),
+                                forward_step = 0.1,
+                                population_sizes = NULL,
+                                population_log_growth_sd = 0.1,
+                                oracle_initial_probability = NULL,
+                                gradient_tolerance = 1e-3,
                                 retry_on_untrusted_covariance = TRUE,
                                 retry_control = list(eval.max = 2000, iter.max = 2000),
                                 eta_prior_sd = 5,
@@ -344,19 +494,54 @@ fit_local_posterior <- function(data,
                                 fixed_sigma_anchor = NA_real_,
                                 fixed_sigma_neighbor = NA_real_,
                                 fixed_tau_group = NA_real_,
-                                sdreport_mode = c("all_f_current", "none", "direct_f_only", "direct_and_local_borrowed_f", "pi0_pi1_only"),
+                                sdreport_mode = c("all_f_current", "none", "direct_f_only", "direct_and_local_borrowed_f", "pi0_pi1_only", "fitness_only"),
                                 initial_jitter_sd = 0,
-                                initial_seed = NULL) {
+                                initial_seed = NULL,
+                                structured_prior = NULL) {
   if (!inherits(data, "alfak2_data")) {
     stop("`data` must be an alfak2_data object.", call. = FALSE)
   }
   observation_model <- match_observation_model(observation_model)
   observation_weight_mode <- match_observation_weight_mode(observation_weight_mode)
+  inference_method <- match.arg(inference_method)
+  conditional_warmstart <- match.arg(conditional_warmstart)
+  if (!is.list(inner_control) ||
+      (length(inner_control) && (is.null(names(inner_control)) || any(!nzchar(names(inner_control)))))) {
+    stop("`inner_control` must be a named list of TMB inner optimizer controls.", call. = FALSE)
+  }
+  inner_control <- utils::modifyList(list(maxit = 1000, tol = 1e-10), inner_control)
+  validate_scalar(inner_control$maxit, "inner_control$maxit", lower = 1)
+  validate_scalar(inner_control$tol, "inner_control$tol", lower = .Machine$double.eps)
+  forward_model <- match.arg(forward_model)
+  validate_scalar(population_log_growth_sd, "population_log_growth_sd", lower = .Machine$double.eps)
+  observed_log_growth <- 0
+  log_growth_sd <- -1
+  if (!is.null(population_sizes)) {
+    if (!is.numeric(population_sizes) || length(population_sizes) != 2L ||
+        any(!is.finite(population_sizes)) || any(population_sizes <= 0)) {
+      stop("`population_sizes` must be a positive finite numeric pair c(N0, Nb) of actual population sizes.", call. = FALSE)
+    }
+    population_sizes <- stats::setNames(as.numeric(population_sizes), c("N0", "Nb"))
+    observed_log_growth <- log(population_sizes[2L]) - log(population_sizes[1L])
+    log_growth_sd <- as.numeric(population_log_growth_sd)
+  }
+  validate_scalar(forward_step, "forward_step", lower = .Machine$double.eps)
+  forward_steps <- max(4, ceiling(data$dt / forward_step))
+  if (!is.finite(forward_steps) || forward_steps > .Machine$integer.max) {
+    stop("`forward_step` requests too many numerical steps.", call. = FALSE)
+  }
   local_parameterization <- match.arg(local_parameterization)
   local_centering <- match.arg(local_centering)
   local_centering_weight_mode <- match.arg(local_centering_weight_mode)
   sdreport_mode <- match.arg(sdreport_mode)
   validate_scalar(as.numeric(local_centering_weight), "local_centering_weight", lower = 0)
+  if (identical(forward_model, "division_process") &&
+      !identical(local_centering, "none") && local_centering_weight > 0)
+    stop("Relative-fitness centering is not a birth-rate constraint; use population growth information with division dynamics.", call. = FALSE)
+  if (identical(forward_model, "division_process") &&
+      !identical(local_centering, "none") && local_centering_weight > 0) {
+    stop("Fitness centering penalties are only supported for `forward_model = \"selection_transport\"`; division-process birth rates have a physical baseline.", call. = FALSE)
+  }
   validate_scalar(as.numeric(initial_jitter_sd), "initial_jitter_sd", lower = 0)
   initial_jitter_sd <- as.numeric(initial_jitter_sd)
   if (!is.null(initial_seed)) {
@@ -373,7 +558,7 @@ fit_local_posterior <- function(data,
   fixed_sigma_anchor <- validate_optional_positive(fixed_sigma_anchor, "fixed_sigma_anchor")
   fixed_sigma_neighbor <- validate_optional_positive(fixed_sigma_neighbor, "fixed_sigma_neighbor")
   fixed_tau_group <- validate_optional_positive(fixed_tau_group, "fixed_tau_group")
-  sdreport_mode_code <- match(sdreport_mode, c("none", "direct_f_only", "direct_and_local_borrowed_f", "all_f_current", "pi0_pi1_only")) - 1L
+  sdreport_mode_code <- match(sdreport_mode, c("none", "direct_f_only", "direct_and_local_borrowed_f", "all_f_current", "pi0_pi1_only", "fitness_only")) - 1L
   if (!is.logical(return_optimizer_diagnostics) || length(return_optimizer_diagnostics) != 1L || is.na(return_optimizer_diagnostics)) {
     stop("`return_optimizer_diagnostics` must be TRUE or FALSE.", call. = FALSE)
   }
@@ -400,6 +585,47 @@ fit_local_posterior <- function(data,
   }
 
   n <- length(graph$labels)
+  use_oracle_initial_probability <- !is.null(oracle_initial_probability)
+  oracle_pi0 <- numeric(n)
+  if (use_oracle_initial_probability) {
+    if (!is.numeric(oracle_initial_probability) || !is.null(dim(oracle_initial_probability)) ||
+        length(oracle_initial_probability) != n || is.null(names(oracle_initial_probability)) ||
+        anyDuplicated(names(oracle_initial_probability)) ||
+        !setequal(names(oracle_initial_probability), as.character(graph$labels)) ||
+        any(!is.finite(oracle_initial_probability)) || any(oracle_initial_probability < 0) ||
+        abs(sum(oracle_initial_probability) - 1) > 1e-8) {
+      stop("`oracle_initial_probability` must be a finite non-negative named probability vector summing to one on every graph node.", call. = FALSE)
+    }
+    oracle_pi0 <- as.numeric(oracle_initial_probability[as.character(graph$labels)])
+    oracle_pi0 <- oracle_pi0 / sum(oracle_pi0)
+  }
+  structured <- !is.null(structured_prior)
+  structure_design <- matrix(numeric(), nrow = n, ncol = 0L)
+  structure_offset <- numeric(n)
+  structure_precision <- Matrix::sparseMatrix(i = seq_len(n), j = seq_len(n),
+                                              x = rep(1, n), dims = c(n, n))
+  structure_logdet <- 0
+  structure_coef_sd <- numeric()
+  if (structured) {
+    required <- c("design", "offset", "precision", "logdet", "coef_sd")
+    if (!is.list(structured_prior) || !all(required %in% names(structured_prior))) {
+      stop("`structured_prior` must provide design, offset, precision, logdet, and coef_sd.", call. = FALSE)
+    }
+    structure_design <- as.matrix(structured_prior$design)
+    structure_offset <- as.numeric(structured_prior$offset)
+    structure_precision <- methods::as(Matrix::Matrix(structured_prior$precision, sparse = TRUE), "generalMatrix")
+    structure_logdet <- as.numeric(structured_prior$logdet)
+    structure_coef_sd <- as.numeric(structured_prior$coef_sd)
+    if (nrow(structure_design) != n || length(structure_offset) != n ||
+        !identical(dim(structure_precision), c(n, n)) ||
+        length(structure_logdet) != 1L ||
+        length(structure_coef_sd) != ncol(structure_design) ||
+        any(!is.finite(c(structure_design, structure_offset, structure_precision@x,
+                        structure_logdet, structure_coef_sd))) ||
+        any(structure_coef_sd <= 0)) {
+      stop("`structured_prior` dimensions or values are invalid.", call. = FALSE)
+    }
+  }
   observed_index <- match(data$labels, as.character(graph$labels))
   if (anyNA(observed_index)) {
     missing <- data$labels[is.na(observed_index)]
@@ -409,6 +635,9 @@ fit_local_posterior <- function(data,
   y1 <- numeric(n)
   y0[observed_index] <- data$counts[, 1]
   y1[observed_index] <- data$counts[, 2]
+  if (use_oracle_initial_probability && any(y0 > 0 & oracle_pi0 == 0)) {
+    stop("Oracle initial probabilities contradict positive time-zero counts.", call. = FALSE)
+  }
   observation_weights <- data$metadata$observation_weights
   if (is.null(observation_weights)) {
     observation_weights <- matrix(1, nrow = nrow(data$counts), ncol = 2L,
@@ -446,6 +675,21 @@ fit_local_posterior <- function(data,
   f0 <- log(p1) - log(p0)
   f0 <- f0 - mean(f0)
   f0_scale <- f0 / max(data$dt, .Machine$double.eps)
+  if (identical(forward_model, "division_process")) {
+    if (!is.null(population_sizes) && observed_log_growth > 0) {
+      # A unit-aware starting point only; the actual likelihood also accounts
+      # for daughter loss and transport rather than assuming pure net growth.
+      baseline_birth <- as.numeric(observed_log_growth) / data$dt
+      f0_scale <- log(pmax(0.05 * baseline_birth, baseline_birth + f0_scale))
+    } else {
+      f0_scale <- pmax(-2, pmin(2, f0_scale))
+    }
+    f0 <- data$dt * f0_scale
+  }
+  if (structured) {
+    f0_scale <- f0_scale - structure_offset
+    f0 <- data$dt * f0_scale
+  }
   n_context <- length(graph$context_label)
   n_group <- max(unlist(graph$context_group0), 0L) + 1L
   parameters <- list(
@@ -455,7 +699,8 @@ fit_local_posterior <- function(data,
     mu_group = rep(0, n_group),
     log_sigma_neighbor = log(if (is.finite(fixed_sigma_neighbor)) pmax(fixed_sigma_neighbor - 1e-5, 1e-8) else 0.35),
     log_sigma_anchor = log(if (is.finite(fixed_sigma_anchor)) pmax(fixed_sigma_anchor - 1e-5, 1e-8) else 0.6),
-    log_tau_group = rep(log(if (is.finite(fixed_tau_group)) pmax(fixed_tau_group - 1e-5, 1e-8) else 0.2), n_group)
+    log_tau_group = rep(log(if (is.finite(fixed_tau_group)) pmax(fixed_tau_group - 1e-5, 1e-8) else 0.2), n_group),
+    structured_coefficients = rep(0, ncol(structure_design))
   )
   if (initial_jitter_sd > 0) {
     if (!is.null(initial_seed)) {
@@ -473,13 +718,17 @@ fit_local_posterior <- function(data,
     parameters$f <- parameters$f + stats::rnorm(length(parameters$f), 0, initial_jitter_sd)
     parameters$delta_context <- parameters$delta_context + stats::rnorm(length(parameters$delta_context), 0, initial_jitter_sd)
   }
+  if (use_oracle_initial_probability) parameters$eta[] <- 0
+  division_transition <- if (identical(forward_model, "division_process")) {
+    division_transition_data(graph, beta = data$beta)
+  } else NULL
   tmb_data <- list(
     y0 = as.numeric(y0),
     y1 = as.numeric(y1),
     n_nodes = as.integer(n),
-    trans_from = as.integer(unlist(graph$transition_from0)),
-    trans_to = as.integer(unlist(graph$transition_to0)),
-    trans_weight = as.numeric(unlist(graph$transition_weight)),
+    trans_from = if (is.null(division_transition)) as.integer(unlist(graph$transition_from0)) else as.integer(division_transition$from0),
+    trans_to = if (is.null(division_transition)) as.integer(unlist(graph$transition_to0)) else as.integer(division_transition$to0),
+    trans_weight = if (is.null(division_transition)) as.numeric(unlist(graph$transition_weight)) else as.numeric(division_transition$weight),
     support_distance = as.integer(graph$support_distance),
     parent_from = as.integer(unlist(graph$parent_from0)),
     parent_to = as.integer(unlist(graph$parent_to0)),
@@ -508,12 +757,53 @@ fit_local_posterior <- function(data,
     fixed_tau_group = if (is.finite(fixed_tau_group)) as.numeric(fixed_tau_group) else -1,
     sdreport_mode = as.integer(sdreport_mode_code)
   )
+  tmb_data$forward_model <- as.integer(match(forward_model, c("division_process", "selection_transport")) - 1L)
+  tmb_data$forward_steps <- as.integer(forward_steps)
+  tmb_data$prior_model <- as.integer(structured)
+  tmb_data$structure_design <- structure_design
+  tmb_data$structure_offset <- structure_offset
+  tmb_data$structure_precision <- structure_precision
+  tmb_data$structure_logdet <- structure_logdet
+  tmb_data$structure_coef_sd <- structure_coef_sd
+  tmb_data$observed_log_growth <- as.numeric(observed_log_growth)
+  tmb_data$log_growth_sd <- log_growth_sd
+  tmb_data$oracle_pi0 <- oracle_pi0
+  tmb_data$use_oracle_pi0 <- as.integer(use_oracle_initial_probability)
+  parameter_map <- local_tmb_parameter_map(parameters, fixed_sigma_anchor,
+                                            fixed_sigma_neighbor, fixed_tau_group)
+  random_effects <- if (identical(inference_method, "laplace")) {
+    if (structured) c("eta", "f", "structured_coefficients") else c("eta", "f", "delta_context", "mu_group")
+  } else NULL
+  if (structured) {
+    for (nm in c("delta_context", "mu_group", "log_sigma_anchor", "log_sigma_neighbor", "log_tau_group")) {
+      parameter_map[[nm]] <- factor(rep(NA_integer_, length(parameters[[nm]])))
+    }
+  }
+  if (use_oracle_initial_probability) parameter_map$eta <- factor(rep(NA_integer_, n))
+  random_effects <- random_effects[vapply(parameters[random_effects], length, integer(1)) > 0L]
+  random_effects <- random_effects[!vapply(random_effects, function(nm)
+    !is.null(parameter_map[[nm]]) && all(is.na(parameter_map[[nm]])), logical(1))]
+  scale_names <- c("log_sigma_anchor", "log_sigma_neighbor", "log_tau_group")
+  all_scales_fixed <- all(vapply(scale_names, function(nm)
+    !is.null(parameter_map[[nm]]) && all(is.na(parameter_map[[nm]])), logical(1)))
+  if (identical(conditional_warmstart, "always") && !all_scales_fixed) {
+    stop("`conditional_warmstart = \"always\"` requires every hierarchical scale to be fixed.", call. = FALSE)
+  }
+  use_warmstart <- identical(inference_method, "laplace") && all_scales_fixed &&
+    (identical(conditional_warmstart, "always") ||
+     (identical(conditional_warmstart, "auto") && structured && n >= 50L))
 
   concentration_results <- lapply(dm_concentration_grid, function(phi) {
     candidate_data <- tmb_data
     candidate_data$dm_concentration <- as.numeric(phi)
+    warmstart <- if (use_warmstart) {
+      local_conditional_warmstart(candidate_data, parameters, parameter_map, control)
+    } else list(parameters = parameters, diagnostics = list(
+      attempted = FALSE, accepted = FALSE, status = "disabled_or_ineligible", elapsed_seconds = 0))
     obj <- tryCatch(
-      TMB::MakeADFun(candidate_data, parameters, DLL = "alfak2", silent = TRUE),
+      TMB::MakeADFun(candidate_data, warmstart$parameters, map = parameter_map,
+                     random = random_effects, DLL = "alfak2", silent = TRUE,
+                     inner.control = inner_control),
       error = function(e) {
         alfak2_abort(
           "Local TMB objective construction failed.",
@@ -526,7 +816,8 @@ fit_local_posterior <- function(data,
       }
     )
     attempt <- tryCatch(
-      run_local_tmb_attempt(obj, obj$par, control, n),
+      run_local_tmb_attempt(obj, obj$par, control, n,
+                            require_latent = identical(forward_model, "division_process")),
       error = function(e) {
         alfak2_abort(
           "Local TMB optimizer failed.",
@@ -549,7 +840,8 @@ fit_local_posterior <- function(data,
       retry_reason <- covariance_status
       merged_retry_control <- utils::modifyList(control, retry_control)
       retry_attempt <- tryCatch(
-        run_local_tmb_attempt(obj, attempt$opt$par, merged_retry_control, n),
+        run_local_tmb_attempt(obj, attempt$opt$par, merged_retry_control, n,
+                              require_latent = identical(forward_model, "division_process")),
         error = function(e) {
           alfak2_abort(
             "Local TMB retry optimizer failed.",
@@ -584,7 +876,10 @@ fit_local_posterior <- function(data,
         diagnostics = warning_diagnostics
       )
     }
-    report <- try(obj$report(attempt$opt$par), silent = TRUE)
+    report <- try({
+      local_tmb_parameter_list(obj, attempt$opt$par)
+      obj$report()
+    }, silent = TRUE)
     if (inherits(report, "try-error")) {
       alfak2_abort(
         "Local TMB report extraction failed.",
@@ -639,7 +934,8 @@ fit_local_posterior <- function(data,
       covariance_fallback = covariance_fallback,
       fitness_sd_source = fitness_sd_source,
       warning_log_path = warning_log_path,
-      warning_diagnostics = warning_diagnostics
+      warning_diagnostics = warning_diagnostics,
+      warmstart = warmstart$diagnostics
     )
   })
   objectives <- vapply(concentration_results, `[[`, numeric(1), "objective")
@@ -667,7 +963,7 @@ fit_local_posterior <- function(data,
   retry_reason <- selected$retry_reason
   dm_concentration_selected <- selected$dm_concentration
   opt <- attempt$opt
-  plist <- obj$env$parList(opt$par)
+  plist <- local_tmb_parameter_list(obj, opt$par)
   report <- selected$report
   f_mean <- if (!is.null(report$f_report)) as.numeric(report$f_report) else as.numeric(plist$f)
   plist_raw <- plist
@@ -676,6 +972,46 @@ fit_local_posterior <- function(data,
   pi0_report <- as.numeric(report$pi0)
   pi1_report <- as.numeric(report$pi1)
   f_sd <- selected$f_sd
+  fitness_covariance <- extract_local_fitness_covariance(attempt$sdrep, attempt$frep,
+                                                        covariance_status)
+  latent_fitness_covariance <- if (identical(forward_model, "division_process")) {
+    extract_local_fitness_covariance(attempt$sdrep, attempt$latent_frep, covariance_status)
+  } else NULL
+  latent_fitness_mean <- if (!is.null(attempt$latent_frep)) attempt$latent_frep$mean else NULL
+  conf_low <- f_mean - 1.959963984540054 * f_sd
+  conf_high <- f_mean + 1.959963984540054 * f_sd
+  point_estimate_type <- if (identical(inference_method, "laplace")) "conditional_mode_at_marginal_scale_mode" else "joint_map"
+  if (identical(forward_model, "division_process") && !covariance_fallback) {
+    latent_sd <- attempt$latent_frep$sd
+    conf_low <- exp(latent_fitness_mean - 1.959963984540054 * latent_sd)
+    conf_high <- exp(latent_fitness_mean + 1.959963984540054 * latent_sd)
+    if (identical(inference_method, "laplace") && !is.null(latent_fitness_covariance)) {
+      rate_mean <- exp(latent_fitness_mean + 0.5 * diag(latent_fitness_covariance))
+      rate_cov <- tcrossprod(rate_mean) * expm1(latent_fitness_covariance)
+      if (all(is.finite(rate_mean)) && all(is.finite(rate_cov))) {
+        f_mean <- as.numeric(rate_mean)
+        fitness_covariance <- rate_cov
+        f_sd <- sqrt(pmax(0, diag(rate_cov)))
+        point_estimate_type <- "laplace_lognormal_mean"
+      } else {
+        covariance_status <- "untrusted_lognormal_moments"
+        covariance_fallback <- TRUE
+        fitness_covariance <- NULL
+        fitness_sd_source <- "fallback_prior_scale"
+        f_sd <- fallback_local_fitness_sd(report, graph$support_distance)
+        warning_log_path <- alfak2_warn("Lognormal posterior moments are non-finite; fitness intervals are withheld.",
+                                        diagnostics = list(stage = "local_lognormal_moments"))
+      }
+    }
+  }
+  if (isTRUE(covariance_fallback)) conf_low[] <- conf_high[] <- NA_real_
+  if (!is.null(fitness_covariance)) {
+    dimnames(fitness_covariance) <- list(as.character(graph$labels), as.character(graph$labels))
+  }
+  if (!is.null(latent_fitness_covariance)) {
+    dimnames(latent_fitness_covariance) <- list(as.character(graph$labels), as.character(graph$labels))
+    names(latent_fitness_mean) <- as.character(graph$labels)
+  }
 
   summary <- data.frame(
     node_id = seq_len(n),
@@ -696,8 +1032,9 @@ fit_local_posterior <- function(data,
     fitness_mean = f_mean,
     fitness_sd = f_sd,
     fitness_sd_source = fitness_sd_source,
-    conf_low = f_mean - 1.959963984540054 * f_sd,
-    conf_high = f_mean + 1.959963984540054 * f_sd,
+    conf_low = conf_low,
+    conf_high = conf_high,
+    interval_valid = !covariance_fallback,
     covariance_status = covariance_status,
     stringsAsFactors = FALSE
   )
@@ -706,6 +1043,11 @@ fit_local_posterior <- function(data,
     message = opt$message,
     objective = opt$objective,
     gradient_norm = attempt$gradient_norm,
+    gradient_tolerance = gradient_tolerance,
+    conditional_gradient_norm = attempt$conditional_gradient_norm,
+    conditional_gradient_error = attempt$conditional_gradient_error,
+    pd_hessian = attempt$pd_hessian,
+    scale_boundary = attempt$scale_boundary,
     covariance_status = covariance_status,
     covariance_fallback = covariance_fallback,
     fitness_sd_source = fitness_sd_source,
@@ -718,6 +1060,34 @@ fit_local_posterior <- function(data,
     observation_weight_mode = observation_weight_mode,
     likelihood_model = likelihood_model,
     local_parameterization = local_parameterization,
+    inference_method = inference_method,
+    forward_model = forward_model,
+    forward_step = forward_step,
+    forward_steps = as.integer(forward_steps),
+    division_transport = if (is.null(division_transition)) NULL else division_transition[c("retained", "viable", "leakage")],
+    fitness_interpretation = if (identical(forward_model, "division_process")) {
+      "birth_rate"
+    } else if (is.null(population_sizes)) "relative_net_growth_rate" else "net_growth_rate",
+    absolute_level = if (!is.null(population_sizes)) {
+      "informed_by_population_growth"
+    } else if (identical(forward_model, "division_process")) "prior_identified_without_external_growth" else "prior_centered_relative_scale",
+    population_growth = list(population_sizes = population_sizes,
+      observed_log_growth = if (is.null(population_sizes)) NA_real_ else as.numeric(observed_log_growth),
+      log_growth_sd = if (is.null(population_sizes)) NA_real_ else log_growth_sd),
+    use_oracle_initial_probability = use_oracle_initial_probability,
+    oracle_information = if (use_oracle_initial_probability) "exact_initial_frequencies_for_diagnostic_only" else "none",
+    random_effects = random_effects,
+    structured_prior = structured,
+    point_estimate_type = point_estimate_type,
+    probability_estimate_type = "conditional_mode",
+    uncertainty_method = if (identical(point_estimate_type, "laplace_lognormal_mean")) {
+      "laplace_log_gaussian_moments"
+    } else if (identical(inference_method, "laplace")) "laplace_delta_method" else "joint_hessian_delta_method",
+    hierarchical_scales = if (structured) NULL else list(
+      sigma_anchor = as.numeric(report$sigma_anchor),
+      sigma_neighbor = as.numeric(report$sigma_neighbor),
+      tau_group = if (is.finite(fixed_tau_group)) rep(fixed_tau_group, n_group) else 1e-5 + exp(plist$log_tau_group)
+    ),
     dm_concentration = dm_concentration_selected,
     dm_concentration_grid = as.numeric(dm_concentration_grid),
     dm_concentration_objective = stats::setNames(objectives, as.character(dm_concentration_grid)),
@@ -747,6 +1117,8 @@ fit_local_posterior <- function(data,
       tau_group = fixed_tau_group
     ),
     sdreport_mode = sdreport_mode,
+    inner_control = inner_control,
+    conditional_warmstart = c(list(mode = conditional_warmstart), selected$warmstart),
     initial_jitter = list(
       sd = initial_jitter_sd,
       seed = initial_seed
@@ -773,8 +1145,11 @@ fit_local_posterior <- function(data,
     graph = graph,
     summary = summary,
     parameter_mode = plist,
+    fitness_covariance = fitness_covariance,
+    latent_fitness_mean = latent_fitness_mean,
+    latent_fitness_covariance = latent_fitness_covariance,
     sdreport = attempt$sdrep,
-    posterior_predictive = report[c("pi0", "pi1")],
+    posterior_predictive = report[c("pi0", "pi1", "log_total_growth")],
     diagnostics = diagnostics
   )
   if (isTRUE(return_tmb_objects)) {

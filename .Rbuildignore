@@ -19,5 +19,6 @@
 ^PR_.*\.md$
 ^alfak_fitness_review.*\.md$
 ^scripts$
+^validation$
 ^Rplots\.pdf$
 ^.*\.(aux|fdb_latexmk|fls|log|out|pdf|synctex\.gz|tex)$

@@ -8,9 +8,8 @@ fit_extrapolation_layer(
   local_fit,
   graph = NULL,
   method = c("graph_gaussian_baseline", "edge_effect_empirical_bayes",
-    "edge_effect_interaction_path_ensemble",
-    "kronecker_or_graph_trend_filtering", "local_NNGP_or_GPnn",
-    "delta_tree_ensemble", "tabpfn_nearfield_feature_model",
+    "edge_effect_interaction_path_ensemble", "kronecker_or_graph_trend_filtering",
+    "local_NNGP_or_GPnn", "delta_tree_ensemble", "tabpfn_nearfield_feature_model",
     "truncated_nearfield_gmrf", "local_polynomial_stencil"),
   max_prediction_distance = 2,
   lambda_l_grid = c(0.2, 1, 5),
@@ -27,6 +26,8 @@ fit_extrapolation_layer(
   anchor_min_effective_count = 0,
   anchor_exclude = character(),
   compute_sd = TRUE,
+  anchor_covariance = NULL,
+  compute_covariance = FALSE,
   ...
 )
 }
@@ -41,29 +42,45 @@ fit_extrapolation_layer(
 a valid prediction for near-field methods.}
 
 \item{lambda_l_grid, lambda_e_grid, sigma_obs_grid}{Hyperparameter grids for
-graph Gaussian and truncated near-field GMRF methods.}
+compiled leave-one-anchor-out tuning. Supplying one value for each grid uses
+fixed hyperparameters; multi-value grids require enough evaluable anchors and
+abort rather than substituting default values.}
 
-\item{eps}{Diagonal numerical stabilizer for graph Gaussian solvers.}
+\item{eps}{Diagonal numerical stabilizer.}
 
-\item{graph_edge_weight}{Edge weighting used by graph-based methods.}
+\item{graph_edge_weight}{Edge weighting used by the Gaussian graph prior.
+\code{"mutation"} preserves the transition weights implied by \code{beta}, \code{"unit"}
+gives every graph edge equal smoothing weight, and \code{"normalized"} preserves
+relative mutation weights while removing the global \code{beta} scale.}
 
-\item{anchor_support_tiers}{Local support tiers used as second-layer anchors.}
+\item{anchor_support_tiers}{Local support tiers to use as Gaussian anchors.
+Defaults to \code{"all"} for the legacy behavior of anchoring every finite local
+posterior row.}
 
 \item{anchor_covariance_inflation}{Named variance multipliers for local
 covariance statuses.}
 
-\item{anchor_count_reference}{Optional low-count downweighting reference for
-anchors.}
+\item{anchor_count_reference}{Optional count total below which observed
+anchors are downweighted by increasing their variance.}
 
-\item{anchor_count_power}{Exponent for count-based anchor variance inflation.}
+\item{anchor_count_power}{Exponent used by count-based variance inflation.}
 
 \item{anchor_min_effective_count}{Minimum effective count required for a local
-row to be used as an anchor.}
+posterior row to be used as a global anchor. Set to \code{NULL} to keep all
+finite local rows.}
 
-\item{anchor_exclude}{Optional karyotype labels to exclude from the anchor set.}
+\item{anchor_exclude}{Optional karyotype labels to exclude from the anchor
+set, used for neighbor-holdout validation.}
 
-\item{compute_sd}{Whether graph Gaussian solvers compute diagonal posterior
-standard deviations.}
+\item{compute_sd}{Whether to compute diagonal posterior standard deviations.
+Set to \code{FALSE} for mean-only global scoring on large benchmark graphs.}
+
+\item{anchor_covariance}{Optional covariance aligned to the local summary.
+Defaults to \code{local_fit$fitness_covariance} when available. This retains
+correlations but remains a two-layer posterior approximation.}
+
+\item{compute_covariance}{Return the complete fitness covariance, for graphs
+with at most 500 nodes. Also computes standard deviations.}
 
 \item{...}{Method-specific controls.}
 }

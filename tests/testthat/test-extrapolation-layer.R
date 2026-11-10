@@ -126,37 +126,4 @@ test_that("full second-layer run index preserves requested combination counts", 
   expect_true("empirical_censored_weighted_slot5" %in% weighted)
 })
 
-test_that("balanced ranking and pareto helpers run on hand-built metrics", {
-  env <- new.env(parent = globalenv())
-  script <- "benchmark/run_full_second_layer_comparison.R"
-  if (!file.exists(script)) script <- file.path("..", "..", "benchmark", "run_full_second_layer_comparison.R")
-  sys.source(script, envir = env)
-  metrics <- data.frame(
-    run_id = rep(c("r1", "r2"), each = 17),
-    package = rep("alfak2", 34),
-    input_mode = rep("full", 34),
-    extrapolation_method = rep(c("graph_gaussian_baseline", "edge_effect_empirical_bayes"), each = 17),
-    minobs = NA_integer_,
-    NN_prior_slot = NA_character_,
-    grf_lambda = 0.6,
-    landscape_id = "L1",
-    landscape_rep = 1L,
-    shell = "all_nearfield",
-    prediction_scale = "raw",
-    metric = rep(c(
-      "rmse", "mae", "relative_rmse", "bias_abs", "q90_absolute_error", "uncalibrated_r2",
-      "edge_gradient_rmse", "edge_gradient_spearman", "centered_rmse", "spearman", "sign_accuracy",
-      "top_k_overlap_fraction", "interval_coverage_95_closeness", "standardized_rmse", "coverage",
-      "runtime_seconds", "failure_rate"
-    ), 2),
-    value = c(c(2,2,2,2,2,0.2, 2,0.2,2,0.2,0.2,0.2, 0.2,2,0.8, 2,0),
-              c(1,1,1,1,1,0.8, 1,0.8,1,0.8,0.8,0.8, 0.1,1,1, 1,0)),
-    failure_status = "ok",
-    stringsAsFactors = FALSE
-  )
-  ranks <- env$build_landscape_rankings(metrics)
-  expect_true("balanced_weighted_rank" %in% names(ranks))
-  expect_true(any(is.finite(ranks$balanced_weighted_rank)))
-  pf <- env$build_pareto_front(metrics)
-  expect_true("is_pareto_optimal" %in% names(pf))
-})
+# The retired benchmark ranking helper is no longer part of the package.

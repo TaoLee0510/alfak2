@@ -28,6 +28,16 @@ second_layer_affine_rmse <- function(pred, truth) {
   sqrt(mean(stats::residuals(fit)^2))
 }
 
+second_layer_rescaled_r2 <- function(pred, truth) {
+  ok <- is.finite(pred) & is.finite(truth)
+  if (sum(ok) < 2L) return(NA_real_)
+  pred <- pred[ok] - mean(pred[ok])
+  truth <- truth[ok] - mean(truth[ok])
+  denom <- sum(truth^2)
+  if (!is.finite(denom) || denom <= 0) return(NA_real_)
+  1 - sum((pred - truth)^2) / denom
+}
+
 second_layer_calibration_coef <- function(pred, truth) {
   ok <- is.finite(pred) & is.finite(truth)
   if (sum(ok) < 2L || !is.finite(stats::var(pred[ok])) || stats::var(pred[ok]) <= 0) {
@@ -81,6 +91,8 @@ second_layer_shell_rows <- function(eval_nodes, shell) {
   d <- as.integer(eval_nodes$support_distance)
   switch(
     shell,
+    full_lscape = seq_len(nrow(eval_nodes)),
+    all_eval = which(d %in% c(0L, 1L, 2L)),
     all_nearfield = which(d %in% c(1L, 2L)),
     d0 = which(d == 0L),
     d1 = which(d == 1L),
@@ -91,7 +103,7 @@ second_layer_shell_rows <- function(eval_nodes, shell) {
 
 second_layer_metric_values <- function(eval_nodes,
                                        eval_edges,
-                                       shell = c("all_nearfield", "d0", "d1", "d2"),
+                                       shell = c("all_eval", "all_nearfield", "d0", "d1", "d2", "full_lscape"),
                                        runtime_seconds = NA_real_,
                                        failure_status = "ok") {
   shell <- match.arg(shell)
@@ -119,12 +131,15 @@ second_layer_metric_values <- function(eval_nodes,
     affine_rmse = second_layer_affine_rmse(df$pred, df$truth),
     count_weighted_rmse = second_layer_weighted_rmse(df$pred, df$truth, weights),
     count_weighted_mae = second_layer_weighted_mae(df$pred, df$truth, weights),
+    rescaled_r2 = second_layer_rescaled_r2(df$pred, df$truth),
     pearson = second_layer_cor(df$pred, df$truth, "pearson"),
     spearman = second_layer_cor(df$pred, df$truth, "spearman")
   )
   if (!is.null(eval_edges) && nrow(eval_edges)) {
     edge_rows <- switch(
       shell,
+      full_lscape = integer(0),
+      all_eval = which(eval_edges$child_distance %in% c(1L, 2L)),
       all_nearfield = which(eval_edges$child_distance %in% c(1L, 2L)),
       d0 = integer(0),
       d1 = which(eval_edges$child_distance == 1L),
@@ -147,7 +162,7 @@ second_layer_metric_values <- function(eval_nodes,
       deleterious_sign_accuracy = NA_real_
     )
   }
-  top <- if (identical(shell, "all_nearfield")) {
+  top <- if (shell %in% c("all_nearfield", "all_eval", "full_lscape")) {
     second_layer_top_k_overlap(df$pred, df$truth)
   } else {
     c(overlap_count = NA_real_, overlap_fraction = NA_real_, k = NA_real_)
@@ -187,7 +202,7 @@ second_layer_metric_values <- function(eval_nodes,
 
 second_layer_metric_table <- function(eval_nodes,
                                       eval_edges,
-                                      shells = c("all_nearfield", "d0", "d1", "d2"),
+                                      shells = c("all_eval", "all_nearfield", "d0", "d1", "d2"),
                                       runtime_seconds = NA_real_,
                                       failure_status = "ok") {
   scales <- c("raw", "anchor_calibrated")
@@ -231,6 +246,38 @@ second_layer_metric_table <- function(eval_nodes,
     }
   }
   do.call(rbind, rows)
+}
+
+second_layer_full_lscape_eval <- function(predictions, landscape) {
+  if (is.null(predictions) || !nrow(predictions)) {
+    return(list(nodes = data.frame(), edges = data.frame()))
+  }
+  needed <- c("karyotype", "fitness_mean")
+  missing <- setdiff(needed, names(predictions))
+  if (length(missing)) {
+    stop("Prediction table is missing columns: ", paste(missing, collapse = ", "), call. = FALSE)
+  }
+  keep <- !is.na(predictions$karyotype) & nzchar(as.character(predictions$karyotype))
+  predictions <- predictions[keep, , drop = FALSE]
+  predictions <- predictions[!duplicated(as.character(predictions$karyotype)), , drop = FALSE]
+  if (!nrow(predictions)) {
+    return(list(nodes = data.frame(), edges = data.frame()))
+  }
+  truth <- predict_landscape_fitness(landscape, as.character(predictions$karyotype))
+  nodes <- data.frame(
+    node_id = seq_len(nrow(predictions)),
+    karyotype = as.character(predictions$karyotype),
+    support_distance = NA_integer_,
+    support_tier = "method_lscape",
+    truth = as.numeric(truth),
+    eval_weight = NA_real_,
+    pred = as.numeric(predictions$fitness_mean),
+    pred_sd = if ("fitness_sd" %in% names(predictions)) as.numeric(predictions$fitness_sd) else NA_real_,
+    pred_anchor_calibrated = as.numeric(predictions$fitness_mean),
+    prediction_status = if ("prediction_status" %in% names(predictions)) as.character(predictions$prediction_status) else "predicted",
+    stringsAsFactors = FALSE
+  )
+  list(nodes = nodes, edges = data.frame())
 }
 
 second_layer_canonical_eval_graph <- function(counts,

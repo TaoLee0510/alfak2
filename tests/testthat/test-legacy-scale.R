@@ -1,4 +1,4 @@
-test_that("alfakR scale columns preserve native estimates and calibrate the weighted mean", {
+test_that("alfakR scale columns preserve native estimates and match finite-time growth", {
   counts <- matrix(
     c(30, 20,
       10, 30),
@@ -38,8 +38,9 @@ test_that("alfakR scale columns preserve native estimates and calibrate the weig
   pi0 <- as.numeric(fit$local$posterior_predictive$pi0)
   pi0 <- pi0 / sum(pi0)
   g0 <- log(1000 / 100) / 2
-  expect_equal(sum(pi0 * s$fitness_mean_alfakR_scale), g0, tolerance = 1e-8)
-  expect_equal(s$fitness_sd_alfakR_scale, s$fitness_sd, tolerance = 1e-12)
+  expect_equal(log(sum(pi0 * exp(2 * s$fitness_mean_alfakR_scale))) / 2, g0, tolerance = 1e-8)
+  C <- attr(s, "fitness_covariance_alfakR_scale")
+  expect_equal(diag(C), s$fitness_sd_alfakR_scale^2, tolerance = 1e-12)
 })
 
 test_that("alfakR scale can apply efflux viability correction", {
@@ -74,7 +75,16 @@ test_that("alfakR scale can apply efflux viability correction", {
   pi0 <- pi0 / sum(pi0)
   g0 <- log(1000 / 100) / 2
   expect_true(all(s$efflux_viability > 0))
-  expect_equal(sum(pi0 * s$fitness_mean_alfakR_scale), g0, tolerance = 1e-8)
+  expect_equal(log(sum(pi0 * exp(2 * s$efflux_viability * s$fitness_mean_alfakR_scale))) / 2,
+               g0, tolerance = 1e-8)
+})
+
+test_that("finite-time growth calibration removes the nonlinear centering bias", {
+  summary <- data.frame(karyotype = c("1", "2"), fitness_mean = c(-0.5, 0.5), fitness_sd = c(0.1, 0.1))
+  result <- add_alfakR_scale_to_summary(summary, matrix(1:2, ncol = 1), c(0.5, 0.5),
+    dt = 1, beta = 0, n0 = 100, nb = 100 * exp(0.7))
+  expect_equal(log(mean(exp(result$fitness_mean_alfakR_scale))), 0.7, tolerance = 1e-12)
+  expect_true(all(result$fitness_sd_alfakR_scale > 0))
 })
 
 test_that("alfakR scale requires calibration population sizes", {

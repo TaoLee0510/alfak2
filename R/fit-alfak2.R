@@ -69,6 +69,23 @@
 #'   uses observed graph nodes, and `"uniform"` weights all finite summary rows
 #'   equally.
 #' @param ... Passed to `fit_local_posterior()`.
+#' @param pipeline `"two_layer"` retains separate local and extrapolation fits;
+#'   `"joint_count"` fits a single count likelihood and structured landscape
+#'   prior on the entire bounded target graph. The joint model is an explicitly
+#'   selectable candidate pending independent all-distance validation.
+#' @param joint_control Named prior controls passed to the joint landscape.
+#'   Experimental `interaction_support = "observed_nullspace"` separates pair
+#'   directions that vanish at observed design rows; this is not a likelihood
+#'   identifiability test. `unidentified_interaction_sd` controls their prior.
+#'   Optional `prior_components` is a list of prior-control lists, with
+#'   `model_prior` supplying component weights before conditional evidence
+#'   updating. It cannot be combined with `model_scales`.
+#' @param target_karyotypes Optional explicit finite query states, as labels or a
+#'   copy-number matrix. They define the global domain together with observed
+#'   nodes, permitting distant queries without complete shell enumeration.
+#' @param forward_tolerance Joint division-model step-halving tolerance on both
+#'   maximum frequency change and log total growth change.
+#' @param forward_max_refinements Maximum joint forward step halvings and refits.
 #'
 #' @return An `alfak2_fit` object.
 #' @export
@@ -124,7 +141,16 @@ fit_alfak2 <- function(counts,
                        nb = NULL,
                        correct_efflux = FALSE,
                        legacy_weight = c("pi0", "directly_informed", "uniform"),
+                       pipeline = c("two_layer", "joint_count"),
+                       joint_control = list(),
+                       target_karyotypes = NULL,
+                       forward_tolerance = 1e-5,
+                       forward_max_refinements = 3L,
                        ...) {
+  pipeline <- match.arg(pipeline)
+  if (!is.list(joint_control) || (length(joint_control) &&
+      (is.null(names(joint_control)) || any(!nzchar(names(joint_control))))))
+    stop("`joint_control` must be a named list.", call. = FALSE)
   if (!is.logical(alfakR_scale) || length(alfakR_scale) != 1L || is.na(alfakR_scale)) {
     stop("`alfakR_scale` must be TRUE or FALSE.", call. = FALSE)
   }
@@ -154,23 +180,18 @@ fit_alfak2 <- function(counts,
     effective_depth_rounding = effective_depth_rounding,
     effective_depth_seed = effective_depth_seed
   )
-  local_graph <- build_karyotype_graph(
+  local_graph <- if (identical(pipeline, "two_layer")) build_karyotype_graph(
     data,
     transition_kernel = transition_kernel,
     shell_depth = local_shell_depth,
     min_cn = min_cn,
     max_cn = max_cn,
     max_nodes = max_nodes
-  )
-  local <- fit_local_posterior(
-    data,
-    local_graph,
-    observation_model = obs_controls$observation_model,
-    dm_concentration = obs_controls$dm_concentration,
-    observation_weight_mode = observation_weight_mode,
-    ...
-  )
-  global_graph <- build_karyotype_graph(
+  ) else NULL
+  global_graph <- if (!is.null(target_karyotypes)) {
+    build_explicit_target_graph(data, target_karyotypes, min_cn, max_cn,
+      max_nodes, transition_kernel)
+  } else build_karyotype_graph(
     data,
     transition_kernel = transition_kernel,
     shell_depth = local_shell_depth + global_extra_shell,
@@ -178,7 +199,20 @@ fit_alfak2 <- function(counts,
     max_cn = max_cn,
     max_nodes = max_nodes
   )
-  global_args <- c(
+  if (identical(pipeline, "joint_count")) {
+    joint <- fit_joint_landscape(data, global_graph, joint_control = joint_control,
+      forward_tolerance = forward_tolerance, forward_max_refinements = forward_max_refinements,
+      observation_model = obs_controls$observation_model,
+      dm_concentration = obs_controls$dm_concentration,
+      observation_weight_mode = observation_weight_mode, ...)
+    local <- joint$local
+    global <- joint$global
+  } else {
+    local <- fit_local_posterior(data, local_graph,
+      observation_model = obs_controls$observation_model,
+      dm_concentration = obs_controls$dm_concentration,
+      observation_weight_mode = observation_weight_mode, ...)
+    global_args <- c(
     list(
       local_fit = local,
       graph = global_graph,
@@ -198,6 +232,7 @@ fit_alfak2 <- function(counts,
     extrapolation_control
   )
   global <- do.call(fit_extrapolation_layer, global_args)
+  }
   input_depth_diag <- data$metadata$input_depth
   if (is.null(input_depth_diag)) input_depth_diag <- list(input_depth = "raw")
   fit <- list(
@@ -207,7 +242,8 @@ fit_alfak2 <- function(counts,
     diagnostics = list(
       local = local$diagnostics,
       global = global$diagnostics,
-      backend = c(local = "TMB", global = "RcppEigen"),
+      backend = c(local = "TMB", global = if (identical(pipeline, "joint_count")) "TMB" else "RcppEigen"),
+      pipeline = pipeline,
       input_depth = input_depth_diag,
       observation_model = obs_controls$observation_model,
       observation_weight_mode = observation_weight_mode,
@@ -215,7 +251,7 @@ fit_alfak2 <- function(counts,
       dm_concentration_grid = obs_controls$dm_concentration,
       transition_kernel = transition_kernel,
       graph_edge_weight = graph_edge_weight,
-      extrapolation_method = extrapolation_method,
+      extrapolation_method = if (identical(pipeline, "joint_count")) "joint_count_landscape" else extrapolation_method,
       max_prediction_distance = max_prediction_distance,
       anchor_support_tiers = anchor_support_tiers,
       anchor_exclude = as.character(anchor_exclude),

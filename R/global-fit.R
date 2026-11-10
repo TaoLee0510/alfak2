@@ -78,6 +78,43 @@ resolve_anchor_tiers <- function(anchor_support_tiers) {
   anchor_support_tiers[nzchar(anchor_support_tiers)]
 }
 
+# The covariance is a Gaussian observation approximation to the local posterior;
+# it preserves correlations but does not remove the first-layer prior.
+resolve_anchor_covariance <- function(local_fit, keep, variance_multiplier,
+                                      anchor_covariance = NULL) {
+  if (is.null(anchor_covariance)) anchor_covariance <- local_fit$fitness_covariance
+  if (is.null(anchor_covariance)) return(NULL)
+  labels <- as.character(local_fit$summary$karyotype)
+  covariance <- as.matrix(anchor_covariance)
+  if (!is.numeric(covariance) || nrow(covariance) != length(labels) ||
+      ncol(covariance) != length(labels) || any(!is.finite(covariance))) {
+    stop("`anchor_covariance` must be a finite square matrix aligned to the local summary.", call. = FALSE)
+  }
+  if (!is.null(rownames(covariance)) || !is.null(colnames(covariance))) {
+    if (is.null(rownames(covariance)) || is.null(colnames(covariance)) ||
+        !setequal(rownames(covariance), labels) || !setequal(colnames(covariance), labels)) {
+      stop("`anchor_covariance` dimnames must match local karyotype labels.", call. = FALSE)
+    }
+    covariance <- covariance[labels, labels, drop = FALSE]
+  }
+  scale <- max(1, max(abs(covariance)))
+  if (max(abs(covariance - t(covariance))) > 1e-8 * scale) {
+    stop("`anchor_covariance` must be symmetric.", call. = FALSE)
+  }
+  covariance <- (covariance + t(covariance)) / 2
+  if (min(eigen(covariance, symmetric = TRUE, only.values = TRUE)$values) < -1e-8 * scale) {
+    stop("`anchor_covariance` must be positive semidefinite.", call. = FALSE)
+  }
+  expected <- as.numeric(local_fit$summary$fitness_sd)^2
+  if (any(abs(diag(covariance)[keep] - expected[keep]) > 1e-6 * pmax(expected[keep], 1e-10))) {
+    stop("`anchor_covariance` diagonal must agree with local fitness variances.", call. = FALSE)
+  }
+  covariance <- covariance[keep, keep, drop = FALSE] *
+    tcrossprod(sqrt(variance_multiplier))
+  dimnames(covariance) <- list(labels[keep], labels[keep])
+  covariance
+}
+
 #' Fit the global graph Gaussian posterior
 #'
 #' Uses the local posterior as diagonal anchor observations and solves the
@@ -109,6 +146,11 @@ resolve_anchor_tiers <- function(anchor_support_tiers) {
 #'   set, used for neighbor-holdout validation.
 #' @param compute_sd Whether to compute diagonal posterior standard deviations.
 #'   Set to `FALSE` for mean-only global scoring on large benchmark graphs.
+#' @param anchor_covariance Optional covariance aligned to the local summary.
+#'   Defaults to `local_fit$fitness_covariance` when available. This retains
+#'   correlations but remains a two-layer posterior approximation.
+#' @param compute_covariance Return the complete fitness covariance, for graphs
+#'   with at most 500 nodes. Also computes standard deviations.
 #'
 #' @return A list containing node summaries and tuning diagnostics.
 #' @export
@@ -132,7 +174,9 @@ fit_graph_posterior <- function(local_fit,
                                 anchor_count_power = 1,
                                 anchor_min_effective_count = 0,
                                 anchor_exclude = character(),
-                                compute_sd = TRUE) {
+                                compute_sd = TRUE,
+                                anchor_covariance = NULL,
+                                compute_covariance = FALSE) {
   if (!inherits(local_fit, "alfak2_local_fit")) {
     stop("`local_fit` must be an alfak2_local_fit object.", call. = FALSE)
   }
@@ -142,6 +186,10 @@ fit_graph_posterior <- function(local_fit,
   if (!is.logical(compute_sd) || length(compute_sd) != 1L || is.na(compute_sd)) {
     stop("`compute_sd` must be TRUE or FALSE.", call. = FALSE)
   }
+  if (!is.logical(compute_covariance) || length(compute_covariance) != 1L || is.na(compute_covariance)) {
+    stop("`compute_covariance` must be TRUE or FALSE.", call. = FALSE)
+  }
+  compute_sd <- isTRUE(compute_sd) || isTRUE(compute_covariance)
   anchor_tiers <- resolve_anchor_tiers(anchor_support_tiers)
   if (!is.null(anchor_min_effective_count)) {
     validate_scalar(as.numeric(anchor_min_effective_count), "anchor_min_effective_count", lower = 0)
@@ -213,6 +261,7 @@ fit_graph_posterior <- function(local_fit,
   }
   anchor_var_multiplier <- covariance_mult * count_mult
   anchor_var <- anchor_var * anchor_var_multiplier
+  covariance <- resolve_anchor_covariance(local_fit, keep, anchor_var_multiplier, anchor_covariance)
   edge_weight <- graph_edge_weights(graph$edge_weight, graph_edge_weight)
 
   res <- tryCatch(
@@ -228,7 +277,9 @@ fit_graph_posterior <- function(local_fit,
       lambda_e_grid = as.numeric(lambda_e_grid),
       sigma_obs_grid = as.numeric(sigma_obs_grid),
       eps = eps,
-      compute_variance = isTRUE(compute_sd)
+      compute_variance = isTRUE(compute_sd),
+      anchor_covariance = covariance,
+      compute_covariance = isTRUE(compute_covariance)
     ),
     error = function(e) {
       alfak2_abort(
@@ -263,9 +314,16 @@ fit_graph_posterior <- function(local_fit,
     conf_high = as.numeric(res$mean) + 1.959963984540054 * as.numeric(res$sd),
     stringsAsFactors = FALSE
   )
+  summary$interval_valid <- isTRUE(compute_sd) && all(covariance_status == "TMB_sdreport")
+  summary$uncertainty_status <- if (all(covariance_status == "TMB_sdreport"))
+    "conditional_gaussian_anchor_model" else "conditional_on_untrusted_local_anchors"
+  fitness_covariance <- if (isTRUE(compute_covariance)) as.matrix(res$covariance) else NULL
+  if (!is.null(fitness_covariance)) dimnames(fitness_covariance) <- list(graph$labels, graph$labels)
   list(
     graph = graph,
     summary = summary,
+    fitness_covariance = fitness_covariance,
+    anchor_covariance = covariance,
     anchors = data.frame(
       node_id = as.integer(anchor_match[keep]),
       karyotype = local_fit$summary$karyotype[keep],
@@ -284,6 +342,8 @@ fit_graph_posterior <- function(local_fit,
       lambda_e = res$lambda_e,
       sigma_obs = res$sigma_obs,
       cv_score = res$cv_score,
+      cv_score_type = res$cv_score_type,
+      cv_scope = res$cv_scope,
       cv_status = res$cv_status,
       cv_evaluated = res$cv_evaluated,
       cv_skipped = res$cv_skipped,
@@ -298,6 +358,12 @@ fit_graph_posterior <- function(local_fit,
     tuning_grid = res$grid,
     diagnostics = list(
       factorization_status = res$factorization_status,
+      cv_score_type = res$cv_score_type,
+      cv_scope = res$cv_scope,
+      anchor_covariance_mode = if (is.null(covariance)) "diagonal" else "joint",
+      prior_handling = "local_posterior_observation_approximation",
+      n_untrusted_anchors = sum(covariance_status != "TMB_sdreport"),
+      interval_valid = isTRUE(compute_sd) && all(covariance_status == "TMB_sdreport"),
       cv_status = res$cv_status,
       cv_evaluated = res$cv_evaluated,
       cv_skipped = res$cv_skipped,
@@ -308,7 +374,7 @@ fit_graph_posterior <- function(local_fit,
       anchor_min_effective_count = anchor_min_effective_count,
       anchor_variance_multiplier_summary = summary(anchor_var_multiplier),
       compute_sd = isTRUE(compute_sd),
-      posterior_sd_mode = if (isTRUE(compute_sd)) "diagonal" else "none"
+      posterior_sd_mode = if (isTRUE(compute_covariance)) "full_covariance" else if (isTRUE(compute_sd)) "diagonal" else "none"
     )
   )
 }

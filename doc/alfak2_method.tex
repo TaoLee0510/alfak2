@@ -436,16 +436,66 @@ The local layer returns, for each local graph node,
 \]
 These become noisy anchors for the global graph layer.
 
-\section{Global Graph Gaussian Posterior}
+\section{Second-Layer Extrapolation Framework}
 
-The global layer does not revisit the raw counts. Instead, it treats local
-fitness estimates as noisy observations and infers the full fitness vector
+The second layer does not revisit the raw counts. Instead, it treats local
+fitness estimates as noisy anchors and predicts fitness on a larger bounded
+graph $\mathcal{G}_{\mathrm{global}}$. The public entry point is
+\texttt{fit\_extrapolation\_layer()}, and \texttt{fit\_alfak2()} passes
+\texttt{extrapolation\_method} to this function.
+
+All second-layer methods return the same global-fit schema:
 \[
-  \bm f=(f_1,\ldots,f_n)^\top
+  \{\mathcal{G}_{\mathrm{global}},\;
+    \text{node summary},\;
+    \text{anchor table},\;
+    \text{hyperparameters},\;
+    \text{tuning grid},\;
+    \text{diagnostics}\}.
 \]
-on a larger graph $\mathcal{G}_{\mathrm{global}}$.
+The node summary always contains
+\[
+\begin{array}{llll}
+\texttt{fitness\_mean}, & \texttt{fitness\_sd}, &
+\texttt{conf\_low}, & \texttt{conf\_high},\\
+\texttt{support\_distance}, & \texttt{support\_tier}, &
+\texttt{extrapolation\_method}, & \texttt{prediction\_status}.
+\end{array}
+\]
 
-\subsection{Anchor Observation Model}
+The current method registry is:
+\begin{itemize}
+  \item \texttt{graph\_gaussian\_baseline}: full-graph sparse Gaussian posterior.
+  \item \texttt{edge\_effect\_empirical\_bayes}: ridge-shrunk one-step edge effect extrapolation.
+  \item \texttt{edge\_effect\_interaction\_path\_ensemble}: one- and two-step path ensemble with edge interactions.
+  \item \texttt{kronecker\_or\_graph\_trend\_filtering}: near-field graph trend filtering.
+  \item \texttt{local\_NNGP\_or\_GPnn}: nearest-neighbor local Gaussian process.
+  \item \texttt{delta\_tree\_ensemble}: tabular parent-to-target fitness-delta model.
+  \item \texttt{tabpfn\_nearfield\_feature\_model}: TabPFN adapter name with current tree fallback.
+  \item \texttt{truncated\_nearfield\_gmrf}: near-field induced-subgraph Gaussian posterior.
+  \item \texttt{local\_polynomial\_stencil}: local weighted polynomial stencil regression.
+\end{itemize}
+The accepted legacy aliases are:
+\[
+\begin{array}{lll}
+\texttt{graph\_gaussian} &\mapsto& \texttt{graph\_gaussian\_baseline},\\
+\texttt{nearfield\_local\_edge\_effect} &\mapsto& \texttt{edge\_effect\_empirical\_bayes},\\
+\texttt{edge\_interaction\_path\_ensemble} &\mapsto& \texttt{edge\_effect\_interaction\_path\_ensemble},\\
+\texttt{graph\_trend\_filtering} &\mapsto& \texttt{kronecker\_or\_graph\_trend\_filtering}.
+\end{array}
+\]
+
+The default reliable near-field reporting distance is
+\[
+  d(v)\le d_{\max}=2.
+\]
+For every method except \texttt{graph\_gaussian\_baseline}, nodes with
+$d(v)>d_{\max}$ are marked \texttt{out\_of\_scope} and their reported fitness
+is set to missing. This is deliberate: these methods are intended to estimate
+directly informed and one- or two-hop neighboring karyotypes, not arbitrary
+far-field graph states.
+
+\subsection{Shared Anchor Construction and Observation Model}
 
 Let $\mathcal{A}$ be the retained anchor set. For each anchor $a$,
 \[
@@ -476,7 +526,37 @@ If count-based downweighting is enabled,
 Low-count or unreliable local anchors therefore receive larger observation
 variance and have less influence on the global posterior.
 
-\subsection{Graph Laplacian Smoothing}
+The retained anchors are controlled by:
+\[
+  \texttt{anchor\_support\_tiers},\quad
+  \texttt{anchor\_exclude},\quad
+  \texttt{anchor\_min\_effective\_count}.
+\]
+\texttt{anchor\_support\_tiers = "all"} keeps all finite local posterior rows.
+Otherwise, only the requested support tiers are allowed. \texttt{anchor\_exclude}
+removes named karyotypes from the anchor set and is used for holdout
+validation. If \texttt{anchor\_min\_effective\_count} is not \texttt{NULL},
+only rows with effective count strictly larger than that threshold are retained.
+
+Edge weights entering second-layer methods are selected by
+\texttt{graph\_edge\_weight}:
+\[
+  w_{ij}^{\mathrm{mutation}} = q_{ij},\qquad
+  w_{ij}^{\mathrm{unit}} = \mathbf{1}\{q_{ij}>0\},\qquad
+  w_{ij}^{\mathrm{normalized}} = q_{ij}/\operatorname{median}(q_{ij}:q_{ij}>0).
+\]
+The normalized mode keeps relative mutation plausibility but removes the global
+scale set by $\beta$.
+
+\subsection{\texttt{graph\_gaussian\_baseline}: Full Graph Gaussian Posterior}
+
+This method is the historical second layer. It infers the full fitness vector
+\[
+  \bm f=(f_1,\ldots,f_n)^\top
+\]
+on $\mathcal{G}_{\mathrm{global}}$ with a sparse Gaussian posterior.
+
+\subsubsection{Graph Laplacian Smoothing}
 
 The first global prior term is graph edge smoothing:
 \[
@@ -493,7 +573,7 @@ This term encourages neighboring karyotypes connected by plausible one-step
 copy-number changes to have similar fitness unless anchor data support a sharp
 difference.
 
-\subsection{Ordered Copy-Number Curvature Penalty}
+\subsubsection{Ordered Copy-Number Curvature Penalty}
 
 The second prior term penalizes second differences along a chromosome
 copy-number axis. For any triplet $x-e_c$, $x$, $x+e_c$ present in the graph,
@@ -513,7 +593,7 @@ The curvature penalty is
 This discourages unsupported zig-zag behavior along ordered copy-number
 coordinates.
 
-\subsection{Epistasis Penalty}
+\subsubsection{Epistasis Penalty}
 
 The third prior term controls second-order interaction between two chromosome
 directions. For any quadruplet $x$, $x+e_c$, $x+e_d$, and $x+e_c+e_d$ present
@@ -535,7 +615,7 @@ This does not forbid epistasis. It penalizes strong interaction effects when
 they are weakly supported by anchors, reducing unstable high-order oscillations
 in sparse regions.
 
-\subsection{Gaussian Posterior}
+\subsubsection{Gaussian Posterior}
 
 The global negative log posterior is
 \[
@@ -603,7 +683,7 @@ The implementation assembles $\bm Q$ as a sparse matrix and uses RcppEigen
 sparse linear algebra to solve for $\bm \mu$ and the diagonal of
 $\bm Q^{-1}$.
 
-\subsection{Hyperparameter Selection}
+\subsubsection{Hyperparameter Selection}
 
 The global layer has three main hyperparameters:
 \[
@@ -628,6 +708,296 @@ The selected values are
   \operatorname{CV}(\lambda_l,\lambda_e,\sigma_{\mathrm{obs}}).
 \]
 
+\section{Near-Field Extrapolation Methods}
+
+The eight non-baseline methods use the same anchors and the same bounded graph
+but restrict reliable reporting to $d(v)\le d_{\max}$. They are designed to
+answer the practical question: given direct local fitness estimates, what is
+the most credible fitness around those observed karyotypes?
+
+\subsection{\texttt{edge\_effect\_empirical\_bayes}}
+
+This method estimates average one-step copy-number fitness effects. Each
+directed edge has type
+\[
+  \tau(e)=(c(e),s(e)),
+\]
+where $c(e)$ is chromosome index and $s(e)\in\{-1,+1\}$ is loss or gain. For an
+anchor-to-anchor edge $e=(u,v)$, define
+\[
+  r_e=z_v-z_u,\qquad
+  V_e=R_u+R_v,\qquad
+  \omega_e=\frac{w_e}{V_e}.
+\]
+The ridge-shrunk empirical Bayes estimate for edge type $\tau$ is
+\[
+  \hat\delta_{\tau}
+  =
+  \frac{\sum_{e:\tau(e)=\tau}\omega_e r_e}
+       {\sum_{e:\tau(e)=\tau}\omega_e+\lambda_\delta}.
+\]
+The default code uses \texttt{ridge\_delta = 4}. For a one-hop target $v$,
+candidate predictions from direct anchor parents $u$ are
+\[
+  \hat f_v^{(u)}
+  =
+  z_u+\hat\delta_{\tau(u,v)}.
+\]
+For two-hop targets, the method reuses the path-combination machinery but sets
+the interaction shrinkage effectively to infinity, so second-order interactions
+are shrunk to zero. Candidate paths are combined by inverse variance and path
+weight. The final variance includes anchor variance, edge-effect uncertainty,
+and between-path dispersion.
+
+The implementation first copies any available local posterior estimates within
+$d_{\max}$ into the global summary. Only remaining missing near-field nodes are
+filled by the edge-effect predictor. This makes the method conservative: when
+TMB already estimated a nearby local node, that local estimate is kept.
+
+\subsection{\texttt{edge\_effect\_interaction\_path\_ensemble}}
+
+This method extends the previous model with second-order path interactions.
+For a two-edge path
+\[
+  u\to m\to v,
+\]
+with edge types $\tau_1$ and $\tau_2$, it fits an interaction correction
+\[
+  \gamma_{\tau_1,\tau_2}
+\]
+from anchor triplets. The residual used for training is
+\[
+  z_v-z_u-\hat\delta_{\tau_1}-\hat\delta_{\tau_2}.
+\]
+The ridge estimate has the same form as the one-step effect:
+\[
+  \hat\gamma_{\tau_1,\tau_2}
+  =
+  \frac{\sum \omega r}
+       {\sum \omega+\lambda_\gamma},
+\]
+with default \texttt{ridge\_gamma = 25}.
+
+For a one-hop target,
+\[
+  \hat f_v^{(u)}=z_u+\hat\delta_{\tau(u,v)}.
+\]
+For a two-hop target,
+\[
+  \hat f_v^{(u,m)}
+  =
+  z_u+\hat\delta_{\tau(u,m)}
+      +\hat\delta_{\tau(m,v)}
+      +\hat\gamma_{\tau(u,m),\tau(m,v)}.
+\]
+All valid paths from directly informed anchors are ensembled. The path weight is
+the product of edge weights along the path, and candidate predictions are
+combined using inverse variance weighting plus a between-path variance term:
+\[
+  \widehat{\Var}(f_v)
+  =
+  \sum_p \alpha_p V_p
+  +
+  \sum_p \alpha_p(\hat f_{vp}-\hat f_v)^2.
+\]
+
+\subsection{\texttt{local\_polynomial\_stencil}}
+
+For each target karyotype $x_0$, this method fits a weighted local polynomial
+regression to nearby anchors. Let
+\[
+  h_a=x_a-x_0,\qquad
+  d_a=\|x_a-x_0\|_1.
+\]
+The design matrix contains an intercept, linear terms, and diagonal quadratic
+terms:
+\[
+  X_a =
+  \left[
+    1,\;
+    h_{a1},\ldots,h_{ap},\;
+    \frac{1}{2}h_{a1}^2,\ldots,\frac{1}{2}h_{ap}^2
+  \right].
+\]
+If there are enough local training anchors, the implementation also adds a
+limited number of pairwise terms $h_{ac}h_{ad}$. The default limit is
+\texttt{max\_pairwise\_terms = 20}.
+
+The anchor weights are
+\[
+  \omega_a
+  =
+  \frac{
+    \exp(-d_a/b)\,q_{\mathrm{tier}(a)}
+  }{
+    R_a
+  },
+\]
+where $b$ is \texttt{bandwidth} and $q_{\mathrm{tier}}$ downweights weaker
+support tiers:
+\[
+q_{\mathrm{direct}}=1,\qquad
+q_{\mathrm{local\ borrowed}}=0.6,\qquad
+q_{\mathrm{weakly\ supported}}=0.3.
+\]
+The coefficient vector is the ridge solution
+\[
+  \hat\beta
+  =
+  (X^\top W X+\lambda I_0)^{-1}X^\top Wz,
+\]
+where the intercept is not penalized. Because the design is centered at
+$x_0$, the predicted target fitness is the intercept $\hat\beta_0$. Prediction
+variance is estimated from weighted residual variance and the intercept
+leverage. If the linear solve fails, the method falls back to a weighted mean.
+
+\subsection{\texttt{local\_NNGP\_or\_GPnn}}
+
+This method is a nearest-neighbor Gaussian process on copy-number vectors. For
+each prediction target, it selects the $k$ nearest anchors by lattice distance
+and anchor variance. The default is \texttt{k = 30}, capped by the number of
+available anchors. The kernel is exponential in $L_1$ copy-number distance:
+\[
+  K(x,y)=\exp\{-\|x-y\|_1/\ell\}.
+\]
+The local covariance matrix is
+\[
+  \bm K_{\mathrm{local}}
+  =
+  K(X,X)+\operatorname{diag}(R_a)+\nu I,
+\]
+where $\nu$ is the nugget. The prior mean is the inverse-variance weighted
+anchor mean. The predictive mean and variance are the standard GP conditional
+quantities.
+
+The method tunes $(\ell,\nu)$ by leave-one-anchor-out RMSE on the grid
+\[
+  \ell\in\{0.75,1.5,3\},\qquad
+  \nu\in\{0.02,0.05\}
+\]
+unless those grids are overridden. If the Cholesky factorization of a local GP
+system fails, the implementation falls back to an inverse-variance weighted
+kernel mean and records the fallback in diagnostics.
+
+\subsection{\texttt{delta\_tree\_ensemble}}
+
+This method learns parent-to-target fitness deltas from tabular features. For
+an ordered anchor pair $(u,v)$ with $1\le \|x_v-x_u\|_1\le 2$, the response is
+\[
+  y_{uv}=z_v-z_u.
+\]
+The feature vector includes parent fitness mean and standard deviation, parent
+support weight, parent count totals, target support distance, path length, edge
+weight, parent copy numbers, target copy numbers, signed copy-number deltas,
+and absolute copy-number deltas.
+
+The backend currently uses \texttt{xgboost} when it is installed and the
+training table is large enough. Otherwise it uses a ridge regression fallback:
+\[
+  y = \alpha + X\beta + \epsilon,\qquad
+  \hat\beta
+  =
+  (X^\top X+\lambda I_0)^{-1}X^\top y.
+\]
+The code checks for several tree libraries, but the implemented non-ridge
+training path is currently \texttt{xgboost}; other detected backends fall back
+to ridge if \texttt{xgboost} is unavailable or fitting fails.
+
+For a target $v$, candidate parent anchors are anchors within
+$1,\ldots,d_{\max}$ lattice steps. Each candidate prediction is
+\[
+  \hat f_v^{(u)}
+  =
+  z_u+\widehat{\Delta}(u,v).
+\]
+Candidates are combined by inverse variance and path-distance weighting.
+The residual standard deviation of the fitted delta model contributes to the
+prediction variance.
+
+\subsection{\texttt{tabpfn\_nearfield\_feature\_model}}
+
+This method name is reserved for a TabPFN-style near-field tabular feature
+model. The current implementation checks whether \texttt{reticulate} and the
+Python module \texttt{tabpfn} are available, records that dependency status,
+and then delegates to the same delta-feature pipeline used by
+\texttt{delta\_tree\_ensemble}. Therefore:
+\[
+\begin{aligned}
+\texttt{tabpfn\_nearfield\_feature\_model}
+&\equiv \text{delta-feature model}\\
+&\quad \text{with TabPFN dependency diagnostics.}
+\end{aligned}
+\]
+in the current code. When TabPFN is unavailable, diagnostics report
+\[
+  \texttt{tabpfn\_unavailable\_used\_tree\_fallback}.
+\]
+This distinction is important for benchmark interpretation: rows for this
+method should not be read as evidence for an actual TabPFN model unless
+diagnostics show a real TabPFN backend in a future implementation.
+
+\subsection{\texttt{kronecker\_or\_graph\_trend\_filtering}}
+
+This method induces the near-field subgraph
+\[
+  \mathcal{G}_{\le d_{\max}}
+  =
+  \{v\in\mathcal{G}:d(v)\le d_{\max}\}
+\]
+and solves a graph trend-filtering problem. In the current implementation the
+backend is graph-based, not a Kronecker lattice solver. The objective is an
+anchor weighted least-squares term plus first- and second-difference penalties:
+\[
+\begin{aligned}
+  \min_{\bm f}\quad
+  &
+  \frac{1}{2}
+  \sum_{a\in\mathcal{A}_{\le d_{\max}}}
+  \frac{(f_a-z_a)^2}{R_a}
+  +
+  \lambda_1\sum_{(i,j)\in E_{\le d_{\max}}}|f_i-f_j|\\
+  &+
+  \lambda_2
+  \sum_{i\to j\to k}
+  |f_i-2f_j+f_k|
+  +
+  \frac{\rho}{2}\|\bm f\|_2^2.
+\end{aligned}
+\]
+The code solves this with an iteratively reweighted quadratic approximation:
+\[
+  |u|\approx \frac{u^2}{\max(|u^{\mathrm{old}}|,\epsilon)}.
+\]
+The defaults are \texttt{lambda1 = 0.25}, \texttt{lambda2 = 0.1},
+\texttt{max\_iter = 80}, and \texttt{tol = 1e-4}. The reported standard
+deviation is a shared residual scale estimated from anchor residuals.
+
+Because this implementation uses dense linear algebra on the induced near-field
+graph, it has a safety limit \texttt{max\_dense\_nodes = 1500}. If the induced
+graph is larger, the method falls back to the interaction path ensemble and
+records \texttt{fallback\_path\_ensemble} in diagnostics.
+
+\subsection{\texttt{truncated\_nearfield\_gmrf}}
+
+This method is the graph Gaussian posterior restricted to the near-field
+induced subgraph. It builds
+\[
+  \mathcal{G}_{\le d_{\max}}
+\]
+and then calls the same sparse Gaussian posterior solver used by
+\texttt{graph\_gaussian\_baseline}, but only on that induced graph. Thus it
+uses the same anchor observation model, graph Laplacian penalty, curvature
+penalty, epistasis penalty, and hyperparameter selection:
+\[
+  (\lambda_l,\lambda_e,\sigma_{\mathrm{obs}})
+  \quad\text{are selected or fixed exactly as in the baseline GMRF.}
+\]
+After solving, the near-field posterior means and standard deviations are
+copied back into the full graph summary; all nodes with $d(v)>d_{\max}$ are
+left \texttt{out\_of\_scope}. This method is useful when the goal is accurate
+direct and near-neighbor shape preservation without allowing far-field graph
+states to influence the near-field posterior.
+
 \section{Output}
 
 The local layer reports
@@ -640,22 +1010,38 @@ The local layer reports
   \qquad
   \hat\pi_{1v}.
 \]
-The global layer reports
+The second layer reports
 \[
-  \hat f_v^{\mathrm{global}}=\mu_v,
+  \hat f_v^{\mathrm{global}},
   \qquad
+  \widehat{\operatorname{sd}}(f_v^{\mathrm{global}}),
+  \qquad
+  \texttt{prediction\_status}_v.
+\]
+For \texttt{graph\_gaussian\_baseline} and
+\texttt{truncated\_nearfield\_gmrf}, the estimate is the Gaussian posterior
+mean $\mu_v$ and, when \texttt{compute\_sd = TRUE},
+\[
   \widehat{\operatorname{sd}}(f_v^{\mathrm{global}})
   =
   \sqrt{(\bm Q^{-1})_{vv}}.
 \]
+For the other near-field methods, the reported standard deviation is
+method-specific: path ensembles combine anchor, edge-effect, and between-path
+variance; local GP uses conditional predictive variance; local polynomial uses
+weighted residual and leverage variance; delta-feature models use residual
+delta-model variance. These are uncertainty estimates on the common output
+schema, not all exact Gaussian posterior marginals.
 Approximate normal intervals are
 \[
   \hat f_v \pm 1.9599639845\,\widehat{\operatorname{sd}}(f_v).
 \]
 
 The fit also reports support tier, support distance, anchor diagnostics,
-selected hyperparameters, and cross-validation status. Nodes far from anchors
-or with large posterior standard deviation can be labeled as graph-borrowed or
+selected hyperparameters, tuning grid, dependency status, convergence status,
+runtime, and method-specific diagnostics. Nodes far from anchors can be labeled
+\texttt{out\_of\_scope} by near-field methods. In the full graph Gaussian
+posterior, nodes far from direct support can be labeled graph-borrowed or
 prior-dominated, indicating that their estimates are driven mostly by prior
 structure rather than direct data.
 
@@ -723,14 +1109,17 @@ This is a post-processing scale conversion. It does not change the native
   Bounded graph expansion makes high-dimensional karyotype spaces
   computationally manageable.
 
-  \item \textbf{It uses structured graph smoothing.}
-  The global layer uses graph Laplacian smoothing, ordered copy-number
-  curvature penalties, and epistasis penalties that reflect the structure of
-  copy-number landscapes.
+  \item \textbf{It supports multiple second-layer extrapolation strategies.}
+  The graph Gaussian methods use graph Laplacian smoothing, ordered copy-number
+  curvature penalties, and epistasis penalties. The near-field methods provide
+  alternatives based on edge effects, path interactions, local GP smoothing,
+  trend filtering, local polynomial stencils, and tabular delta models.
 
   \item \textbf{It preserves uncertainty.}
-  The local TMB layer provides anchor uncertainty, and the global Gaussian
-  posterior provides posterior standard deviations for all graph nodes.
+  The local TMB layer provides anchor uncertainty. The second layer carries that
+  uncertainty through the selected extrapolation method and reports common
+  interval columns, while GMRF methods additionally provide Gaussian posterior
+  marginal standard deviations.
 
   \item \textbf{It provides interpretable support tiers.}
   Each node is annotated by support distance and support tier, helping users
@@ -749,12 +1138,11 @@ The current \texttt{alfak2} method can be summarized as
 &\longrightarrow
 \text{fitness anchors};
 \\[4pt]
-\text{Global:}\quad
+\text{Second layer:}\quad
 &\text{anchor observations}
-+ \text{graph smoothing}
-+ \text{CN penalties}\\
++ \text{method-specific extrapolation}\\
 &\longrightarrow
-\text{graph Gaussian posterior}.
+\text{global or near-field fitness estimates}.
 \end{aligned}
 \]
 
