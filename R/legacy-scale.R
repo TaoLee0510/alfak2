@@ -54,7 +54,8 @@ add_alfakR_scale_to_summary <- function(summary,
                                         beta,
                                         n0,
                                         nb,
-                                        correct_efflux = FALSE) {
+                                        correct_efflux = FALSE,
+                                        fitness_covariance = NULL) {
   validate_legacy_scale_controls(n0, nb, dt, beta, correct_efflux)
   if (!is.matrix(karyotypes) || nrow(karyotypes) != nrow(summary)) {
     stop("`karyotypes` must be a matrix with one row per summary row.", call. = FALSE)
@@ -82,20 +83,43 @@ add_alfakR_scale_to_summary <- function(summary,
         call. = FALSE
       )
     }
-    offset <- (sum(weights * fitness / viability) - g0) / sum(weights / viability)
-    legacy_mean <- (fitness - offset) / viability
-    legacy_sd <- as.numeric(summary$fitness_sd) / viability
-  } else {
-    center <- sum(weights * fitness)
-    legacy_mean <- fitness + g0 - center
-    legacy_sd <- as.numeric(summary$fitness_sd)
   }
+  # Match finite-time population growth, not the instantaneous arithmetic mean.
+  exponent <- dt * fitness
+  exponent[!is.finite(fitness)] <- -Inf
+  shift <- max(exponent[weights > 0])
+  growth_weights <- weights * exp(exponent - shift)
+  log_growth <- (log(sum(growth_weights)) + shift) / dt
+  growth_weights <- growth_weights / sum(growth_weights)
+  offset <- log_growth - g0
+  scale <- if (isTRUE(correct_efflux)) 1 / viability else rep(1, length(fitness))
+  legacy_mean <- (fitness - offset) * scale
+  if (is.null(fitness_covariance)) {
+    marginal_variance <- as.numeric(summary$fitness_sd)^2
+    marginal_variance[!is.finite(marginal_variance)] <- 0
+    covariance <- diag(marginal_variance, nrow(summary))
+  } else {
+    covariance <- as.matrix(fitness_covariance)
+    if (!identical(dim(covariance), c(nrow(summary), nrow(summary))) || any(!is.finite(covariance)))
+      stop("Legacy calibration covariance must be finite and aligned with summary.", call. = FALSE)
+  }
+  jacobian <- diag(nrow(summary)) - matrix(growth_weights, nrow(summary), nrow(summary), byrow = TRUE)
+  jacobian <- jacobian * scale
+  calibrated_covariance <- jacobian %*% covariance %*% t(jacobian)
+  legacy_sd <- sqrt(pmax(0, diag(calibrated_covariance)))
+  legacy_sd[!is.finite(summary$fitness_sd) | !is.finite(fitness)] <- NA_real_
 
   summary$fitness_mean_alfakR_scale <- legacy_mean
   summary$fitness_sd_alfakR_scale <- legacy_sd
   summary$conf_low_alfakR_scale <- legacy_mean - 1.959963984540054 * legacy_sd
   summary$conf_high_alfakR_scale <- legacy_mean + 1.959963984540054 * legacy_sd
+  if ("interval_valid" %in% names(summary)) {
+    invalid <- !summary$interval_valid
+    summary$conf_low_alfakR_scale[invalid] <- NA_real_
+    summary$conf_high_alfakR_scale[invalid] <- NA_real_
+  }
   summary$efflux_viability <- viability
+  attr(summary, "fitness_covariance_alfakR_scale") <- calibrated_covariance
   summary
 }
 
@@ -106,6 +130,8 @@ add_alfakR_scale_to_fit <- function(fit,
                                     legacy_weight = c("pi0", "directly_informed", "uniform")) {
   legacy_weight <- match.arg(legacy_weight)
   validate_legacy_scale_controls(n0, nb, fit$data$dt, fit$data$beta, correct_efflux)
+  if (identical(fit$local$diagnostics$forward_model, "division_process"))
+    stop("Division-process growth is calibrated during fitting: supply `population_sizes = c(N0, Nb)` instead of `alfakR_scale`.", call. = FALSE)
 
   local_weights <- resolve_legacy_scale_weights(fit$local, fit$local$summary, legacy_weight)
   global_weights <- resolve_legacy_scale_weights(fit$local, fit$global$summary, legacy_weight)
@@ -118,7 +144,8 @@ add_alfakR_scale_to_fit <- function(fit,
     beta = fit$data$beta,
     n0 = n0,
     nb = nb,
-    correct_efflux = correct_efflux
+    correct_efflux = correct_efflux,
+    fitness_covariance = fit$local$fitness_covariance
   )
   fit$global$summary <- add_alfakR_scale_to_summary(
     fit$global$summary,
@@ -128,7 +155,8 @@ add_alfakR_scale_to_fit <- function(fit,
     beta = fit$data$beta,
     n0 = n0,
     nb = nb,
-    correct_efflux = correct_efflux
+    correct_efflux = correct_efflux,
+    fitness_covariance = fit$global$fitness_covariance
   )
   fit$diagnostics$alfakR_scale <- list(
     enabled = TRUE,
@@ -137,7 +165,7 @@ add_alfakR_scale_to_fit <- function(fit,
     g0 = log(nb / n0) / fit$data$dt,
     correct_efflux = correct_efflux,
     legacy_weight = legacy_weight,
-    note = "alfak2 posterior fitness expressed on the alfakR absolute-growth scale"
+    note = "finite-time population growth calibration; covariance conditional on pi0 weights and supplied population sizes"
   )
   fit
 }

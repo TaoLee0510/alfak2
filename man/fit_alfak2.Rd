@@ -18,10 +18,9 @@ fit_alfak2(
   lambda_e_grid = c(0.05, 0.25, 1),
   sigma_obs_grid = c(0.02, 0.05, 0.1),
   graph_edge_weight = c("mutation", "unit", "normalized"),
-  extrapolation_method = c("graph_gaussian_baseline",
-    "edge_effect_empirical_bayes", "edge_effect_interaction_path_ensemble",
-    "kronecker_or_graph_trend_filtering", "local_NNGP_or_GPnn",
-    "delta_tree_ensemble", "tabpfn_nearfield_feature_model",
+  extrapolation_method = c("graph_gaussian_baseline", "edge_effect_empirical_bayes",
+    "edge_effect_interaction_path_ensemble", "kronecker_or_graph_trend_filtering",
+    "local_NNGP_or_GPnn", "delta_tree_ensemble", "tabpfn_nearfield_feature_model",
     "truncated_nearfield_gmrf", "local_polynomial_stencil"),
   max_prediction_distance = 2,
   extrapolation_control = list(),
@@ -46,6 +45,11 @@ fit_alfak2(
   nb = NULL,
   correct_efflux = FALSE,
   legacy_weight = c("pi0", "directly_informed", "uniform"),
+  pipeline = c("two_layer", "joint_count"),
+  joint_control = list(),
+  target_karyotypes = NULL,
+  forward_tolerance = 1e-05,
+  forward_max_refinements = 3L,
   ...
 )
 }
@@ -145,6 +149,28 @@ missegregation-efflux viability correction to the legacy-scale columns.}
 \code{"pi0"} uses the local TMB posterior initial frequencies, \code{"directly_informed"}
 uses observed graph nodes, and \code{"uniform"} weights all finite summary rows
 equally.}
+
+\item{pipeline}{\code{"two_layer"} retains separate local and extrapolation fits;
+\code{"joint_count"} fits a single count likelihood and structured landscape
+prior on the entire bounded target graph. The joint model is an explicitly
+selectable candidate pending independent all-distance validation.}
+
+\item{joint_control}{Named prior controls passed to the joint landscape.
+Experimental \code{interaction_support = "observed_nullspace"} separates pair
+directions that vanish at observed design rows; this is not a likelihood
+identifiability test. \code{unidentified_interaction_sd} controls their prior.
+Optional \code{prior_components} is a list of prior-control lists, with
+\code{model_prior} supplying component weights before conditional evidence
+updating. It cannot be combined with \code{model_scales}.}
+
+\item{target_karyotypes}{Optional explicit finite query states, as labels or a
+copy-number matrix. They define the global domain together with observed
+nodes, permitting distant queries without complete shell enumeration.}
+
+\item{forward_tolerance}{Joint division-model step-halving tolerance on both
+maximum frequency change and log total growth change.}
+
+\item{forward_max_refinements}{Maximum joint forward step halvings and refits.}
 
 \item{...}{Passed to \code{fit_local_posterior()}.}
 }

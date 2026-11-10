@@ -80,7 +80,8 @@ prepare_extrapolation_anchors <- function(local_fit,
                                           anchor_count_reference = NULL,
                                           anchor_count_power = 1,
                                           anchor_min_effective_count = 0,
-                                          anchor_exclude = character()) {
+                                          anchor_exclude = character(),
+                                          anchor_covariance = NULL) {
   if (!inherits(local_fit, "alfak2_local_fit")) {
     stop("`local_fit` must be an alfak2_local_fit object.", call. = FALSE)
   }
@@ -150,7 +151,7 @@ prepare_extrapolation_anchors <- function(local_fit,
   }
   anchor_var_multiplier <- covariance_mult * count_mult
   anchor_var <- anchor_var_base * anchor_var_multiplier
-  data.frame(
+  out <- data.frame(
     node_id = as.integer(anchor_match[keep]),
     karyotype = as.character(local_fit$summary$karyotype[keep]),
     mean = as.numeric(local_fit$summary$fitness_mean[keep]),
@@ -165,6 +166,17 @@ prepare_extrapolation_anchors <- function(local_fit,
     anchor_count_for_weight = anchor_count_for_weight,
     stringsAsFactors = FALSE
   )
+  attr(out, "fitness_covariance") <- resolve_anchor_covariance(
+    local_fit, keep, anchor_var_multiplier, anchor_covariance
+  )
+  out
+}
+
+extrapolation_anchor_covariance <- function(anchors, indices = seq_len(nrow(anchors))) {
+  covariance <- attr(anchors, "fitness_covariance")
+  if (is.null(covariance)) return(diag(as.numeric(anchors$variance[indices]), length(indices)))
+  labels <- as.character(anchors$karyotype[indices])
+  covariance[labels, labels, drop = FALSE]
 }
 
 graph_edge_table <- function(graph, graph_edge_weight = c("mutation", "unit", "normalized")) {
@@ -434,13 +446,20 @@ nearfield_local_edge_effect_fit <- function(local_fit,
                                             anchors,
                                             graph_edge_weight = c("mutation", "unit", "normalized"),
                                             ridge_delta = 4,
+                                            preserve_local_predictions = FALSE,
                                             ...) {
   graph_edge_weight <- match.arg(graph_edge_weight)
   started <- proc.time()[["elapsed"]]
   method <- "edge_effect_empirical_bayes"
   warnings <- character()
   summary <- extrapolation_empty_summary(graph, method, max_prediction_distance)
-  summary <- copy_local_summary_predictions(summary, local_fit, graph, max_prediction_distance)
+  if (!is.logical(preserve_local_predictions) || length(preserve_local_predictions) != 1L ||
+      is.na(preserve_local_predictions)) stop("`preserve_local_predictions` must be TRUE or FALSE.", call. = FALSE)
+  summary <- if (isTRUE(preserve_local_predictions)) {
+    copy_local_summary_predictions(summary, local_fit, graph, max_prediction_distance)
+  } else {
+    fill_direct_anchor_predictions(summary, anchors[anchors$support_distance == 0L, , drop = FALSE])
+  }
   missing <- which(as.integer(graph$support_distance) <= max_prediction_distance &
                      !is.finite(summary$fitness_mean))
   effects <- fit_edge_effects(
@@ -466,7 +485,8 @@ nearfield_local_edge_effect_fit <- function(local_fit,
     summary$prediction_status[ok] <- "local_edge_effect"
   }
   summary <- extrapolation_add_intervals(summary)
-  hp <- list(graph_edge_weight = graph_edge_weight, ridge_delta = ridge_delta)
+  hp <- list(graph_edge_weight = graph_edge_weight, ridge_delta = ridge_delta,
+             preserve_local_predictions = preserve_local_predictions)
   diagnostics <- build_extrapolation_diagnostics(
     method, max_prediction_distance, anchors, summary, hp,
     tuning_grid = data.frame(parameter = "ridge_delta", value = ridge_delta),
@@ -596,12 +616,25 @@ fit_local_polynomial_target <- function(target,
   penalty <- diag(ridge, ncol(Xw))
   penalty[1, 1] <- 0
   beta <- tryCatch(solve(crossprod(Xw) + penalty, crossprod(Xw, yw)), error = function(e) NULL)
-  if (is.null(beta)) return(c(mean = stats::weighted.mean(y, w), variance = stats::weighted.mean(var, w), n_train = length(train)))
+  covariance <- extrapolation_anchor_covariance(anchors, train)
+  if (is.null(beta)) {
+    prediction_weights <- w / sum(w)
+    return(c(mean = sum(prediction_weights * y),
+             variance = as.numeric(crossprod(prediction_weights, covariance %*% prediction_weights)),
+             n_train = length(train)))
+  }
   residual <- as.numeric(y - X %*% beta)
-  rv <- if (length(residual) >= 2L) stats::weighted.mean(residual^2, w) else stats::weighted.mean(var, w)
-  if (!is.finite(rv) || rv <= 0) rv <- stats::weighted.mean(var, w)
-  leverage_var <- tryCatch(solve(crossprod(Xw) + penalty)[1, 1], error = function(e) NA_real_)
-  pred_var <- rv * if (is.finite(leverage_var) && leverage_var > 0) leverage_var else 1 / max(1, sum(w))
+  # The intercept is a linear function of the noisy anchors. Propagate their
+  # covariance once; multiplying by a second residual variance gives wrong units.
+  inverse <- solve(crossprod(Xw) + penalty)
+  smoother <- inverse %*% t(X * w)
+  prediction_weights <- as.numeric(smoother[1L, ])
+  measurement_var <- as.numeric(crossprod(prediction_weights, covariance %*% prediction_weights))
+  residual_operator <- diag(length(train)) - X %*% smoother
+  expected_noise <- sum(w * diag(residual_operator %*% covariance %*% t(residual_operator))) / sum(w)
+  excess <- max(0, stats::weighted.mean(residual^2, w) - expected_noise)
+  # Positive model discrepancy is predictive error in addition to parameter error.
+  pred_var <- measurement_var + excess * (1 + sum(prediction_weights^2))
   c(mean = as.numeric(beta[1]), variance = pmax(pred_var, .Machine$double.eps), n_train = length(train))
 }
 
@@ -818,10 +851,10 @@ delta_feature_vector <- function(parent_node, target_node, graph, parent_anchor,
     edge_weight = edge_weight,
     local_anchor_density = NA_real_,
     candidate_parent_count = NA_real_,
-    setNames(px, paste0("parent_cn_", seq_along(px))),
-    setNames(tx, paste0("target_cn_", seq_along(tx))),
-    setNames(delta, paste0("delta_cn_", seq_along(delta))),
-    setNames(abs(delta), paste0("abs_delta_cn_", seq_along(delta)))
+    stats::setNames(px, paste0("parent_cn_", seq_along(px))),
+    stats::setNames(tx, paste0("target_cn_", seq_along(tx))),
+    stats::setNames(delta, paste0("delta_cn_", seq_along(delta))),
+    stats::setNames(abs(delta), paste0("abs_delta_cn_", seq_along(delta)))
   )
 }
 
@@ -917,14 +950,17 @@ delta_tabular_predict <- function(model, x) {
   ridge_delta_predict(model$model, x)
 }
 
-delta_model_predict_targets <- function(graph, anchors, model, max_prediction_distance, method_status) {
+delta_model_predict_targets <- function(graph, anchors, model, max_prediction_distance, method_status,
+                                         target_nodes = NULL) {
   out_mean <- rep(NA_real_, length(graph$labels))
   out_var <- rep(NA_real_, length(graph$labels))
   status <- rep("missing", length(graph$labels))
   out_mean[anchors$node_id] <- anchors$mean
   out_var[anchors$node_id] <- anchors$variance
   status[anchors$node_id] <- "anchor"
-  for (target in which(as.integer(graph$support_distance) > 0L & as.integer(graph$support_distance) <= max_prediction_distance)) {
+  if (is.null(target_nodes)) target_nodes <- which(as.integer(graph$support_distance) > 0L &
+                                                    as.integer(graph$support_distance) <= max_prediction_distance)
+  for (target in target_nodes) {
     amat <- graph$karyotypes[anchors$node_id, , drop = FALSE]
     d <- anchor_lattice_distance(graph$karyotypes[target, ], amat)
     parents <- which(d >= 1 & d <= max_prediction_distance)
@@ -943,6 +979,36 @@ delta_model_predict_targets <- function(graph, anchors, model, max_prediction_di
   list(mean = out_mean, variance = out_var, status = status)
 }
 
+delta_anchor_node_cv <- function(graph, anchors, backend, ridge_lambda, max_prediction_distance,
+                                 max_cv_anchors = 50L) {
+  validate_scalar(as.numeric(max_cv_anchors), "max_cv_anchors", lower = 0)
+  n <- nrow(anchors)
+  held <- if (n >= 3L && max_cv_anchors > 0) {
+    unique(as.integer(round(seq(1, n, length.out = min(n, as.integer(max_cv_anchors))))))
+  } else integer()
+  pred <- truth <- numeric()
+  for (hold in held) {
+    training_anchors <- anchors[-hold, , drop = FALSE]
+    # Removing the node before constructing pairs excludes every training pair
+    # containing its fitness, rather than randomly splitting dependent edges.
+    train <- delta_training_table(graph, training_anchors, max_path_length = 2)
+    model <- delta_tabular_fit(train$x, train$y, backend, ridge_lambda)
+    prediction <- delta_model_predict_targets(
+      graph, training_anchors, model, max_prediction_distance, "heldout_node",
+      target_nodes = anchors$node_id[[hold]]
+    )$mean[anchors$node_id[[hold]]]
+    if (is.finite(prediction)) {
+      pred <- c(pred, prediction)
+      truth <- c(truth, anchors$mean[[hold]])
+    }
+  }
+  list(rmse = if (length(pred)) sqrt(mean((pred - truth)^2)) else NA_real_,
+       mae = if (length(pred)) mean(abs(pred - truth)) else NA_real_,
+       evaluated = length(pred), skipped = length(held) - length(pred),
+       scope = "node_loo_conditional_on_local_fit",
+       status = if (length(pred)) "ok" else if (!max_cv_anchors) "disabled" else "insufficient_evaluable_nodes")
+}
+
 tree_backend_status <- function() {
   candidates <- c("xgboost", "lightgbm", "catboost", "xbart", "bart", "grf", "ranger", "randomForest", "glmnet")
   available <- vapply(candidates, requireNamespace, logical(1), quietly = TRUE)
@@ -957,6 +1023,7 @@ delta_tree_ensemble_fit <- function(local_fit,
                                     graph_edge_weight = c("mutation", "unit", "normalized"),
                                     ridge_lambda = 1,
                                     bootstrap_replicates = 0L,
+                                    max_cv_anchors = 50L,
                                     force_ridge = FALSE,
                                     method_name = "delta_tree_ensemble",
                                     dependency_status = NULL,
@@ -964,8 +1031,11 @@ delta_tree_ensemble_fit <- function(local_fit,
   started <- proc.time()[["elapsed"]]
   graph_edge_weight <- match.arg(graph_edge_weight)
   method <- method_name
+  if (length(bootstrap_replicates) != 1L || !is.finite(bootstrap_replicates) || bootstrap_replicates != 0L) {
+    stop("`bootstrap_replicates` is not implemented for this adapter; use 0 and an end-to-end bootstrap.", call. = FALSE)
+  }
   train <- delta_training_table(graph, anchors, max_path_length = 2)
-  backend_status <- tree_backend_status()
+  backend_status <- if (isTRUE(force_ridge)) list(backend = "ridge_fallback", available = logical()) else tree_backend_status()
   backend <- if (isTRUE(force_ridge)) "ridge_fallback" else backend_status$backend
   model <- delta_tabular_fit(train$x, train$y, backend = backend, ridge_lambda = ridge_lambda)
   method_status <- if (identical(model$model_type, "xgboost")) "delta_tree_xgboost" else "delta_tree_ridge"
@@ -978,10 +1048,10 @@ delta_tree_ensemble_fit <- function(local_fit,
   summary <- extrapolation_add_intervals(summary)
   hp <- list(backend = backend, model_type = model$model_type, ridge_lambda = ridge_lambda, graph_edge_weight = graph_edge_weight)
   grid <- data.frame(parameter = names(hp), value = as.character(unlist(hp, use.names = FALSE)), stringsAsFactors = FALSE)
-  cv_pred <- if (nrow(train$x)) delta_tabular_predict(model, train$x) else numeric(0)
-  abs_pred <- cv_pred
-  cv_rmse <- if (length(abs_pred)) sqrt(mean((abs_pred - train$y)^2)) else NA_real_
-  cv_mae <- if (length(abs_pred)) mean(abs(abs_pred - train$y)) else NA_real_
+  training_pred <- if (nrow(train$x)) delta_tabular_predict(model, train$x) else numeric(0)
+  training_rmse <- if (length(training_pred)) sqrt(mean((training_pred - train$y)^2)) else NA_real_
+  training_mae <- if (length(training_pred)) mean(abs(training_pred - train$y)) else NA_real_
+  cv <- delta_anchor_node_cv(graph, anchors, backend, ridge_lambda, max_prediction_distance, max_cv_anchors)
   diagnostics <- build_extrapolation_diagnostics(
     method, max_prediction_distance, anchors, summary, hp, grid, "ok",
     proc.time()[["elapsed"]] - started,
@@ -1001,9 +1071,16 @@ delta_tree_ensemble_fit <- function(local_fit,
       backend_available = backend_status$available,
       n_training_edges = length(train$y),
       n_features = if (length(dim(train$x))) ncol(train$x) else 0L,
-      cv_score = cv_rmse,
-      anchor_cv_absolute_f_rmse = cv_rmse,
-      anchor_cv_absolute_f_mae = cv_mae,
+      cv_score = cv$rmse,
+      cv_score_type = "node_loo_rmse",
+      cv_scope = cv$scope,
+      cv_status = cv$status,
+      cv_evaluated = cv$evaluated,
+      cv_skipped = cv$skipped,
+      anchor_cv_absolute_f_rmse = cv$rmse,
+      anchor_cv_absolute_f_mae = cv$mae,
+      training_delta_rmse = training_rmse,
+      training_delta_mae = training_mae,
       best_params = model$best_params,
       bootstrap_replicates = as.integer(bootstrap_replicates),
       fallback_status = if (identical(model$model_type, "xgboost")) "none" else if (identical(backend, "ridge_fallback")) "ridge_fallback" else "ridge_fallback_after_backend_failure"
@@ -1027,7 +1104,7 @@ tabpfn_nearfield_feature_model_fit <- function(local_fit,
       tabpfn_version <- tryCatch(as.character(reticulate::py_get_attr(reticulate::import("tabpfn"), "__version__")), error = function(e) NA_character_)
     }
   }
-  dependency_status <- if (isTRUE(tabpfn_available)) "tabpfn_available_ridge_adapter" else "tabpfn_unavailable_used_tree_fallback"
+  dependency_status <- if (isTRUE(tabpfn_available)) "tabpfn_available_not_used_tree_fallback" else "tabpfn_unavailable_used_tree_fallback"
   fit <- delta_tree_ensemble_fit(
     local_fit = local_fit,
     graph = graph,
@@ -1042,10 +1119,8 @@ tabpfn_nearfield_feature_model_fit <- function(local_fit,
   fit$diagnostics$python_available <- python_available
   fit$diagnostics$tabpfn_available <- tabpfn_available
   fit$diagnostics$tabpfn_version <- tabpfn_version
-  fit$diagnostics$fallback_used <- !isTRUE(tabpfn_available)
-  if (!isTRUE(tabpfn_available)) {
-    fit$diagnostics$fallback_status <- "tree_fallback_used"
-  }
+  fit$diagnostics$fallback_used <- TRUE
+  fit$diagnostics$fallback_status <- "tree_fallback_used"
   fit
 }
 
@@ -1262,6 +1337,8 @@ truncated_nearfield_gmrf_fit <- function(local_fit,
                                          anchor_min_effective_count = 0,
                                          anchor_exclude = character(),
                                          compute_sd = TRUE,
+                                         anchor_covariance = NULL,
+                                         compute_covariance = FALSE,
                                          ...) {
   started <- proc.time()[["elapsed"]]
   method <- "truncated_nearfield_gmrf"
@@ -1281,7 +1358,9 @@ truncated_nearfield_gmrf_fit <- function(local_fit,
     anchor_count_power = anchor_count_power,
     anchor_min_effective_count = anchor_min_effective_count,
     anchor_exclude = anchor_exclude,
-    compute_sd = compute_sd
+    compute_sd = compute_sd,
+    anchor_covariance = anchor_covariance,
+    compute_covariance = compute_covariance
   )
   summary <- extrapolation_empty_summary(graph, method, max_prediction_distance)
   summary$fitness_mean[scoped] <- subfit$summary$fitness_mean
@@ -1305,13 +1384,20 @@ truncated_nearfield_gmrf_fit <- function(local_fit,
         lambda_e = hp$lambda_e,
         sigma_obs = hp$sigma_obs,
         cv_score = hp$cv_score,
-        anchor_cv_rmse = hp$cv_score,
+        anchor_cv_nlpd = hp$cv_score,
+        anchor_cv_rmse = NA_real_,
         anchor_cv_mae = NA_real_,
         factorization_status = subfit$diagnostics$factorization_status
       )
     )
   )
-  finish_extrapolation_fit(graph, summary, subfit$anchors, hp, subfit$tuning_grid, diagnostics)
+  out <- finish_extrapolation_fit(graph, summary, subfit$anchors, hp, subfit$tuning_grid, diagnostics)
+  if (!is.null(subfit$fitness_covariance)) {
+    out$fitness_covariance <- subfit$fitness_covariance
+    out$fitness_covariance_labels <- as.character(subgraph$labels)
+    out$diagnostics$fitness_covariance_scope <- "reported_nearfield_nodes_only"
+  }
+  out
 }
 
 wrap_graph_gaussian_fit <- function(local_fit,
@@ -1340,6 +1426,7 @@ wrap_graph_gaussian_fit <- function(local_fit,
 
 #' Fit a second-layer extrapolation model
 #'
+#' @inheritParams fit_graph_posterior
 #' @param local_fit An `alfak2_local_fit` object.
 #' @param graph Optional global graph. Defaults to `local_fit$graph`.
 #' @param method Extrapolation method.
@@ -1383,6 +1470,8 @@ fit_extrapolation_layer <- function(local_fit,
                                     anchor_min_effective_count = 0,
                                     anchor_exclude = character(),
                                     compute_sd = TRUE,
+                                    anchor_covariance = NULL,
+                                    compute_covariance = FALSE,
                                     ...) {
   if (!inherits(local_fit, "alfak2_local_fit")) {
     stop("`local_fit` must be an alfak2_local_fit object.", call. = FALSE)
@@ -1409,6 +1498,8 @@ fit_extrapolation_layer <- function(local_fit,
       anchor_min_effective_count = anchor_min_effective_count,
       anchor_exclude = anchor_exclude,
       compute_sd = compute_sd,
+      anchor_covariance = anchor_covariance,
+      compute_covariance = compute_covariance,
       ...
     ))
   }
@@ -1420,7 +1511,8 @@ fit_extrapolation_layer <- function(local_fit,
     anchor_count_reference = anchor_count_reference,
     anchor_count_power = anchor_count_power,
     anchor_min_effective_count = anchor_min_effective_count,
-    anchor_exclude = anchor_exclude
+    anchor_exclude = anchor_exclude,
+    anchor_covariance = anchor_covariance
   )
   switch(
     method,
@@ -1495,6 +1587,8 @@ fit_extrapolation_layer <- function(local_fit,
       anchor_min_effective_count = anchor_min_effective_count,
       anchor_exclude = anchor_exclude,
       compute_sd = compute_sd,
+      anchor_covariance = anchor_covariance,
+      compute_covariance = compute_covariance,
       ...
     )
   )

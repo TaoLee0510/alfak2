@@ -13,8 +13,8 @@ Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
 // alfak2_graph_posterior_cpp
-Rcpp::List alfak2_graph_posterior_cpp(Rcpp::IntegerMatrix karyotypes, Rcpp::IntegerVector edge_from, Rcpp::IntegerVector edge_to, Rcpp::NumericVector edge_weight, Rcpp::IntegerVector anchor_index, Rcpp::NumericVector anchor_mean, Rcpp::NumericVector anchor_var, Rcpp::NumericVector lambda_l_grid, Rcpp::NumericVector lambda_e_grid, Rcpp::NumericVector sigma_obs_grid, double eps, bool compute_variance);
-RcppExport SEXP _alfak2_alfak2_graph_posterior_cpp(SEXP karyotypesSEXP, SEXP edge_fromSEXP, SEXP edge_toSEXP, SEXP edge_weightSEXP, SEXP anchor_indexSEXP, SEXP anchor_meanSEXP, SEXP anchor_varSEXP, SEXP lambda_l_gridSEXP, SEXP lambda_e_gridSEXP, SEXP sigma_obs_gridSEXP, SEXP epsSEXP, SEXP compute_varianceSEXP) {
+Rcpp::List alfak2_graph_posterior_cpp(Rcpp::IntegerMatrix karyotypes, Rcpp::IntegerVector edge_from, Rcpp::IntegerVector edge_to, Rcpp::NumericVector edge_weight, Rcpp::IntegerVector anchor_index, Rcpp::NumericVector anchor_mean, Rcpp::NumericVector anchor_var, Rcpp::NumericVector lambda_l_grid, Rcpp::NumericVector lambda_e_grid, Rcpp::NumericVector sigma_obs_grid, double eps, bool compute_variance, Rcpp::Nullable<Rcpp::NumericMatrix> anchor_covariance, bool compute_covariance);
+RcppExport SEXP _alfak2_alfak2_graph_posterior_cpp(SEXP karyotypesSEXP, SEXP edge_fromSEXP, SEXP edge_toSEXP, SEXP edge_weightSEXP, SEXP anchor_indexSEXP, SEXP anchor_meanSEXP, SEXP anchor_varSEXP, SEXP lambda_l_gridSEXP, SEXP lambda_e_gridSEXP, SEXP sigma_obs_gridSEXP, SEXP epsSEXP, SEXP compute_varianceSEXP, SEXP anchor_covarianceSEXP, SEXP compute_covarianceSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
@@ -30,7 +30,9 @@ BEGIN_RCPP
     Rcpp::traits::input_parameter< Rcpp::NumericVector >::type sigma_obs_grid(sigma_obs_gridSEXP);
     Rcpp::traits::input_parameter< double >::type eps(epsSEXP);
     Rcpp::traits::input_parameter< bool >::type compute_variance(compute_varianceSEXP);
-    rcpp_result_gen = Rcpp::wrap(alfak2_graph_posterior_cpp(karyotypes, edge_from, edge_to, edge_weight, anchor_index, anchor_mean, anchor_var, lambda_l_grid, lambda_e_grid, sigma_obs_grid, eps, compute_variance));
+    Rcpp::traits::input_parameter< Rcpp::Nullable<Rcpp::NumericMatrix> >::type anchor_covariance(anchor_covarianceSEXP);
+    Rcpp::traits::input_parameter< bool >::type compute_covariance(compute_covarianceSEXP);
+    rcpp_result_gen = Rcpp::wrap(alfak2_graph_posterior_cpp(karyotypes, edge_from, edge_to, edge_weight, anchor_index, anchor_mean, anchor_var, lambda_l_grid, lambda_e_grid, sigma_obs_grid, eps, compute_variance, anchor_covariance, compute_covariance));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -111,27 +113,29 @@ BEGIN_RCPP
 END_RCPP
 }
 // alfak2_transition_operator_cpp
-Rcpp::List alfak2_transition_operator_cpp(Rcpp::IntegerMatrix karyotypes, double beta, std::string transition_kernel);
-RcppExport SEXP _alfak2_alfak2_transition_operator_cpp(SEXP karyotypesSEXP, SEXP betaSEXP, SEXP transition_kernelSEXP) {
+Rcpp::List alfak2_transition_operator_cpp(Rcpp::IntegerMatrix karyotypes, double beta, std::string transition_kernel, bool division_process, double probability_cutoff);
+RcppExport SEXP _alfak2_alfak2_transition_operator_cpp(SEXP karyotypesSEXP, SEXP betaSEXP, SEXP transition_kernelSEXP, SEXP division_processSEXP, SEXP probability_cutoffSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< Rcpp::IntegerMatrix >::type karyotypes(karyotypesSEXP);
     Rcpp::traits::input_parameter< double >::type beta(betaSEXP);
     Rcpp::traits::input_parameter< std::string >::type transition_kernel(transition_kernelSEXP);
-    rcpp_result_gen = Rcpp::wrap(alfak2_transition_operator_cpp(karyotypes, beta, transition_kernel));
+    Rcpp::traits::input_parameter< bool >::type division_process(division_processSEXP);
+    Rcpp::traits::input_parameter< double >::type probability_cutoff(probability_cutoffSEXP);
+    rcpp_result_gen = Rcpp::wrap(alfak2_transition_operator_cpp(karyotypes, beta, transition_kernel, division_process, probability_cutoff));
     return rcpp_result_gen;
 END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
-    {"_alfak2_alfak2_graph_posterior_cpp", (DL_FUNC) &_alfak2_alfak2_graph_posterior_cpp, 12},
+    {"_alfak2_alfak2_graph_posterior_cpp", (DL_FUNC) &_alfak2_alfak2_graph_posterior_cpp, 14},
     {"_alfak2_alfak2_parse_karyotypes_cpp", (DL_FUNC) &_alfak2_alfak2_parse_karyotypes_cpp, 1},
     {"_alfak2_alfak2_stringify_karyotypes_cpp", (DL_FUNC) &_alfak2_alfak2_stringify_karyotypes_cpp, 1},
     {"_alfak2_alfak2_build_graph_cpp", (DL_FUNC) &_alfak2_alfak2_build_graph_cpp, 9},
     {"_alfak2_alfak2_simulate_counts_cpp", (DL_FUNC) &_alfak2_alfak2_simulate_counts_cpp, 12},
     {"_alfak2_alfak2_pij_cpp", (DL_FUNC) &_alfak2_alfak2_pij_cpp, 3},
-    {"_alfak2_alfak2_transition_operator_cpp", (DL_FUNC) &_alfak2_alfak2_transition_operator_cpp, 3},
+    {"_alfak2_alfak2_transition_operator_cpp", (DL_FUNC) &_alfak2_alfak2_transition_operator_cpp, 5},
     {NULL, NULL, 0}
 };
 

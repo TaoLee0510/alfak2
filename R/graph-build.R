@@ -55,6 +55,9 @@ build_karyotype_graph <- function(x,
     if (is.null(beta)) beta <- 0.01
   }
   validate_scalar(beta, "beta", lower = 0, upper = 1)
+  max_nodes <- validate_grf_integer(max_nodes, "max_nodes", lower = 1L)
+  if (length(labels) > max_nodes)
+    stop("Observed and explicit target nodes exceed `max_nodes` before graph expansion.", call. = FALSE)
   graph <- alfak2_build_graph_cpp(
     labels = labels,
     y0 = as.integer(y0),
@@ -67,4 +70,39 @@ build_karyotype_graph <- function(x,
     max_nodes = as.integer(max_nodes)
   )
   new_alfak2_graph(graph)
+}
+
+# A finite query domain can include distant states without enumerating every
+# intervening shell of a high-dimensional lattice. Missing intermediate states
+# remain computational outflow in division dynamics and are never folded back.
+build_explicit_target_graph <- function(data, target_karyotypes, min_cn, max_cn, max_nodes,
+                                        transition_kernel = "exact") {
+  targets <- if (is.character(target_karyotypes)) target_karyotypes else
+    format_karyotypes(as.matrix(target_karyotypes))
+  targets <- unique(as.character(targets))
+  if (!length(targets)) stop("`target_karyotypes` must contain at least one state.", call. = FALSE)
+  parsed <- parse_karyotypes(unique(c(data$labels, targets)))
+  if (any(parsed < min_cn | parsed > max_cn))
+    stop("Explicit targets must be within the copy-number bounds.", call. = FALSE)
+  augmented <- data
+  holdout <- augmented$metadata$holdout_mode
+  if (is.null(holdout)) holdout <- list()
+  holdout$labels <- unique(c(holdout$labels, targets))
+  augmented$metadata$holdout_mode <- holdout
+  graph <- build_karyotype_graph(augmented, shell_depth = 0, min_cn = min_cn,
+    max_cn = max_cn, max_nodes = max_nodes, transition_kernel = transition_kernel)
+  weights <- data$metadata$observation_weights
+  effective <- if (is.null(weights)) rowSums(data$counts) else
+    rowSums(data$counts * validate_observation_weights(weights, data$counts))
+  seeds <- parse_karyotypes(data$labels[effective > 0])
+  if (!nrow(seeds)) stop("Explicit target graph requires a positive effective-count seed.", call. = FALSE)
+  distance <- rep(Inf, length(graph$labels))
+  for (i in seq_len(nrow(seeds)))
+    distance <- pmin(distance, rowSums(abs(sweep(graph$karyotypes, 2L, seeds[i, ], "-"))))
+  graph$support_distance <- as.integer(distance)
+  graph$support_tier <- ifelse(distance == 0, "directly_informed",
+    ifelse(distance == 1, "local_borrowed", ifelse(distance == 2, "weakly_supported", "graph_borrowed")))
+  graph$domain_mode <- "explicit_targets"
+  graph$target_labels <- targets
+  graph
 }

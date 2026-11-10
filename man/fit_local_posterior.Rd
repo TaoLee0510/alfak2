@@ -11,7 +11,15 @@ fit_local_posterior(
   dm_concentration = 200,
   observation_weight_mode = c("likelihood", "fractional_count"),
   control = list(eval.max = 500, iter.max = 500),
-  gradient_tolerance = Inf,
+  inner_control = list(maxit = 1000, tol = 1e-10),
+  conditional_warmstart = c("auto", "none", "always"),
+  inference_method = c("laplace", "joint_map"),
+  forward_model = c("selection_transport", "division_process"),
+  forward_step = 0.1,
+  population_sizes = NULL,
+  population_log_growth_sd = 0.1,
+  oracle_initial_probability = NULL,
+  gradient_tolerance = 0.001,
   retry_on_untrusted_covariance = TRUE,
   retry_control = list(eval.max = 2000, iter.max = 2000),
   eta_prior_sd = 5,
@@ -32,9 +40,10 @@ fit_local_posterior(
   fixed_sigma_neighbor = NA_real_,
   fixed_tau_group = NA_real_,
   sdreport_mode = c("all_f_current", "none", "direct_f_only",
-    "direct_and_local_borrowed_f", "pi0_pi1_only"),
+    "direct_and_local_borrowed_f", "pi0_pi1_only", "fitness_only"),
   initial_jitter_sd = 0,
-  initial_seed = NULL
+  initial_seed = NULL,
+  structured_prior = NULL
 )
 }
 \arguments{
@@ -54,6 +63,38 @@ score that preserves the original count scale; \code{"fractional_count"} uses th
 historical fractional-count pseudo-likelihood.}
 
 \item{control}{List passed to \code{stats::nlminb}.}
+
+\item{inner_control}{TMB inner Newton controls for Laplace random-effect
+optimization. The default preserves a strict \code{tol = 1e-10}; reducing
+\code{maxit} does not bypass conditional-gradient validity checks.}
+
+\item{conditional_warmstart}{\code{"auto"} uses first-derivative conditional
+optimization to initialize structured Laplace fits with at least 50 nodes.
+\code{"always"} allows smaller fixed-scale problems; \code{"none"} disables it.
+Hierarchical scales must all be fixed for this initialization to be used.}
+
+\item{inference_method}{\code{"laplace"} marginalizes initial abundances, fitness,
+and context effects while estimating hierarchical scales. \code{"joint_map"}
+retains the legacy joint optimization for controlled comparisons.}
+
+\item{forward_model}{Evolution model passed to the compiled likelihood.
+\code{"division_process"} uses repeated division-driven transport;
+\code{"selection_transport"} retains the historical endpoint transport model.}
+
+\item{forward_step}{Maximum numerical time step for the division-process
+solver. Decrease this value to check numerical convergence.}
+
+\item{population_sizes}{Optional positive numeric pair \code{c(N0, Nb)} containing
+actual initial and final population sizes, not the numbers of sampled cells.}
+
+\item{population_log_growth_sd}{Standard deviation of the observation error
+for \code{log(Nb/N0)}, used only when \code{population_sizes} is supplied.}
+
+\item{oracle_initial_probability}{Diagnostic-only named initial probability
+vector on every graph node, including true zeros. When supplied, initial
+frequencies are fixed exactly rather than estimated from pseudo-counts.
+Results use additional oracle information and are not a fair algorithm
+comparison against ordinary count-only fits.}
 
 \item{gradient_tolerance}{Maximum absolute gradient tolerated before TMB
 covariance is marked untrusted. Set to \code{Inf} to rely on optimizer
@@ -77,36 +118,46 @@ initial log-abundances.}
 \item{eta_distance_penalty}{Additional negative prior-mean shift per support
 shell beyond the first borrowed shell.}
 
-\item{local_parameterization}{Local TMB fitness parameterization.}
+\item{local_parameterization}{Local TMB fitness parameterization. \code{"f"} uses
+per-time fitness directly. \code{"g_equivalent"} optimizes \code{g = dt * f} but
+reports fitness on the original per-time scale.}
 
 \item{return_optimizer_diagnostics}{Whether to attach gradient block and top
-node diagnostics.}
+node diagnostics to \code{diagnostics}.}
 
-\item{return_tmb_objects}{Whether to attach TMB optimizer objects.}
+\item{return_tmb_objects}{Whether to attach TMB optimizer objects to the
+returned fit. Defaults to \code{FALSE} because these objects are large.}
 
 \item{support_tier_f_sd_multiplier}{Optional named multiplier for local
 fitness prior standard deviations by support tier.}
 
-\item{borrowed_residual_sd}{Optional residual prior standard deviation for
-borrowed nodes.}
+\item{borrowed_residual_sd}{Optional extra residual prior standard deviation
+around parent-propagated means for borrowed nodes.}
 
-\item{weakly_supported_residual_sd}{Optional residual prior standard deviation
-for weakly supported nodes.}
+\item{weakly_supported_residual_sd}{Optional extra residual prior standard
+deviation for weakly supported nodes.}
 
-\item{local_centering}{Optional fitness centering penalty mode.}
+\item{local_centering}{Optional strong fitness centering penalty for local
+identifiability probes.}
 
-\item{local_centering_weight}{Penalty weight for local centering.}
+\item{local_centering_weight}{Penalty weight used when \code{local_centering} is
+not \code{"none"}.}
 
 \item{local_centering_weight_mode}{Weighting scheme for centering penalties.}
 
 \item{fixed_sigma_anchor, fixed_sigma_neighbor, fixed_tau_group}{Optional fixed
-local scale values.}
+local scale values. \code{NA} keeps the corresponding scale estimated.}
 
-\item{sdreport_mode}{TMB ADREPORT selection used for covariance diagnostics.}
+\item{sdreport_mode}{TMB ADREPORT selection used for covariance diagnostics.
+Defaults to the historical all-fitness plus probability reports.}
 
-\item{initial_jitter_sd}{Optional multistart jitter standard deviation.}
+\item{initial_jitter_sd}{Optional standard deviation for benchmark/debug
+multistart jitter applied to eta, fitness, and context-effect initial values.}
 
 \item{initial_seed}{Optional seed used when \code{initial_jitter_sd > 0}.}
+
+\item{structured_prior}{Internal joint-landscape prior specification. Ordinary
+local fits leave this as \code{NULL}.}
 }
 \value{
 An \code{alfak2_local_fit} object.

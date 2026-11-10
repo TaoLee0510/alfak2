@@ -1,26 +1,6 @@
-test_that("calibration gate reports failure and valid-shape states", {
-  calibration_script <- file.path(getwd(), "benchmark", "scr", "run_grf_alfak2_parameter_calibration.R")
-  if (!file.exists(calibration_script)) {
-    calibration_script <- file.path(getwd(), "..", "..", "benchmark", "scr", "run_grf_alfak2_parameter_calibration.R")
-  }
-  source(normalizePath(calibration_script, mustWork = TRUE))
-  ranked_fail <- data.frame(
-    recommended_status = c("amplitude_collapse", "wrong_direction", "delta_untrusted"),
-    stringsAsFactors = FALSE
-  )
-  fail <- calibration_gate_summary(ranked_fail)
-  expect_equal(fail$recommended_status, "no_valid_shape_configuration")
-  expect_equal(fail$n_valid_shape_configs, 0L)
-
-  ranked_valid <- data.frame(
-    recommended_status = c("wrong_direction", "valid_shape_config"),
-    stringsAsFactors = FALSE
-  )
-  valid <- calibration_gate_summary(ranked_valid)
-  expect_equal(valid$recommended_status, "valid_shape_config")
-  expect_equal(valid$n_valid_shape_configs, 1L)
-})
-
+# Tests for the retired benchmark-only calibration gate were removed with its
+# scripts. Active package inference regressions below remain independent of
+# external benchmark files.
 test_that("global compute_sd false preserves posterior means", {
   counts <- matrix(
     c(80, 72, 24, 18, 18, 24, 20, 22, 18, 17, 22, 21, 18, 20),

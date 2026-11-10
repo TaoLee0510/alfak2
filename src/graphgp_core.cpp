@@ -10,6 +10,8 @@ struct GraphSolveResult {
   VectorXd variance;
   bool ok;
   std::string status;
+  double contrast_variance = NA_REAL;
+  Eigen::MatrixXd covariance;
 };
 
 struct CvScoreResult {
@@ -94,7 +96,8 @@ static SparseMatrix<double> assemble_precision(const Rcpp::IntegerMatrix& karyot
                                                double lambda_l,
                                                double lambda_e,
                                                double sigma_obs,
-                                               double eps) {
+                                               double eps,
+                                               const Eigen::MatrixXd& anchor_precision) {
   int n = karyotypes.nrow();
   int p = karyotypes.ncol();
   std::vector< Triplet<double> > triplets;
@@ -157,8 +160,15 @@ static SparseMatrix<double> assemble_precision(const Rcpp::IntegerMatrix& karyot
 
   for (int i = 0; i < n; ++i) triplets.emplace_back(i, i, eps);
   for (size_t a = 0; a < anchor_index0.size(); ++a) {
-    double v = std::max(1e-10, anchor_var[a] + sigma_obs * sigma_obs);
-    triplets.emplace_back(anchor_index0[a], anchor_index0[a], 1.0 / v);
+    if (anchor_precision.size()) {
+      for (size_t b = 0; b < anchor_index0.size(); ++b) {
+        double w = anchor_precision(a, b);
+        if (w != 0.0) triplets.emplace_back(anchor_index0[a], anchor_index0[b], w);
+      }
+    } else {
+      double v = std::max(1e-10, anchor_var[a] + sigma_obs * sigma_obs);
+      triplets.emplace_back(anchor_index0[a], anchor_index0[a], 1.0 / v);
+    }
   }
 
   SparseMatrix<double> q(n, n);
@@ -178,15 +188,33 @@ static GraphSolveResult solve_graph(const Rcpp::IntegerMatrix& karyotypes,
                                     double lambda_e,
                                     double sigma_obs,
                                     double eps,
-                                    bool compute_variance) {
+                                    bool compute_variance,
+                                    const Eigen::MatrixXd& anchor_covariance,
+                                    const VectorXd& contrast = VectorXd(),
+                                    bool compute_covariance = false) {
   int n = karyotypes.nrow();
+  Eigen::MatrixXd anchor_precision;
+  if (anchor_covariance.size()) {
+    Eigen::MatrixXd noise = anchor_covariance;
+    noise.diagonal().array() += sigma_obs * sigma_obs;
+    Eigen::LLT<Eigen::MatrixXd> noise_solver(noise);
+    if (noise_solver.info() != Eigen::Success) {
+      return {VectorXd::Constant(n, NA_REAL), VectorXd::Constant(n, NA_REAL),
+              false, "Anchor observation covariance is not positive definite"};
+    }
+    anchor_precision = noise_solver.solve(Eigen::MatrixXd::Identity(noise.rows(), noise.cols()));
+  }
   SparseMatrix<double> q = assemble_precision(karyotypes, edge_from, edge_to, edge_weight,
                                               anchor_index0, anchor_var,
-                                              lambda_l, lambda_e, sigma_obs, eps);
+                                              lambda_l, lambda_e, sigma_obs, eps, anchor_precision);
   VectorXd rhs = VectorXd::Zero(n);
+  VectorXd anchor_rhs;
+  if (anchor_precision.size()) {
+    anchor_rhs = anchor_precision * Eigen::Map<const VectorXd>(anchor_mean.begin(), anchor_mean.size());
+  }
   for (size_t a = 0; a < anchor_index0.size(); ++a) {
     double v = std::max(1e-10, anchor_var[a] + sigma_obs * sigma_obs);
-    rhs(anchor_index0[a]) += anchor_mean[a] / v;
+    rhs(anchor_index0[a]) += anchor_precision.size() ? anchor_rhs(a) : anchor_mean[a] / v;
   }
 
   Eigen::SimplicialLDLT< SparseMatrix<double> > solver;
@@ -202,16 +230,27 @@ static GraphSolveResult solve_graph(const Rcpp::IntegerMatrix& karyotypes,
   }
 
   VectorXd var = VectorXd::Constant(n, NA_REAL);
-  if (compute_variance) {
+  Eigen::MatrixXd covariance;
+  if (compute_covariance) covariance.resize(n, n);
+  if (compute_variance || compute_covariance) {
     var.setZero();
     for (int i = 0; i < n; ++i) {
       VectorXd e = VectorXd::Zero(n);
       e(i) = 1.0;
       VectorXd z = solver.solve(e);
       var(i) = std::max(0.0, z(i));
+      if (compute_covariance) covariance.col(i) = z;
     }
   }
-  return {mean, var, true, "ok"};
+  double contrast_variance = NA_REAL;
+  if (contrast.size()) {
+    VectorXd z = solver.solve(contrast);
+    if (solver.info() != Eigen::Success || !z.allFinite()) {
+      return {mean, var, false, "Predictive variance solve failed"};
+    }
+    contrast_variance = std::max(0.0, contrast.dot(z));
+  }
+  return {mean, var, true, "ok", contrast_variance, covariance};
 }
 
 static CvScoreResult cv_score_grid(const Rcpp::IntegerMatrix& karyotypes,
@@ -226,7 +265,8 @@ static CvScoreResult cv_score_grid(const Rcpp::IntegerMatrix& karyotypes,
                                    double lambda_l,
                                    double lambda_e,
                                    double sigma_obs,
-                                   double eps) {
+                                   double eps,
+                                   const Eigen::MatrixXd& anchor_covariance) {
   int m = anchor_index0.size();
   if (m < 3) return {NA_REAL, 0, m};
   double rss = 0.0;
@@ -240,22 +280,51 @@ static CvScoreResult cv_score_grid(const Rcpp::IntegerMatrix& karyotypes,
     }
     std::vector<int> idx;
     Rcpp::NumericVector mean(m - 1), var(m - 1);
+    std::vector<int> train;
     idx.reserve(m - 1);
     int k = 0;
     for (int a = 0; a < m; ++a) {
       if (a == hold) continue;
       idx.push_back(anchor_index0[a]);
+      train.push_back(a);
       mean[k] = anchor_mean[a];
       var[k] = anchor_var[a];
       ++k;
     }
+    Eigen::MatrixXd train_covariance;
+    VectorXd contrast = VectorXd::Zero(karyotypes.nrow());
+    contrast(anchor_index0[hold]) = 1.0;
+    double offset = 0.0;
+    double noise_variance = anchor_var[hold] + sigma_obs * sigma_obs;
+    if (anchor_covariance.size()) {
+      train_covariance.resize(m - 1, m - 1);
+      VectorXd cross(m - 1);
+      for (int a = 0; a < m - 1; ++a) {
+        cross(a) = anchor_covariance(train[a], hold);
+        for (int b = 0; b < m - 1; ++b) {
+          train_covariance(a, b) = anchor_covariance(train[a], train[b]);
+        }
+      }
+      Eigen::MatrixXd train_noise = train_covariance;
+      train_noise.diagonal().array() += sigma_obs * sigma_obs;
+      Eigen::LLT<Eigen::MatrixXd> noise_solver(train_noise);
+      if (noise_solver.info() != Eigen::Success) return {R_PosInf, evaluated, skipped};
+      VectorXd regression = noise_solver.solve(cross);
+      for (int a = 0; a < m - 1; ++a) {
+        contrast(idx[a]) -= regression(a);
+        offset += regression(a) * mean[a];
+      }
+      noise_variance = anchor_covariance(hold, hold) + sigma_obs * sigma_obs - cross.dot(regression);
+    }
     GraphSolveResult res = solve_graph(karyotypes, edge_from, edge_to, edge_weight,
                                        idx, mean, var, lambda_l, lambda_e,
-                                       sigma_obs, eps, false);
+                                       sigma_obs, eps, false, train_covariance, contrast);
     if (!res.ok) return {std::numeric_limits<double>::infinity(), evaluated, skipped};
-    double pred = res.mean(anchor_index0[hold]);
+    double pred = offset + contrast.dot(res.mean);
     double err = pred - anchor_mean[hold];
-    rss += err * err / std::max(1e-10, anchor_var[hold] + sigma_obs * sigma_obs);
+    double predictive_variance = std::max(1e-10, noise_variance + res.contrast_variance);
+    rss += 0.5 * (std::log(2.0 * std::acos(-1.0) * predictive_variance) +
+                  err * err / predictive_variance);
     ++evaluated;
   }
   if (evaluated == 0) return {NA_REAL, evaluated, skipped};
@@ -274,10 +343,33 @@ Rcpp::List alfak2_graph_posterior_cpp(Rcpp::IntegerMatrix karyotypes,
                                       Rcpp::NumericVector lambda_e_grid,
                                       Rcpp::NumericVector sigma_obs_grid,
                                       double eps = 1e-5,
-                                      bool compute_variance = true) {
+                                      bool compute_variance = true,
+                                      Rcpp::Nullable<Rcpp::NumericMatrix> anchor_covariance = R_NilValue,
+                                      bool compute_covariance = false) {
+  if (compute_covariance && karyotypes.nrow() > 500) {
+    Rcpp::stop("Full graph covariance is limited to 500 nodes; use diagonal uncertainty for larger graphs.");
+  }
   if (anchor_index.size() == 0) Rcpp::stop("At least one local anchor is required.");
   if (anchor_mean.size() != anchor_index.size() || anchor_var.size() != anchor_index.size()) {
     Rcpp::stop("Anchor index, mean, and variance vectors must have equal length.");
+  }
+  Eigen::MatrixXd covariance;
+  if (anchor_covariance.isNotNull()) {
+    Rcpp::NumericMatrix supplied(anchor_covariance);
+    int m = anchor_index.size();
+    if (supplied.nrow() != m || supplied.ncol() != m) {
+      Rcpp::stop("Anchor covariance must have one row and column per anchor.");
+    }
+    covariance = Eigen::Map<Eigen::MatrixXd>(supplied.begin(), m, m);
+    if (!covariance.allFinite() || !covariance.isApprox(covariance.transpose(), 1e-8)) {
+      Rcpp::stop("Anchor covariance must be finite and symmetric.");
+    }
+    covariance = (0.5 * (covariance + covariance.transpose())).eval();
+    Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> eigen(covariance);
+    if (eigen.info() != Eigen::Success || eigen.eigenvalues().minCoeff() <
+        -1e-8 * std::max(1.0, covariance.diagonal().maxCoeff())) {
+      Rcpp::stop("Anchor covariance must be positive semidefinite.");
+    }
   }
   std::vector<int> anchor0(anchor_index.size());
   for (int i = 0; i < anchor_index.size(); ++i) {
@@ -329,7 +421,7 @@ Rcpp::List alfak2_graph_posterior_cpp(Rcpp::IntegerMatrix karyotypes,
           cv_score_grid(karyotypes, edge_from, edge_to, edge_weight,
                         anchor0, anchor_mean, anchor_var,
                         component, component_anchor_count,
-                        l, e, s, eps) :
+                        l, e, s, eps, covariance) :
           CvScoreResult{NA_REAL, 0, cv_report_skipped};
         double sc = cv.score;
         gl.push_back(l); ge.push_back(e); gs.push_back(s); score.push_back(sc);
@@ -347,17 +439,19 @@ Rcpp::List alfak2_graph_posterior_cpp(Rcpp::IntegerMatrix karyotypes,
 
   GraphSolveResult final = solve_graph(karyotypes, edge_from, edge_to, edge_weight,
                                        anchor0, anchor_mean, anchor_var,
-                                       best_l, best_e, best_s, eps, compute_variance);
+                                       best_l, best_e, best_s, eps, compute_variance, covariance,
+                                       VectorXd(), compute_covariance);
   if (!final.ok) Rcpp::stop(final.status);
 
   Rcpp::NumericVector mean(final.mean.size()), sd(final.variance.size());
   for (int i = 0; i < final.mean.size(); ++i) {
     mean[i] = final.mean(i);
-    sd[i] = compute_variance ? std::sqrt(std::max(0.0, final.variance(i))) : NA_REAL;
+    sd[i] = (compute_variance || compute_covariance) ? std::sqrt(std::max(0.0, final.variance(i))) : NA_REAL;
   }
   return Rcpp::List::create(
     Rcpp::Named("mean") = mean,
     Rcpp::Named("sd") = sd,
+    Rcpp::Named("covariance") = final.covariance,
     Rcpp::Named("lambda_l") = best_l,
     Rcpp::Named("lambda_e") = best_e,
     Rcpp::Named("sigma_obs") = best_s,
@@ -365,6 +459,8 @@ Rcpp::List alfak2_graph_posterior_cpp(Rcpp::IntegerMatrix karyotypes,
     Rcpp::Named("cv_status") = cv_status,
     Rcpp::Named("cv_evaluated") = cv_report_evaluated,
     Rcpp::Named("cv_skipped") = cv_report_skipped,
+    Rcpp::Named("cv_score_type") = "gaussian_predictive_nlpd",
+    Rcpp::Named("cv_scope") = "anchor_loo_conditional_on_local_fit",
     Rcpp::Named("grid") = Rcpp::DataFrame::create(
       Rcpp::Named("lambda_l") = gl,
       Rcpp::Named("lambda_e") = ge,
