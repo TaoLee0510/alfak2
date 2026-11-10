@@ -1,0 +1,40 @@
+#!/usr/bin/env Rscript
+repo<-normalizePath(Sys.getenv("ALFAK2_REPO","."));root<-file.path(repo,"validation/observation_design")
+src<-normalizePath(Sys.getenv("ALFAK2_MECHANISM_SOURCE",file.path(root,"mechanism")))
+out<-Sys.getenv("ALFAK2_MECHANISM_OUTPUT",file.path(root,"results/mechanism_v1"))
+dir.create(out,recursive=TRUE,showWarnings=FALSE)
+stopifnot(!file.exists(file.path(out,"frozen_cases.rds")))
+source(file.path(src,"common.R"));runtime<-mechanism_load(repo,src,FALSE)
+source(file.path(root,"results/computation_source_v4/data.R"))
+k<-as.matrix(expand.grid(rep(list(1:2),3)));context<-design_context(k,.005,runtime);k<-context$graph$karyotypes
+shell<-rowSums(abs(k-2));p<-numeric(8);p[shell==0]<-.45;p[shell==2]<-.35/3;p[shell==3]<-.20
+w<-numeric(8);w[shell==0]<-.85;w[shell==1]<-.15/3
+P<-runtime$independent$process_independent_operator(k,rep(1,8),.005)$probability
+nativeP<-matrix(0,8,8);op<-context$operator;nativeP[cbind(op$from0+1L,op$to0+1L)]<-op$weight
+stopifnot(max(abs(P-nativeP))<1e-12)
+x<-k-2;profiles<-list(prior=context$prior$offset,
+  interaction=.16*x[,1]*x[,2]-.12*x[,2]*x[,3]+.12*x[,1]*x[,2]*x[,3])
+D<-as.matrix(dist(k,method="manhattan"));edges<-which(D==1&upper.tri(D),arr.ind=TRUE)
+cases<-list();ledger<-list()
+for(i in seq_along(profiles)) {
+  id<-paste0("n8_layout_",names(profiles)[i]);ps<-9100000L+100L*i+1L;ss<-9200000L+100L*i+1L
+  path<-design_simulate_path(k,exp(profiles[[i]]),.005,p,1200L,ps,times=c(0,1.5))
+  set.seed(ss);uniform<-matrix(runif(360L*2L),360L,2L)
+  y<-cbind(design_count_uniform(path$populations[,1],uniform[,1],240L),design_count_uniform(path$populations[,2],uniform[,2],360L))
+  rownames(y)<-context$graph$labels;colnames(y)<-c("t0","t1")
+  sp<-list(n=8L,q=15L,steps=15L,dt=1.5,offset=context$prior$offset,
+    lower=t(chol(context$covariance)),eta_basis=context$eta_basis,known_pi0=numeric(),probability=P,
+    beta_zero=FALSE,y0=as.numeric(y[,1]),y1=as.numeric(y[,2]),growth=0,growth_sd=0)
+  cases[[id]]<-list(id=id,n=8L,profile=names(profiles)[i],beta=.005,growth=FALSE,
+    counts=y,y=y,times=c(0,1.5),trajectory=c(0L,0L),reference_weight=w,weight=w,
+    graph=context$graph,prior=context$prior,covariance=context$covariance,specification=sp,edges=edges,
+    truth_log_birth=profiles[[i]],truth=exp(profiles[[i]]),nominal_initial=p,path=path,
+    generation_seed=ps,sampling_seed=ss)
+  ledger[[id]]<-data.frame(case_id=id,process_seed=ps,sampling_seed=ss,n0=sum(y[,1]),n1=sum(y[,2]),
+    zero_initial_rows=sum(y[,1]==0),late_only_rows=sum(y[,1]==0&y[,2]>0),both_zero_rows=sum(rowSums(y)==0))
+}
+saveRDS(cases,file.path(out,"frozen_cases.rds"),version=2);saveRDS(context,file.path(out,"context.rds"),version=2)
+write.csv(do.call(rbind,ledger),file.path(out,"case_manifest.csv"),row.names=FALSE)
+files<-c(file.path(out,c("frozen_cases.rds","context.rds")),file.path(src,c("PROTOCOL.md","prepare.R","common.R")))
+write.csv(data.frame(file=files,sha256=unname(round2_sha256(files))),file.path(out,"input_freeze_sha256.csv"),row.names=FALSE)
+print(do.call(rbind,ledger),row.names=FALSE)

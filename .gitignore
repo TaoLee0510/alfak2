@@ -35,3 +35,14 @@ src/RcppExports-db7d5c29.o.tmp
 benchmark/scr/run_synthetic_sparsity_benchmark_alfak2.html
 benchmark/scr/compare_alfak2_vs_alfakR_real_samples.html
 benchmark/scr/run_real_samples_alfak2.html
+
+# Validation: track scripts and written reports only. Results, data tables,
+# frozen result snapshots, and binaries stay local.
+/validation/**
+!/validation/**/
+!/validation/**/*.R
+!/validation/**/*.py
+!/validation/**/*.cpp
+!/validation/**/*.h
+!/validation/**/*.md
+/validation/**/results/

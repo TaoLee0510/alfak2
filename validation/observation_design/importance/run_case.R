@@ -1,0 +1,20 @@
+#!/usr/bin/env Rscript
+repo<-normalizePath(Sys.getenv("ALFAK2_REPO","."));root<-file.path(repo,"validation/observation_design")
+src<-normalizePath(Sys.getenv("ALFAK2_IS_SOURCE"));out<-normalizePath(Sys.getenv("ALFAK2_IS_CASE_OUTPUT"))
+source(file.path(src,"model.R"));source(file.path(src,"integrate.R"));runtime<-is_load(repo,src)
+casefile<-normalizePath(Sys.getenv("ALFAK2_IS_CASE"));contextfile<-normalizePath(Sys.getenv("ALFAK2_IS_CONTEXT"))
+case<-readRDS(casefile);context<-readRDS(contextfile)
+stopifnot(!file.exists(file.path(out,"result.rds")))
+fit<-is_integrate(case,context,runtime,as.integer(Sys.getenv("ALFAK2_IS_SEED")),save_directory=out)
+fit$sample_checkpoint<-normalizePath(file.path(out,"sample_checkpoint.rds"))
+if(fit$specification$n>8L)fit$samples<-NULL
+saveRDS(fit,file.path(out,"result.rds"),compress=FALSE);write.csv(fit$moments,file.path(out,"moments.csv"),row.names=FALSE)
+write.csv(data.frame(case_id=case$id,status=fit$status,samples=fit$n_samples,ess=fit$ess,
+ max_pareto_k=max(fit$pareto_k),max_mean_mcse_ratio=fit$max_mean_mcse_ratio,
+ max_sd_mcse_ratio=fit$max_sd_mcse_ratio,elapsed_seconds=fit$elapsed_seconds),file.path(out,"status.csv"),row.names=FALSE)
+files<-unique(c(list.files(src,full.names=TRUE),casefile,contextfile,runtime$importance_binary,runtime$native,
+ vapply(getLoadedDLLs(),function(x)x[["path"]],character(1))))
+files<-files[file.exists(files)&!dir.exists(files)]
+write.csv(data.frame(file=files,sha256=vapply(files,digest::digest,character(1),algo="sha256",file=TRUE)),
+ file.path(out,"source_sha256.csv"),row.names=FALSE)
+writeLines(fit$status,file.path(out,"COMPLETE"))
