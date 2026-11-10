@@ -1,0 +1,51 @@
+#!/usr/bin/env Rscript
+root<-"validation/observation_design";src<-Sys.getenv("ALFAK2_CONSTRAINED_SOURCE",file.path(root,"constrained"))
+out<-Sys.getenv("ALFAK2_CONSTRAINED_OUTPUT",file.path(root,"results/constrained_v1"));dir.create(out,recursive=TRUE,showWarnings=FALSE)
+source(file.path(src,"planning_helpers.R"));source(file.path(root,"results/computation_source_v4/data.R"))
+source("validation/accuracy_round2/oracle_profile_fisher.R")
+context<-readRDS(file.path(root,"results/context.rds"));context$landscape_precision<-solve(context$covariance)
+nominal<-design_nominal_initial(context);n<-context$n
+P<-matrix(0,n,n);op<-context$operator;P[cbind(op$from0+1L,op$to0+1L)]<-op$weight
+p<-pmax(nominal$A,1e-4);p<-p/sum(p);g<-context$prior$offset+.04*(context$graph$karyotypes[,1]-2)
+library(testthat);reporter<-ListReporter$new()
+with_reporter(reporter,{
+  test_that("cached propagator derivatives match independent probability derivatives",{
+    ker<-constrained_kernel(P,g);half<-constrained_kernel(P,g,epsilon=2.5e-6)
+    direct<-oracle_fisher_jacobian(p,g,P,1.5,epsilon=2.5e-6)
+    m<-as.numeric(ker$M%*%p);q<-m/sum(m)
+    J<-vapply(ker$D,function(D)as.numeric(D%*%p)/sum(m),numeric(n));J<-J-tcrossprod(q,colSums(J))
+    expect_equal(q,direct$pi1,tolerance=1e-12)
+    expect_lt(max(abs(J-direct$j1_birth)),1e-8)
+    expect_lt(max(vapply(seq_len(n),function(i)max(abs(ker$D[[i]]-half$D[[i]])),numeric(1))),1e-7)
+    expect_lt(max(abs(colSums(J))),1e-12)
+  })
+  test_that("nuisance-prior Schur covariance agrees with direct joint inverse",{
+    ker<-constrained_kernel(P,g);j<-oracle_fisher_jacobian(p,g,P,1.5,epsilon=5e-6)
+    E0<-(j$j0_eta%*%context$eta_basis)*sqrt(300/p)
+    E1<-(j$j1_eta%*%context$eta_basis)*sqrt(300/j$pi1)
+    G<-j$j1_birth*sqrt(300/j$pi1)
+    Heta<-diag(n-1)+crossprod(E0)+crossprod(E1)
+    cross<-crossprod(G,E1)
+    H<-rbind(cbind(context$landscape_precision+crossprod(G),cross),cbind(t(cross),Heta))
+    C<-solve(H)[seq_len(n),seq_len(n)]
+    risk<-constrained_risk(list(p),list(c(300,300)),ker,context,diag(n))
+    expect_lt(max(abs(risk$covariance-C*tcrossprod(exp(g)))),1e-8)
+    F<-constrained_information(p,ker,context$eta_basis,c(300,300))
+    Fprofile<-constrained_information(p,ker,context$eta_basis,c(300,300),FALSE)
+    expect_gt(min(eigen(F,symmetric=TRUE,only.values=TRUE)$values),-1e-8)
+    expect_gt(min(eigen(F-Fprofile,symmetric=TRUE,only.values=TRUE)$values),-1e-8)
+    expect_equal(constrained_information(p,ker,context$eta_basis,c(0,0)),matrix(0,n,n),tolerance=1e-12)
+    expect_lt(min(eigen(context$covariance-solve(context$landscape_precision+F),symmetric=TRUE,only.values=TRUE)$values)*-1,1e-8)
+  })
+  test_that("candidate grid preserves composition, cell and observation budgets",{
+    grid<-constrained_grid(context,nominal)
+    expect_equal(nrow(grid$table),5304L)
+    expect_false(anyDuplicated(grid$table$id)>0)
+    expect_true(all(vapply(grid$spec,function(s)all(vapply(s$initial,function(p)abs(sum(p)-1)<1e-12&&all(p>=0),logical(1))),logical(1))))
+    expect_true(all(vapply(grid$spec,function(s)sum(unlist(s$depths))==600L&&sum(s$initial_cells)==1200L,logical(1))))
+    expect_true(all(vapply(grid$spec,function(s)all(unlist(s$depths)>0),logical(1))))
+  })
+})
+res<-as.data.frame(reporter$get_results());saveRDS(res,file.path(out,"planning_test_details.rds"));res$result<-NULL
+write.csv(res,file.path(out,"planning_tests.csv"),row.names=FALSE);print(colSums(res[,c("nb","passed","failed","error","warning")]))
+if(any(res$failed>0|res$error|res$warning>0))stop("Planning implementation tests failed")
