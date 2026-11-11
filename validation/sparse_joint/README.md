@@ -425,6 +425,18 @@ from 0.89 (wavelength 0.8, distance 2) to 1.00 (wavelength 1.6): slightly
 narrow on intermediate, conservative on smooth landscapes. The pooled
 acceptance rule is unchanged.
 
+The one ranking exception, observed karyotypes on the smoothest landscapes
+(wavelength 1.6, distance 0), where the two-layer pipeline ranks better (0.48
+against 0.34 held-out), comes from karyotypes seen in fewer than five cells.
+The two-layer pipeline does not filter by count. For karyotypes with at least
+five cells the sparse joint model ranks better at every wavelength (0.74
+against 0.68 at 1.6). At wavelength 1.6, 56% of the rare observed karyotypes
+(held-out; 51% development) lie more than one step from every major and are
+predicted at the common observed level, which cannot rank them; the two-layer
+pipeline smooths them from their observed neighbours (Spearman 0.44). Inside
+the domain the sparse joint model ranks rare karyotypes better (0.65 against
+0.53).
+
 ## Outputs for alfakR pipelines
 
 Analyses built on `alfakR::alfak()` (branch `dev`) read four files from its
@@ -478,6 +490,10 @@ rest of the landscape. On `dev_L10_P01_unbalanced_3000_100_360d` it is 0.43
   scale with it.
 - Intervals are too narrow after 1080 days and when the landscape changes at
   the first sample.
+- Observed karyotypes outside the domain all get the same observed level, so
+  on diverse populations (smooth landscapes) about half the rare observed
+  karyotypes are not ranked. Adding the trend's variation to that level is
+  untried.
 - The shell coefficient is a lower bound from absence, so unobserved
   neighbours are still predicted too high (bias +0.02 at one step, +0.04 at
   two).
