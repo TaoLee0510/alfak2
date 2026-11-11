@@ -1,0 +1,39 @@
+\par\medskip\noindent\begin{minipage}{\linewidth}
+\textit{Error relative to the null predictor, held-out landscapes.}
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{l*{8}{r}}
+\toprule
+ & \multicolumn{2}{c}{$\lambda=0.4$} & \multicolumn{2}{c}{$\lambda=0.8$} & \multicolumn{2}{c}{$\lambda=1.2$} & \multicolumn{2}{c}{$\lambda=1.6$} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}
+Method & $d=3$ & $d=4$ & $d=3$ & $d=4$ & $d=3$ & $d=4$ & $d=3$ & $d=4$ \\
+\midrule
+Graph Gaussian & 1.00 & 1.00 & 1.00 & 1.00 & 0.99 & 0.99 & 0.98 & 0.99 \\
+\texttt{alfakR} (minobs = 20) & 2.35 & 2.28 & 1.32 & 1.26 & 1.50 & 1.42 & 18.21 & 15.30 \\
+Sparse joint, independent & 0.50 & 0.48 & 0.82 & 0.80 & 0.64 & 0.65 & 0.59 & 0.59 \\
+Sparse joint, balance (default) & 0.45 & 0.44 & 0.58 & 0.59 & 0.55 & 0.56 & 0.54 & 0.53 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{minipage}
+
+\par\medskip\noindent\begin{minipage}{\linewidth}
+\textit{Spearman correlation, held-out landscapes.}
+\begin{center}
+\footnotesize
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{l*{8}{r}}
+\toprule
+ & \multicolumn{2}{c}{$\lambda=0.4$} & \multicolumn{2}{c}{$\lambda=0.8$} & \multicolumn{2}{c}{$\lambda=1.2$} & \multicolumn{2}{c}{$\lambda=1.6$} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}
+Method & $d=3$ & $d=4$ & $d=3$ & $d=4$ & $d=3$ & $d=4$ & $d=3$ & $d=4$ \\
+\midrule
+Graph Gaussian & -0.03 & -0.04 & 0.02 & 0.01 & 0.20 & 0.16 & 0.28 & 0.23 \\
+\texttt{alfakR} (minobs = 20) & 0.02 & 0.01 & 0.02 & 0.01 & 0.19 & 0.16 & 0.25 & 0.24 \\
+Sparse joint, independent & 0.12 & 0.11 & 0.18 & 0.15 & 0.35 & 0.31 & 0.43 & 0.40 \\
+Sparse joint, balance (default) & 0.15 & 0.14 & 0.19 & 0.16 & 0.37 & 0.33 & 0.43 & 0.40 \\
+\bottomrule
+\end{tabular}
+\end{center}
+\end{minipage}

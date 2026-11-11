@@ -470,6 +470,52 @@ and tables in `doc/generated/`). Each cell holds three landscapes.
   interval (0.81 to 0.83) or a shallow first sample (100/3000: 0.77 to 0.86),
   at wavelengths up to 0.8.
 
+## Distances 3 and 4
+
+`far_distance.R` samples, for every core dataset of both sets, 2000
+karyotypes at distance 3 and 2000 at distance 4 from the nearest observed
+karyotype (`stt_far_nodes()` in `benchmark/sparse_two_timepoint/score.R`) and
+fits all twelve methods again with them as targets: the null predictor, both
+sparse joint variants, the two-layer pipeline with each of its eight second
+layers, and `alfakR` (minobs 20). The shells cannot be enumerated at 22
+chromosomes, so they are sampled by random walks from observed karyotypes,
+each observed karyotype an equally likely start, keeping endpoints at exactly
+that distance; this is not uniform within a shell, unlike the scoreboard's
+distances 1 and 2. The walks' intermediate nodes are unscored targets, so that
+the graph second layers have a path. Centring is the scoreboard's. Results,
+fits and the sparse joint fit objects are under
+`benchmark/results/sparse_two_timepoint/sweeps/far/`; `far_results.R` writes
+the figures and tables of Section 5.4 and Supplement S5 to `doc/generated/`.
+The two-layer first layer and target graph are computed once per dataset and
+reused by its eight entries (`--memo=yes`); a check on two datasets gave
+identical predictions for all but `alfakR`, whose bootstrap is unseeded
+(correlation 0.996). The run took 3 h 20 min with three workers on a laptop.
+
+- Every method fitted every dataset except `alfakR`, which failed on the same
+  7 development and 5 held-out datasets as in the scoreboard.
+- Every target at distance 3 or 4 is at least three steps from a major
+  karyotype, outside the domain, so the sparse joint prediction is the trend
+  alone.
+- Held-out, balance: ratio to the null predictor 0.45 / 0.58 / 0.55 / 0.54 at
+  distance 3 and 0.44 / 0.59 / 0.56 / 0.53 at distance 4 (wavelengths 0.4 /
+  0.8 / 1.2 / 1.6), within 0.03 of distance 2. The gain is mostly the mean:
+  the null predictor's mean error at distance 4 is 0.474 / 0.157 / 0.085 /
+  0.049, the trend leaves 0.128 / 0.071 / 0.034 / 0.010. The remaining mean
+  error is positive everywhere and grows from distance 3 to 4: distant
+  karyotypes are predicted too high.
+- Spearman at distance 4: 0.14 / 0.16 / 0.33 / 0.40 (distance 2: 0.17 / 0.21 /
+  0.39 / 0.46). Coverage at distances 3 and 4: 0.91, 0.84 to 0.86, 0.97 to
+  0.98 and 1.00, so too narrow at wavelength 0.8.
+- Independent initial states: higher error than balance everywhere (0.48 to
+  0.82), similar ranking (0.11 to 0.43).
+- Graph Gaussian: 0.98 to 1.00 of the null error, mean error within 0.001 of
+  the null predictor, Spearman -0.04 to 0.28, coverage 1.00 because its
+  standard deviation grows to 0.6 to 1.2. The seven near-field second layers
+  predict nothing beyond distance 2 and score as the null predictor.
+- `alfakR` (Kriging mean, no uncertainty): 2.35 / 1.32 / 1.50 / 18.2 at
+  distance 3, 2.28 / 1.26 / 1.42 / 15.3 at distance 4; Spearman 0.01 to 0.25.
+- Development landscapes: balance 0.42 to 0.59, Spearman 0.14 to 0.49.
+
 ## Outputs for alfakR pipelines
 
 Analyses built on `alfakR::alfak()` (branch `dev`) read four files from its
@@ -529,7 +575,9 @@ rest of the landscape. On `dev_L10_P01_unbalanced_3000_100_360d` it is 0.43
   untried.
 - The shell coefficient is a lower bound from absence, so unobserved
   neighbours are still predicted too high (bias +0.02 at one step, +0.04 at
-  two).
+  two, and on held-out landscapes +0.005 to +0.13 at three and four, largest
+  on rugged ones). Far intervals are too narrow at wavelength 0.8 (coverage
+  0.84 at distance 4).
 - The calibration constants come from one family of simulated landscapes.
 - ALFA-K with minobs 5 has 75 of 96 development fits (the HPC run continues)
   and none on the held-out landscapes. On those 75 its RMSE is 0.169 / 0.225
@@ -551,5 +599,7 @@ reported uncertainty. `rate_sensitivity.R` sweeps the two supplied rates.
 mean. `real_cohort.R` runs the checks on real samples. `alfakR_compat.R`
 compares the output files with those of alfakR. `wavelength_tables.R` writes
 the tables by wavelength of the method document. `scenario_results.R` writes the figures and
-tables by sampling design to `doc/generated/`. The official verdict comes
+tables by sampling design to `doc/generated/`. `far_distance.R` fits and
+scores all methods at distances 3 and 4, and `far_results.R` writes its
+figures and tables to `doc/generated/`. The official verdict comes
 from `benchmark/sparse_two_timepoint/run.R --stage=report`.
