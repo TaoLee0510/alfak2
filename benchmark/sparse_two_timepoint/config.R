@@ -48,7 +48,7 @@ stt_config <- function(output_dir = file.path("benchmark", "results", "sparse_tw
   cohort_method <- function(members, ...) {
     list(type = "alfak2_sparse_joint_cohort", birth_rate = 1, min_cn = 1L, max_cn = 8L, members = members,
          dataset_dir = file.path(output_dir, "datasets"), landscapes = landscapes[c("landscape_id", "split")],
-         cohort_size = 8L, arguments = list(...))
+         cohort_size = 8L, arguments = utils::modifyList(list(initial_state = "free"), list(...)))
   }
   list(
     output_dir = output_dir,
@@ -105,7 +105,8 @@ stt_config <- function(output_dir = file.path("benchmark", "results", "sparse_tw
                       # compared there with the single-sample model.
                       cohort = c("alfak2_sparse_joint_cohort", "alfak2_sparse_joint_cohort_unrelated",
                                  "alfak2_sparse_joint_cohort_shared_trend",
-                                 "alfak2_sparse_joint_cohort_unrelated_shared_trend"),
+                                 "alfak2_sparse_joint_cohort_unrelated_shared_trend",
+                                 "alfak2_sparse_joint_cohort_balance"),
                       cohort_baseline = "alfak2_sparse_joint"),
     methods = list(
       zero = list(type = "zero"),
@@ -120,10 +121,15 @@ stt_config <- function(output_dir = file.path("benchmark", "results", "sparse_tw
       alfak2_two_layer_cv = list(type = "alfak2_two_layer", local_shell_depth = 0L, max_nodes = 60000L),
       # Candidate. One division per day is assumed for every dataset; the
       # simulated populations divide about 0.9 times per day.
-      alfak2_sparse_joint = list(type = "alfak2_sparse_joint", birth_rate = 1, min_cn = 1L, max_cn = 8L),
+      # `initial_state = "free"` was the package default when these were
+      # benchmarked; "balance" is the default now and has its own entry.
+      alfak2_sparse_joint = list(type = "alfak2_sparse_joint", birth_rate = 1, min_cn = 1L, max_cn = 8L,
+                                 arguments = list(initial_state = "free")),
       # Sensitivity to the assumed baseline birth rate: half and double.
-      alfak2_sparse_joint_slow = list(type = "alfak2_sparse_joint", birth_rate = 0.5, min_cn = 1L, max_cn = 8L),
-      alfak2_sparse_joint_fast = list(type = "alfak2_sparse_joint", birth_rate = 2, min_cn = 1L, max_cn = 8L),
+      alfak2_sparse_joint_slow = list(type = "alfak2_sparse_joint", birth_rate = 0.5, min_cn = 1L, max_cn = 8L,
+                                      arguments = list(initial_state = "free")),
+      alfak2_sparse_joint_fast = list(type = "alfak2_sparse_joint", birth_rate = 2, min_cn = 1L, max_cn = 8L,
+                                      arguments = list(initial_state = "free")),
       # Initial abundances of non-major karyotypes tied to mutation-selection
       # balance, which reads the first sample's levels as well.
       alfak2_sparse_joint_balance = list(type = "alfak2_sparse_joint", birth_rate = 1, min_cn = 1L, max_cn = 8L,
@@ -131,11 +137,11 @@ stt_config <- function(output_dir = file.path("benchmark", "results", "sparse_tw
       # Baseline birth rate known only within a factor of 16. The simulated
       # rate, about 0.9, is near the centre, the top or the bottom of the range.
       alfak2_sparse_joint_range = list(type = "alfak2_sparse_joint_rates", birth_rate_range = c(0.25, 4),
-                                       min_cn = 1L, max_cn = 8L),
+                                       min_cn = 1L, max_cn = 8L, arguments = list(initial_state = "free")),
       alfak2_sparse_joint_range_low = list(type = "alfak2_sparse_joint_rates", birth_rate_range = c(0.0625, 1),
-                                           min_cn = 1L, max_cn = 8L),
+                                           min_cn = 1L, max_cn = 8L, arguments = list(initial_state = "free")),
       alfak2_sparse_joint_range_high = list(type = "alfak2_sparse_joint_rates", birth_rate_range = c(1, 16),
-                                            min_cn = 1L, max_cn = 8L),
+                                            min_cn = 1L, max_cn = 8L, arguments = list(initial_state = "free")),
       # Cohort fit of the eight patients of a landscape, scored on patient 1.
       # The trend is shared or per sample, whichever has the higher marginal
       # likelihood.
@@ -145,7 +151,9 @@ stt_config <- function(output_dir = file.path("benchmark", "results", "sparse_tw
       alfak2_sparse_joint_cohort_unrelated = cohort_method("other_landscapes", trend = "select"),
       # The same two with one trend for the whole cohort, always.
       alfak2_sparse_joint_cohort_shared_trend = cohort_method("landscape", trend = "shared"),
-      alfak2_sparse_joint_cohort_unrelated_shared_trend = cohort_method("other_landscapes", trend = "shared")
+      alfak2_sparse_joint_cohort_unrelated_shared_trend = cohort_method("other_landscapes", trend = "shared"),
+      # The cohort fit with initial abundances at mutation-selection balance.
+      alfak2_sparse_joint_cohort_balance = cohort_method("landscape", trend = "select", initial_state = "balance")
     )
   )
 }

@@ -180,9 +180,11 @@ stt_method_alfak2_sparse_joint_cohort <- function(dataset, nodes, method) {
 stt_method_alfak2_sparse_joint_rates <- function(dataset, nodes, method) {
   counts <- dataset$counts
   storage.mode(counts) <- "integer"
-  fit <- alfak2::fit_sparse_joint_rates(counts, dt = dataset$interval, beta = dataset$beta,
-                                        min_cn = method$min_cn, max_cn = method$max_cn,
-                                        birth_rate_range = method$birth_rate_range)
+  fit <- do.call(alfak2::fit_sparse_joint_rates, c(
+    list(counts, dt = dataset$interval, beta = dataset$beta, min_cn = method$min_cn, max_cn = method$max_cn,
+         birth_rate_range = method$birth_rate_range),
+    method$arguments
+  ))
   prediction <- stats::predict(fit, nodes$karyotype)
   list(status = "ok",
        detail = sprintf("rates=%s rank_agreement=%.3f", paste(signif(fit$rates, 3), collapse = "/"),
