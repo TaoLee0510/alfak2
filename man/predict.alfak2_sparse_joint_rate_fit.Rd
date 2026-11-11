@@ -16,12 +16,12 @@
 }
 \value{
 Data frame with one row per karyotype. \code{relative_fitness} is
-fitness per unit of \code{dt}, relative to the major karyotypes, at the
-central rate; \code{relative_low} and \code{relative_high} enclose its 95\%
-intervals at every fitted rate, and \code{relative_sd} is the standard
-deviation whose symmetric 95\% interval about \code{relative_fitness} contains
-them. \code{per_division} is relative fitness
-divided by the assumed rate, with \code{per_division_low} and
+fitness per unit of \code{dt}, relative to the major karyotypes, at the rate
+chosen by \code{point} in \code{\link[=fit_sparse_joint_rates]{fit_sparse_joint_rates()}}; \code{relative_low} and
+\code{relative_high} enclose its 95\% intervals at every fitted rate, and
+\code{relative_sd} is the standard deviation whose symmetric 95\% interval
+about \code{relative_fitness} contains them. \code{per_division} is relative
+fitness divided by the assumed rate, with \code{per_division_low} and
 \code{per_division_high} its range over the rates. The attribute
 \code{rank_agreement} is the lowest Spearman correlation between the
 predictions at any two rates.

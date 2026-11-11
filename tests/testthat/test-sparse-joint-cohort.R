@@ -77,3 +77,34 @@ test_that("invalid cohort inputs are rejected", {
   expect_error(fit_sparse_joint_cohort(list(A = sim$samples$A, B = prepare_alfak2_data(sim$samples$B, dt = 60, beta = 0.01)),
                                        dt = 10, beta = sim$beta), "missegregation")
 })
+
+test_that("the trend is per sample, shared, or chosen by marginal likelihood", {
+  sim <- simulate_cohort_counts()
+  fit <- function(trend) {
+    fit_sparse_joint_cohort(sim$samples, dt = sim$dt, beta = sim$beta, major_frequency = 0.05, max_cn = 4,
+                            trend = trend)
+  }
+  sample <- fit("sample")
+  shared <- fit("shared")
+  expect_equal(sample$diagnostics$trend, "sample")
+  expect_equal(shared$diagnostics$trend, "shared")
+  # per sample: each sample's trend is centred on its own mean karyotype
+  expect_false(isTRUE(all.equal(sample$trend$samples$A$centre, sample$trend$samples$B$centre)))
+  expect_false(isTRUE(all.equal(sample$trend$samples$A$coefficients, sample$trend$samples$B$coefficients)))
+  # shared: one set of coefficients and one centre
+  expect_equal(shared$trend$samples$A$coefficients, shared$trend$samples$B$coefficients)
+  expect_equal(shared$trend$samples$A$centre, shared$trend$samples$B$centre)
+  # a karyotype far from both samples is predicted from that sample's trend
+  far <- "1.4.1.4"
+  in_a <- predict(sample, far, sample = "A")
+  in_b <- predict(sample, far, sample = "B")
+  expect_equal(c(in_a$source, in_b$source), c("trend", "trend"))
+  expect_false(isTRUE(all.equal(in_a$fitness_mean, in_b$fitness_mean)))
+  expect_true(is.finite(predict(sample, far)$relative_sd))
+  # selection keeps the fit with the lower negative log marginal likelihood
+  chosen <- fit("select")
+  objective <- c(shared = shared$diagnostics$objective, sample = sample$diagnostics$objective)
+  expect_equal(chosen$diagnostics$trend_objective, objective)
+  expect_equal(chosen$diagnostics$trend, names(which.min(objective)))
+  expect_equal(chosen$landscape, if (which.min(objective) == 1L) shared$landscape else sample$landscape)
+})

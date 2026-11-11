@@ -18,9 +18,11 @@
 \value{
 Data frame with \code{karyotype}, \code{fitness_mean}, \code{fitness_sd},
 \code{conf_low}, \code{conf_high}, \code{relative_fitness}, \code{relative_sd},
-\code{relative_sd_model}, \code{shell} and \code{source}, which is \code{"sample"}, \code{"landscape"}, \code{"observed_level"} or
-\code{"trend"}. Relative fitness is measured from the count-weighted mean of
-the sample's major karyotypes, or of all samples' when \code{sample} is \code{NULL}.
+\code{relative_sd_model}, \code{shell} and \code{source}, which is \code{"sample"},
+\code{"landscape"}, \code{"observed_level"} or \code{"trend"}. Relative fitness is
+measured from the count-weighted mean of the sample's major karyotypes,
+or of all samples' when \code{sample} is \code{NULL}; \code{shell} is the distance to the
+nearest major karyotype of the sample, or of any sample.
 }
 \description{
 Without \code{sample}, returns the shared landscape: the posterior of a

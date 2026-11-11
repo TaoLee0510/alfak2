@@ -19,11 +19,24 @@
 #' samples which do not follow one landscape are not forced onto it. With
 #' `sharing = "full"` it is the shared value.
 #'
+#' With `trend = "sample"` every sample has its own trend: dosage and
+#' curvature about its own mean karyotype, and distance to its own major
+#' karyotypes. Samples then share only the karyotypes they have in common and
+#' the prior scales, and samples with no karyotype in common are fitted as if
+#' alone. `trend = "shared"` fits one trend for the cohort, which helps when
+#' the samples follow one landscape and on simulated cohorts from different
+#' landscapes predicted much worse than fitting each sample alone.
+#' `trend = "select"`, the default, fits both and keeps the one with the
+#' higher marginal likelihood; on simulated cohorts it chose the shared trend
+#' for samples of one landscape and separate trends otherwise. It takes twice
+#' as long. The marginal likelihoods are in `diagnostics$trend_objective`.
+#'
 #' @param samples List of two-column count matrices with karyotype row names,
 #'   or of `alfak2_data` objects. Names identify the samples.
 #' @param dt Time between the two samples: one value, or one per sample.
 #'   Used for count matrices only.
 #' @param sharing `"partial"` or `"full"`; see above.
+#' @param trend `"select"`, `"sample"` or `"shared"`; see above.
 #' @inheritParams fit_sparse_joint
 #'
 #' @return An `alfak2_sparse_joint_cohort_fit` object. `landscape` has one row
@@ -36,6 +49,7 @@ fit_sparse_joint_cohort <- function(samples,
                                     birth_rate = 1,
                                     birth_rate_log_sd = 0.05,
                                     sharing = c("partial", "full"),
+                                    trend = c("select", "sample", "shared"),
                                     major_frequency = 0.01,
                                     major_count = 3,
                                     max_states = 5000,
@@ -52,6 +66,24 @@ fit_sparse_joint_cohort <- function(samples,
                                     inner_control = list(maxit = 200, tol = 1e-10)) {
   if (!is.list(samples) || inherits(samples, "alfak2_data") || !length(samples)) {
     stop("`samples` must be a list of count matrices or `alfak2_data` objects.", call. = FALSE)
+  }
+  trend_mode <- match.arg(trend)
+  if (trend_mode == "select") {
+    # Fit with each trend and keep the one the data support better. Both
+    # models have the same hyperparameters, so their Laplace marginal
+    # likelihoods are comparable.
+    arguments <- mget(names(formals(sys.function())), envir = environment())
+    fits <- lapply(c(shared = "shared", sample = "sample"), function(mode) {
+      tryCatch(do.call(fit_sparse_joint_cohort, utils::modifyList(arguments, list(trend = mode))),
+               error = function(e) e)
+    })
+    failed <- vapply(fits, inherits, logical(1), what = "error")
+    if (all(failed)) stop(conditionMessage(fits[[1L]]), call. = FALSE)
+    objective <- vapply(fits, function(fit) if (inherits(fit, "error")) Inf else fit$diagnostics$objective, numeric(1))
+    best <- fits[[which.min(objective)]]
+    best$diagnostics$trend_objective <- objective
+    best$diagnostics$seconds <- sum(vapply(fits[!failed], function(fit) fit$diagnostics$seconds, numeric(1)))
+    return(best)
   }
   sharing <- match.arg(sharing)
   initial_state <- match.arg(initial_state)
@@ -129,15 +161,25 @@ fit_sparse_joint_cohort <- function(samples,
   }
   log_self <- bind("log_self")
 
-  # One trend for the cohort. Its centre weights every sample equally, and
-  # the shell term is the distance to the nearest major of any sample.
+  # Trend designs. A sample's own trend is centred on its count-weighted mean
+  # karyotype and measures distance to its own majors. The cohort's trend is
+  # centred on the average of those means, weighting samples equally, and
+  # measures distance to the nearest major of any sample.
   major_labels <- unique(state_label[state_major])
   major <- parse_karyotypes(major_labels)
-  centre <- Reduce(`+`, lapply(domains, function(d) {
+  sample_centre <- lapply(domains, function(d) {
     total <- d$y0 + d$y1
     colSums(d$karyotypes * total) / sum(total)
-  })) / n_sample
-  design <- sparse_joint_design(node_karyotypes, centre, major, shell_power)
+  })
+  centre <- Reduce(`+`, sample_centre) / n_sample
+  shared_trend <- trend_mode == "shared"
+  trend_centre <- if (shared_trend) rep(list(centre), n_sample) else sample_centre
+  trend_major <- if (shared_trend) rep(list(major), n_sample) else lapply(domains, `[[`, "major")
+  designs <- lapply(seq_len(n_sample), function(s) {
+    sparse_joint_design(domains[[s]]$karyotypes, trend_centre[[s]], trend_major[[s]], shell_power)
+  })
+  design <- list(design = do.call(rbind, lapply(designs, `[[`, "design")), group = designs[[1L]]$group)
+  n_coef <- ncol(design$design)
   initial <- lapply(domains, function(d) sparse_joint_initial_prior(d$y0, d$y1, initial_frequency))
   reference <- vapply(seq_len(n_sample), function(s) {
     offset[[s]] + which.max(domains[[s]]$y0 + domains[[s]]$y1)
@@ -161,13 +203,13 @@ fit_sparse_joint_cohort <- function(samples,
     log_scale_prior_sd = rep(1.5, 5L),
     deviations = as.integer(deviations),
     balance = as.integer(initial_state == "balance"), history = history, balance_sd = balance_sd,
-    balance_offset = rep(0, n_state)
+    balance_offset = rep(0, n_state), shared_trend = as.integer(shared_trend)
   )
   parameters <- list(
     zeta = tmb_data$zeta_prior_mean,
     m = rep(log(birth_rate), n_node),
     g = rep(log(birth_rate), n_state),
-    coef = c(log(birth_rate), rep(0, ncol(design$design) - 1L)),
+    coef = matrix(c(log(birth_rate), rep(0, n_coef - 1L)), n_coef, n_sample),
     theta1 = vapply(domains, function(d) log(sum(d$y1) / sum(d$y0)), numeric(1)),
     log_scale = tmb_data$log_scale_prior_mean
   )
@@ -175,6 +217,8 @@ fit_sparse_joint_cohort <- function(samples,
   free_scale <- c(TRUE, TRUE, FALSE, TRUE, deviations)
   map <- list(log_scale = factor(ifelse(free_scale, cumsum(free_scale), NA)))
   if (!deviations) map$g <- factor(rep(NA, n_state))
+  # One trend: every column of `coef` is the same parameters.
+  if (shared_trend) map$coef <- factor(rep(seq_len(n_coef), n_sample))
   random <- c("zeta", "m", if (deviations) "g", "coef", "theta1")
   objective <- TMB::MakeADFun(tmb_data, parameters, map = map, random = random, DLL = "alfak2",
                               silent = TRUE, inner.control = inner_control)
@@ -183,11 +227,19 @@ fit_sparse_joint_cohort <- function(samples,
   node_latent <- which(solver$names == "m")
   state_latent <- if (deviations) which(solver$names == "g") else node_latent[state_node]
   m_hat <- cbind(solver$mode[node_latent], sqrt(solver$variance(node_latent)))
-  coef_hat <- cbind(solver$mode[solver$names == "coef"])
+  # Positions of each sample's coefficients among the latent variables.
+  coef_latent <- which(solver$names == "coef")
+  coef_index <- lapply(seq_len(n_sample), function(s) {
+    if (shared_trend) coef_latent else coef_latent[(s - 1L) * n_coef + seq_len(n_coef)]
+  })
   state_hat <- if (deviations) {
     cbind(solver$mode[state_latent], sqrt(solver$variance(state_latent)))
   } else m_hat[state_node, , drop = FALSE]
-  coef_covariance <- sparse_joint_coef_covariance(solver)
+  sample_trend <- lapply(seq_len(n_sample), function(s) {
+    list(centre = trend_centre[[s]], major = trend_major[[s]], coefficients = solver$mode[coef_index[[s]]],
+         covariance = sparse_joint_coef_covariance(solver, coef_index[[s]]))
+  })
+  names(sample_trend) <- names(samples)
   scale <- tmb_data$log_scale_prior_mean
   scale[free_scale] <- optimum$par
   scale <- stats::setNames(exp(scale), scale_names)
@@ -214,6 +266,8 @@ fit_sparse_joint_cohort <- function(samples,
   }), use.names = FALSE)
   node_weight <- as.numeric(tapply(major_share, factor(state_node, levels = seq_len(n_node)), sum))
   relative <- sparse_joint_relative(solver, node_latent, landscape$fitness_mean, landscape$log_birth_sd, node_weight)
+  # Covariance of each sample's trend coefficients with the cohort reference.
+  relative$reference$sample_coef_covariance <- lapply(coef_index, function(index) relative$covariance[index])
   landscape$relative_fitness <- relative$mean
   landscape$relative_sd <- sparse_joint_calibrate(relative$sd, relative$mean, landscape$shell, birth_rate,
                                                   calibration)
@@ -236,7 +290,9 @@ fit_sparse_joint_cohort <- function(samples,
     summary$relative_fitness <- own$mean
     summary$relative_sd <- sparse_joint_calibrate(own$sd, own$mean, summary$shell, birth_rate, calibration)
     summary$relative_sd_model <- own$sd
-    # Covariance of every node's shared value with this sample's reference.
+    # Covariance of every node's shared value, and of the sample's trend
+    # coefficients, with this sample's reference.
+    own$reference$coef_covariance <- own$covariance[coef_index[[s]]]
     references[[s]] <<- c(own$reference, list(node_covariance = own$covariance[node_latent]))
     summary
   })
@@ -246,7 +302,7 @@ fit_sparse_joint_cohort <- function(samples,
     landscape = landscape,
     samples = summaries,
     dropped = stats::setNames(lapply(domains, `[[`, "dropped"), names(samples)),
-    trend = list(coefficients = coef_hat[, 1L], covariance = coef_covariance, centre = centre,
+    trend = list(mode = trend_mode, samples = sample_trend, centre = centre,
                  major = major, shell_power = shell_power, scales = scale,
                  observed_level = lapply(summaries, sparse_joint_observed_level),
                  reference = relative$reference, sample_reference = references,
@@ -259,7 +315,8 @@ fit_sparse_joint_cohort <- function(samples,
       shared_nodes = sum(in_domain_of > 1L),
       dropped_karyotypes = sum(lengths(lapply(domains, `[[`, "dropped"))),
       dropped_cells = sum(vapply(domains, `[[`, numeric(1), "dropped_cells")),
-      sharing = sharing, birth_rate = birth_rate, fitted_birth_rate = exp(coef_hat[1L, 1L]),
+      sharing = sharing, trend = trend_mode, birth_rate = birth_rate,
+      fitted_birth_rate = exp(mean(vapply(sample_trend, function(t) t$coefficients[[1L]], numeric(1)))),
       initial_state = initial_state, beta = beta,
       min_cn = as.integer(min_cn), max_cn = as.integer(max_cn),
       seconds = proc.time()[["elapsed"]] - started
@@ -283,9 +340,11 @@ fit_sparse_joint_cohort <- function(samples,
 #'
 #' @return Data frame with `karyotype`, `fitness_mean`, `fitness_sd`,
 #'   `conf_low`, `conf_high`, `relative_fitness`, `relative_sd`,
-#'   `relative_sd_model`, `shell` and `source`, which is `"sample"`, `"landscape"`, `"observed_level"` or
-#'   `"trend"`. Relative fitness is measured from the count-weighted mean of
-#'   the sample's major karyotypes, or of all samples' when `sample` is `NULL`.
+#'   `relative_sd_model`, `shell` and `source`, which is `"sample"`,
+#'   `"landscape"`, `"observed_level"` or `"trend"`. Relative fitness is
+#'   measured from the count-weighted mean of the sample's major karyotypes,
+#'   or of all samples' when `sample` is `NULL`; `shell` is the distance to the
+#'   nearest major karyotype of the sample, or of any sample.
 #' @export
 predict.alfak2_sparse_joint_cohort_fit <- function(object, karyotypes, sample = NULL, ...) {
   labels <- if (is.character(karyotypes)) karyotypes else format_karyotypes(as.matrix(karyotypes))
@@ -300,14 +359,27 @@ predict.alfak2_sparse_joint_cohort_fit <- function(object, karyotypes, sample = 
   reference <- if (shared) trend$reference else trend$sample_reference[[sample]]
   cn <- parse_karyotypes(labels)
   self <- 2 * sparse_joint_self_probability(cn, object$diagnostics$beta) - 1
-  design <- sparse_joint_design(cn, trend$centre, trend$major, trend$shell_power)$design
   # In a sample, a karyotype deviates from the shared value.
   deviation <- if (shared) 0 else trend$scales[["deviation"]]
 
-  # The trend everywhere, then overwritten by better-informed sources.
-  log_birth <- as.numeric(design %*% trend$coefficients)
-  log_birth_sd <- sqrt(rowSums((design %*% trend$covariance) * design) + trend$scales[["residual"]]^2 + deviation^2)
-  covariance <- as.numeric(design %*% reference$coef_covariance)
+  # The trend everywhere, then overwritten by better-informed sources. In a
+  # sample it is that sample's trend. For the shared landscape it is the
+  # average of the samples' trends; the variance taken is the average of
+  # theirs, which is at least the variance of the average.
+  trend_part <- function(s, reference_covariance) {
+    part <- trend$samples[[s]]
+    design <- sparse_joint_design(cn, part$centre, part$major, trend$shell_power)$design
+    list(mean = as.numeric(design %*% part$coefficients),
+         variance = rowSums((design %*% part$covariance) * design),
+         covariance = as.numeric(design %*% reference_covariance))
+  }
+  parts <- if (shared) {
+    lapply(seq_along(trend$samples), function(s) trend_part(s, reference$sample_coef_covariance[[s]]))
+  } else list(trend_part(sample, reference$coef_covariance))
+  average <- function(name) Reduce(`+`, lapply(parts, `[[`, name)) / length(parts)
+  log_birth <- average("mean")
+  log_birth_sd <- sqrt(average("variance") + trend$scales[["residual"]]^2 + deviation^2)
+  covariance <- average("covariance")
   source <- rep("trend", length(labels))
 
   node <- match(labels, object$landscape$karyotype)
@@ -342,14 +414,15 @@ predict.alfak2_sparse_joint_cohort_fit <- function(object, karyotypes, sample = 
       relative_sd = NA_real_,
       relative_sd_model = sqrt(pmax(fitness$fitness_mean^2 * log_birth_sd^2 + reference$variance -
                                       2 * fitness$fitness_mean * covariance, 0)),
-      shell = sparse_joint_major_distance(cn, trend$major), source = source, stringsAsFactors = FALSE
+      # Distance to the nearest major of the sample, or of any sample.
+      shell = sparse_joint_major_distance(cn, if (shared) trend$major else {
+        own <- object$samples[[sample]]
+        parse_karyotypes(own$karyotype[own$major])
+      }),
+      source = source, stringsAsFactors = FALSE
     )
   )
-  # In a sample the floor grows with the distance to that sample's majors.
-  shell <- if (shared) out$shell else {
-    sparse_joint_major_distance(cn, parse_karyotypes(object$samples[[sample]]$karyotype[object$samples[[sample]]$major]))
-  }
-  out$relative_sd <- sparse_joint_calibrate(out$relative_sd_model, out$relative_fitness, shell,
+  out$relative_sd <- sparse_joint_calibrate(out$relative_sd_model, out$relative_fitness, out$shell,
                                             trend$birth_rate, trend$calibration)
   columns <- c("fitness_mean", "fitness_sd", "conf_low", "conf_high", "relative_fitness", "relative_sd",
                "relative_sd_model")
@@ -370,7 +443,8 @@ print.alfak2_sparse_joint_cohort_fit <- function(x, ...) {
   d <- x$diagnostics
   cat("<alfak2_sparse_joint_cohort_fit>\n")
   cat("  samples:", d$n_samples, " karyotypes:", d$n_nodes, "(", d$shared_nodes, "in more than one sample )\n")
-  cat("  sharing:", d$sharing, " between-sample deviation:", signif(x$trend$scales[["deviation"]], 3), "\n")
+  cat("  sharing:", d$sharing, " trend:", d$trend, " between-sample deviation:",
+      signif(x$trend$scales[["deviation"]], 3), "\n")
   cat("  baseline birth rate:", d$birth_rate, " convergence:", d$convergence, "\n")
   invisible(x)
 }

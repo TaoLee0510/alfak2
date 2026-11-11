@@ -162,9 +162,9 @@ sparse_joint_posterior <- function(objective, tmb_data, parameters, map, random,
   )
 }
 
-# Posterior covariance of the trend coefficients.
-sparse_joint_coef_covariance <- function(solver) {
-  coef_index <- which(solver$names == "coef")
+# Posterior covariance of latent variables at `coef_index`, by default all
+# trend coefficients.
+sparse_joint_coef_covariance <- function(solver, coef_index = which(solver$names == "coef")) {
   selector <- Matrix::sparseMatrix(i = coef_index, j = seq_along(coef_index), x = 1,
                                    dims = c(length(solver$names), length(coef_index)))
   solver$solve(selector)[coef_index, , drop = FALSE]

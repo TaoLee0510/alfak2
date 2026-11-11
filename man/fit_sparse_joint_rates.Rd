@@ -8,6 +8,7 @@ fit_sparse_joint_rates(
   ...,
   birth_rate_range,
   n_rates = 3L,
+  point = c("lowest", "centre"),
   fit_function = fit_sparse_joint
 )
 }
@@ -21,22 +22,31 @@ per unit of \code{dt}.}
 \item{n_rates}{Number of rates fitted, spaced evenly on the log scale. An
 odd number puts one at the centre of the range.}
 
+\item{point}{Rate of the point prediction: \code{"lowest"} of the range, or its
+geometric \code{"centre"}, which is more accurate when the true rate is near
+the centre and much less accurate when it is near the lowest.}
+
 \item{fit_function}{\code{\link[=fit_sparse_joint]{fit_sparse_joint()}} or \code{\link[=fit_sparse_joint_cohort]{fit_sparse_joint_cohort()}}.}
 }
 \value{
 An \code{alfak2_sparse_joint_rate_fit} object: \code{rates}, the \code{fits} at
-each of them, and \code{central}, the index of the fit at the centre.
+each of them, \code{point}, the index of the fit used for point predictions,
+and \code{central}, the index of the fit at the centre.
 }
 \description{
 Use this when the baseline birth rate is unknown and only a plausible range
 can be given. The model is fitted at each of a few rates across the range.
-\code{\link[stats:predict]{stats::predict()}} then reports relative fitness at the central rate, an interval
-that covers every rate in the range, and relative fitness per division.
+\code{\link[stats:predict]{stats::predict()}} then reports relative fitness at one of them, an
+interval that covers every rate in the range, and relative fitness per
+division.
 }
 \details{
 The two directions of error are not alike. Assuming too low a rate shrinks
-the predicted deficits of rare and unobserved karyotypes towards zero, which
-is no worse than predicting no differences. Assuming too high a rate
-inflates them, and a rate four times too high predicts worse than no
-differences. Rankings change little either way.
+the predicted deficits of rare and unobserved karyotypes towards zero; on
+simulated landscapes a rate 4 to 10 times too low still predicts better
+than no differences. Assuming too high a rate inflates them, and a rate 4
+times too high predicts worse than no differences. Rankings change little
+either way. The point prediction is therefore taken at the lowest rate of
+the range by default, which is never too high when the range holds the
+true rate.
 }
