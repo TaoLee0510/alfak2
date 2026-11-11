@@ -76,14 +76,16 @@ stt_method_alfak2_two_layer <- function(dataset, nodes, method) {
   storage.mode(counts) <- "integer"
   karyotypes <- stt_parse_karyotypes(nodes$karyotype)
   targets <- nodes$karyotype[nodes$distance > 0L]
+  # The two-layer pipeline is no longer the package default and must be named.
   arguments <- list(
-    counts, dt = dataset$interval, beta = dataset$beta,
+    counts, dt = dataset$interval, beta = dataset$beta, pipeline = "two_layer",
     transition_kernel = "exact",
     local_shell_depth = method$local_shell_depth,
     min_cn = 0, max_cn = as.integer(max(karyotypes)),
     max_nodes = method$max_nodes,
     graph_edge_weight = "normalized",
-    extrapolation_method = "graph_gaussian_baseline",
+    extrapolation_method = if (is.null(method$extrapolation_method)) "graph_gaussian_baseline" else
+      method$extrapolation_method,
     target_karyotypes = targets,
     observation_weight_mode = "fractional_count"
   )
