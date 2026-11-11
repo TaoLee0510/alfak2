@@ -22,6 +22,85 @@ stt_one_step_neighbours <- function(karyotypes, min_cn, max_cn) {
   out[!duplicated(stt_format_karyotypes(out)), , drop = FALSE]
 }
 
+# Karyotypes three and four steps from the observed ones, for the
+# extrapolation check (validation/sparse_joint/far_distance.R). The shells are
+# far too large to enumerate at 22 chromosomes, so they are sampled by random
+# walks of three or four single-copy steps from observed karyotypes, each
+# observed karyotype being an equally likely start, keeping endpoints whose
+# distance to the nearest observed karyotype is exactly the number of steps.
+# Within a shell this sampling is not uniform. The intermediate nodes of the
+# kept walks are returned as unscored rows (`scored = FALSE`): graph-based
+# methods need a path from the observed karyotypes to a target. The observed
+# karyotypes are included as the reference for centring.
+stt_far_nodes <- function(counts, min_cn = 1L, max_cn = 8L, cap = 2000L, seed = 1L, max_batches = 60L) {
+  counts <- as.matrix(counts)
+  observed <- rownames(counts)[rowSums(counts) > 0]
+  obs <- stt_parse_karyotypes(observed)
+  n_chr <- ncol(obs)
+  distance_to_observed <- function(k) {
+    out <- rep(Inf, nrow(k))
+    for (i in seq_len(nrow(obs))) out <- pmin(out, rowSums(abs(sweep(k, 2L, obs[i, ], "-"))))
+    out
+  }
+  old_seed <- if (exists(".Random.seed", envir = .GlobalEnv)) get(".Random.seed", envir = .GlobalEnv) else NULL
+  set.seed(seed)
+  walk <- function(steps, n) {
+    position <- obs[sample.int(nrow(obs), n, replace = TRUE), , drop = FALSE]
+    path <- vector("list", steps)
+    for (s in seq_len(steps)) {
+      chr <- sample.int(n_chr, n, replace = TRUE)
+      move <- sample(c(-1L, 1L), n, replace = TRUE)
+      index <- cbind(seq_len(n), chr)
+      candidate <- position[index] + move
+      blocked <- candidate < min_cn | candidate > max_cn
+      move[blocked] <- -move[blocked]
+      position[index] <- position[index] + move
+      path[[s]] <- position
+    }
+    list(end = position, path = path)
+  }
+  keep <- list(`3` = character(), `4` = character())
+  paths <- character()
+  for (steps in 3:4) {
+    batch <- 0L
+    while (length(keep[[as.character(steps)]]) < cap && batch < max_batches) {
+      batch <- batch + 1L
+      w <- walk(steps, 4000L)
+      d <- distance_to_observed(w$end)
+      hit <- which(d == steps)
+      labels <- stt_format_karyotypes(w$end[hit, , drop = FALSE])
+      new <- !duplicated(labels) & !labels %in% keep[[as.character(steps)]]
+      hit <- hit[new]
+      labels <- labels[new]
+      room <- cap - length(keep[[as.character(steps)]])
+      if (length(labels) > room) {
+        hit <- hit[seq_len(room)]
+        labels <- labels[seq_len(room)]
+      }
+      keep[[as.character(steps)]] <- c(keep[[as.character(steps)]], labels)
+      for (s in seq_len(steps - 1L)) {
+        paths <- c(paths, stt_format_karyotypes(w$path[[s]][hit, , drop = FALSE]))
+      }
+    }
+  }
+  if (is.null(old_seed)) rm(".Random.seed", envir = .GlobalEnv) else assign(".Random.seed", old_seed, envir = .GlobalEnv)
+  scored <- c(keep[["3"]], keep[["4"]])
+  paths <- setdiff(unique(paths), c(observed, scored))
+  path_distance <- if (length(paths)) distance_to_observed(stt_parse_karyotypes(paths)) else numeric()
+  nodes <- data.frame(
+    karyotype = c(observed, scored, paths),
+    distance = c(rep(0L, length(observed)), rep(3L, length(keep[["3"]])), rep(4L, length(keep[["4"]])),
+                 as.integer(path_distance)),
+    scored = c(rep(TRUE, length(observed) + length(scored)), rep(FALSE, length(paths))),
+    stringsAsFactors = FALSE
+  )
+  nodes$count_t0 <- 0
+  nodes$count_t1 <- 0
+  nodes$count_t0[seq_along(observed)] <- counts[observed, 1L]
+  nodes$count_t1[seq_along(observed)] <- counts[observed, 2L]
+  nodes
+}
+
 # Observed karyotypes plus their one- and two-step neighbourhoods. A shell
 # larger than its cap is subsampled uniformly; the draw depends only on `seed`.
 # The two-step shell is built from the complete one-step shell before either
@@ -140,12 +219,16 @@ stt_score_predictions <- function(nodes, truth_rate, prediction, reference_min_c
   # by support, because most of them are seen in only a few cells.
   total <- nodes$count_t0 + nodes$count_t1
   no_edges <- rep(FALSE, length(edge_distance))
-  strata <- list(
-    list(name = "d0", use = nodes$distance == 0L, edges = edge_distance == 0L),
-    list(name = "d1", use = nodes$distance == 1L, edges = edge_distance == 1L),
-    list(name = "d2", use = nodes$distance == 2L, edges = edge_distance == 2L),
-    list(name = "d0_ge5", use = nodes$distance == 0L & total >= 5, edges = no_edges),
-    list(name = "d0_lt5", use = nodes$distance == 0L & total < 5, edges = no_edges)
+  # One stratum per distance present (0 to 2 for the scoreboard, also 3 and 4
+  # for the extrapolation check), then observed karyotypes by support.
+  strata <- c(
+    lapply(sort(unique(nodes$distance)), function(d) {
+      list(name = paste0("d", d), use = nodes$distance == d, edges = edge_distance == d)
+    }),
+    list(
+      list(name = "d0_ge5", use = nodes$distance == 0L & total >= 5, edges = no_edges),
+      list(name = "d0_lt5", use = nodes$distance == 0L & total < 5, edges = no_edges)
+    )
   )
   by_stratum <- lapply(strata, function(stratum) {
     use <- stratum$use

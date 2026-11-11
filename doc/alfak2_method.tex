@@ -1215,6 +1215,103 @@ it fell below 0.90 mainly at distance 2 and mainly for the longer interval
 (0.81 to 0.83 at $\lambda\le0.8$) and for a shallow first sample (100/3000;
 0.77 to 0.86 at $\lambda\le0.8$), and was conservative on smooth landscapes.
 
+\subsection{Extrapolation to Distances 3 and 4}
+\label{sec:val-far}
+
+The scoreboard evaluates karyotypes up to two steps from the observed ones.
+To assess extrapolation beyond this range, karyotypes three and four steps
+from the nearest observed karyotype were sampled for every core dataset of
+both sets. Random walks of three or four single-copy steps were started from
+observed karyotypes, each observed karyotype being an equally likely start,
+and endpoints at exactly that distance were retained, up to 2000 per
+distance; the shells cannot be enumerated at 22 chromosomes, and this
+sampling is not uniform within a shell. All methods were fitted again with
+these karyotypes as targets. The intermediate nodes of the walks were added
+as unscored targets, so that the graph-based second layers of the two-layer
+pipeline have a path from the observed karyotypes. Reference values and
+centring are those of Section~\ref{sec:val-design}, so that distances 0 to 4
+share one origin. Because fitness declines with distance from the observed
+karyotypes, the error at large distances contains a mean deficit that the
+null predictor does not capture; the mean error and the rank correlation are
+therefore reported alongside the error ratio.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{generated/far_distance_ratio.pdf}
+
+\includegraphics[width=\textwidth]{generated/far_distance_spearman.pdf}
+\caption{Error relative to the null predictor (top) and Spearman correlation
+with the reference values (bottom) against distance from the nearest observed
+karyotype, held-out landscapes. Distances 0 to 2 are those of the scoreboard;
+the shaded region marks distances 3 and 4. Ratios of \texttt{alfakR} above 8
+are drawn at the upper edge and labelled with their value. Graph Gaussian
+denotes the two-layer pipeline with its default second layer.}
+\label{fig:far}
+\end{figure}
+
+\input{generated/far_main.tex}
+
+Each of the 192 datasets contributed 2000 karyotypes at each distance. All
+methods produced predictions for every dataset except \texttt{alfakR}, which
+failed on the same seven development and five held-out datasets as in the
+scoreboard. Every karyotype at distance 3 or 4 lies at least three steps from
+the nearest major karyotype and therefore outside the domain of the sparse
+joint model, so its prediction is the trend~(\ref{eq:predict-trend}) alone,
+determined by the dosage, curvature and shell terms of~(\ref{eq:trend}).
+
+On the held-out landscapes the sparse joint model with the balance prior
+attained 0.45, 0.58, 0.55 and 0.54 times the error of the null predictor at
+distance 3 for $\lambda=0.4$, 0.8, 1.2 and 1.6, and 0.44, 0.59, 0.56 and 0.53
+at distance 4 (Figure~\ref{fig:far}). These ratios agree with those at
+distance 2 (0.47, 0.58, 0.55 and 0.55) to within 0.03; the relative error did
+not increase beyond the range of the scoreboard. The reduction derives mainly
+from the mean. Because fitness declines with distance from the observed
+karyotypes, the mean error of the null predictor at distance 4 was 0.474,
+0.157, 0.085 and 0.049; the trend removed 73\%, 55\%, 60\% and 80\% of this
+deficit, leaving mean errors of 0.128, 0.071, 0.034 and 0.010. The remaining
+mean error was positive in every combination of wavelength and distance, and
+larger at distance 4 than at distance 3: fitness far from the observed
+karyotypes was overestimated, increasingly so with distance. The Spearman
+correlation at distance 4 was 0.14, 0.16, 0.33 and 0.40, against 0.17, 0.21,
+0.39 and 0.46 at distance 2. Ranking therefore declined slowly with distance;
+it remained informative on smooth landscapes and weak on rugged ones.
+Coverage of the nominal 95\% intervals at distances 3 and 4 was 0.91 at
+$\lambda=0.4$, 0.84 to 0.86 at $\lambda=0.8$, 0.97 to 0.98 at $\lambda=1.2$
+and 1.00 at $\lambda=1.6$; the intervals were too narrow at $\lambda=0.8$ and
+conservative on smooth landscapes. With independent initial states the error
+was higher than with the balance prior at every wavelength and both distances
+(ratios 0.48 to 0.82), and the rank correlations were similar (0.11 to 0.43).
+
+The graph Gaussian second layer of the two-layer pipeline attained 0.98 to
+1.00 times the error of the null predictor at distances 3 and 4, and its mean
+error agreed with that of the null predictor to within 0.001: its predictions
+shrink to zero away from the observed karyotypes. Its rank correlation ranged
+from $-0.04$ to 0.28 and was lower than that of the sparse joint model at
+every wavelength and both distances. Its standard deviations grew with
+distance, to 0.6 to 1.2 at distances 3 and 4 in the datasets examined, so
+that its intervals contained 99.9 to 100\% of the reference values; such
+intervals carry little information. The seven near-field
+second-layer methods produced no prediction beyond distance 2 and are
+therefore equivalent to the null predictor there
+(Supplement~\ref{sec:s-far}). \texttt{alfakR} predicts these karyotypes from
+its Kriging mean surface, without an uncertainty. Its error was 2.35, 1.32,
+1.50 and 18.2 times that of the null predictor at distance 3 and 2.28, 1.26,
+1.42 and 15.3 times at distance 4, and its rank correlation ranged from 0.01
+to 0.25.
+
+The development landscapes gave the same results: ratios of 0.42 to 0.59 and
+rank correlations of 0.14 to 0.49 for the sparse joint model at distances 3
+and 4 (Supplement~\ref{sec:s-far}). One qualification applies to the
+comparison across distances. The scoreboard samples distances 1 and 2
+uniformly within each shell, whereas distances 3 and 4 are sampled by random
+walks, which are not uniform within a shell. Differences between distances 2
+and 3 therefore partly reflect the sampling; the rank correlation of the graph
+Gaussian layer at $\lambda=1.6$, which rose from 0.19 at distance 2 to 0.28
+at distance 3, is an example. Beyond the domain, the sparse joint model thus
+retains a constant advantage over the null predictor, because its trend
+captures the decline of fitness with distance, but it does not rank
+individual karyotypes far from the data reliably on rugged landscapes.
+
 \subsection{Additional Assessments}
 \label{sec:val-additional}
 
@@ -1242,7 +1339,12 @@ karyotype-calling errors nor spatial sampling bias, and treatment is
 represented only by a bottleneck and by changes of the landscape at the first
 sample. The summary statistics of the simulated samples overlap with those of
 20 glioblastoma samples, although the simulated samples contain more
-karyotypes observed in a single cell. The benchmark is thus a necessary test
+karyotypes observed in a single cell. Beyond one step from the major
+karyotypes the sparse joint model predicts from its trend alone; at distances
+3 and 4 this reduced the error of the null predictor by 41 to 56\% but ranked
+karyotypes only weakly on rugged landscapes (Spearman correlation 0.14 to
+0.19 at $\lambda=0.4$ and 0.8; Section~\ref{sec:val-far}), and the fitness of
+distant karyotypes was overestimated. The benchmark is thus a necessary test
 of the method, not evidence of its accuracy on patient samples, for which no
 reference values exist.
 
@@ -2546,5 +2648,23 @@ joint model (balance) relative to the null predictor.}
 \input{generated/scenario_supp_heldout.tex}
 
 \input{generated/scenario_supp_dev.tex}
+
+\section{Results at Distances 3 and 4}
+\label{sec:s-far}
+
+This section gives, for every method and both sets of landscapes, the error,
+mean error, rank correlation, interval coverage and fraction of karyotypes
+predicted at distances 3 and 4 (Section~\ref{sec:val-far}). As in the
+scoreboard, a karyotype for which a method provides no prediction receives
+the prediction zero, and a method that fails on a dataset is scored as the
+null predictor on it. The seven near-field second-layer methods report
+predictions only within distance 2 of the observed karyotypes and are
+therefore scored as the null predictor at distances 3 and 4. The fraction of
+karyotypes predicted by \texttt{alfakR} is below one where it failed: on 5 of
+the 24 held-out datasets at $\lambda=1.6$, and on 3, 1 and 3 of the 24
+development datasets at $\lambda=0.4$, 1.2 and 1.6. It has no coverage at
+these distances because its Kriging predictions carry no uncertainty.
+
+\input{generated/far_supp.tex}
 
 \end{document}
