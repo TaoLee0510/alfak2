@@ -46,3 +46,6 @@ benchmark/scr/run_real_samples_alfak2.html
 !/validation/**/*.h
 !/validation/**/*.md
 /validation/**/results/
+
+# Local handoff notes, not part of the package
+HANDOFF_CLAUDE_*.md
