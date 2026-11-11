@@ -364,8 +364,17 @@ RMSE, with Spearman correlation in brackets, at distances 0 / 1 / 2:
   less (0.96 / 0.88 / 0.83 against 0.98 / 0.94 / 0.90), because the shared
   scales come from other landscapes.
 - With balance, a patient alone does as well on error (development 0.026 /
-  0.044 / 0.066 over all scenarios). Balance within a cohort has not been
-  tried.
+  0.044 / 0.066 over all scenarios).
+- Balance within a cohort (`alfak2_sparse_joint_cohort_balance`, trend
+  chosen, development, 2026-11-11): 2 of the 12 cohorts (L04, L07) fail
+  because neither trend has a finite marginal likelihood; the scale
+  optimisation fails already at the prior-centred scales. On the other 10,
+  against the cohort with free initial abundances, RMSE is lower at distances
+  1 and 2 (-0.003, interval -0.005 to -0.001; -0.006, -0.009 to -0.003) and
+  Spearman is not significantly different (+0.015); against balance alone,
+  RMSE is not significantly different and Spearman is higher (+0.078 / +0.053
+  / +0.045, intervals above zero). Coverage 0.99 / 0.96 / 0.94. A cohort of
+  eight took up to 57 minutes. The cohort default stays free.
 - A cohort of eight takes 10 s to 45 min, twice that when the trend is chosen.
 
 On the 20 GBM samples the per-sample trend is strongly preferred (negative log
@@ -374,6 +383,47 @@ karyotype's fitness between patients is large (0.05 on the log scale, against
 a residual of 0.003). The patients do not look like one landscape. Within a
 sample, estimates under the two trends agree (Spearman 0.94, median over
 samples). The fit takes about an hour for 16 000 states.
+
+## The second-layer methods of the two-layer pipeline
+
+The two-layer pipeline's nine second-layer methods were compared on the 96
+development datasets of the core scenarios (2026-11-11), each with the same
+first layer and fixed graph hyperparameters as `alfak2_two_layer_fixed`
+(`graph_gaussian_baseline`). `tabpfn_nearfield_feature_model` runs
+`delta_tree_ensemble` without its Python module and was not run separately.
+All 672 fits finished. By wavelength (`wavelength_tables.R`, as in Supplement
+S2.3 of `doc/alfak2_method.tex`):
+
+- Error: every second-layer method is 0.89 to 1.00 times the error of the null
+  predictor (`delta_tree_ensemble` 0.89 to 1.19), against 0.44 to 0.75 for the
+  sparse joint model with balance. They all interpolate the same first-layer
+  anchors, so the choice of second layer hardly matters.
+- Ranking: on the smoothest landscapes the second-layer methods rank observed
+  karyotypes better (wavelength 1.6, distance 0: 0.48 to 0.54 against 0.41)
+  and as well at wavelength 1.2 (0.47 to 0.50 against 0.49); everywhere else
+  the sparse joint model ranks better. The held-out landscapes show the same
+  exception (0.48 against 0.34 for `graph_gaussian_baseline`).
+- Intervals: near zero coverage for `local_polynomial_stencil` and
+  `delta_tree_ensemble` at distances 1 and 2, near one for the graph Gaussian
+  methods and `local_NNGP_or_GPnn`, below 0.6 for observed karyotypes except
+  the graph Gaussian methods; 0.90 to 1.00 for the sparse joint model.
+
+The benchmark's score stage now replaces the rows of the methods it scores and
+keeps the others; it previously rewrote `metrics_<split>.csv` with only those
+methods.
+
+## Results by wavelength
+
+Pooled over landscapes, errors are dominated by the rugged landscapes
+(wavelength 0.4), where fitness differences are about ten times larger than at
+1.6. The method document therefore reports results per wavelength. On the
+held-out landscapes the sparse joint model with balance is below the null
+predictor at every wavelength and distance (0.47 to 0.74 of its error), the
+two-layer pipeline at 0.92 to 1.00, and `alfakR` above it everywhere (21% of
+its fits failed at wavelength 1.6). Coverage of the sparse joint model ranges
+from 0.89 (wavelength 0.8, distance 2) to 1.00 (wavelength 1.6): slightly
+narrow on intermediate, conservative on smooth landscapes. The pooled
+acceptance rule is unchanged.
 
 ## Outputs for alfakR pipelines
 
@@ -436,8 +486,10 @@ rest of the landscape. On `dev_L10_P01_unbalanced_3000_100_360d` it is 0.43
   and none on the held-out landscapes. On those 75 its RMSE is 0.169 / 0.225
   at distances 0 / 1, above no information, and both variants rank better
   with intervals excluding zero.
-- Balance within a cohort, and a longer default history for balance, have not
-  been tried.
+- Balance within a cohort helps where it runs but fails on 2 of 12
+  development cohorts; falling back to free initial abundances when it fails,
+  or a marginal likelihood from the expected information, is untried. A
+  longer default history for balance has not been tried either.
 
 ## Files
 
@@ -448,5 +500,6 @@ reported uncertainty. `rate_sensitivity.R` sweeps the two supplied rates.
 `forward_prediction.R` scores forecasts of the later composition.
 `depth_limit.R` compares the fit with deep resamples and a perfect stratum
 mean. `real_cohort.R` runs the checks on real samples. `alfakR_compat.R`
-compares the output files with those of alfakR. The official verdict comes
+compares the output files with those of alfakR. `wavelength_tables.R` writes
+the tables by wavelength of the method document. The official verdict comes
 from `benchmark/sparse_two_timepoint/run.R --stage=report`.
