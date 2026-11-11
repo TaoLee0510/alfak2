@@ -7,7 +7,13 @@ analyses of karyotype evolution. It combines bounded karyotype graph
 construction, local hierarchical Bayesian inference, and a graph
 Gaussian-process posterior with ordered copy-number epistasis penalties.
 
-The default two-layer pipeline is:
+The default pipeline, `fit_alfak2()` or `fit_sparse_joint()`, is the sparse
+joint count model, described [below](#sparse-joint-model-for-two-sparse-samples).
+`alfak_compat()` runs it with the arguments of `alfakR::alfak()` and writes
+alfakR's output files, so that analyses built on alfakR read its results
+unchanged.
+
+The earlier two-layer pipeline, `pipeline = "two_layer"`, is:
 
 1. build a local karyotype graph around observed copy-number states,
 2. fit a local hierarchical posterior for initial frequencies and node fitness
@@ -60,13 +66,23 @@ fit <- fit_alfak2(
   sim$counts,
   dt = 1,
   beta = 0.00005,
+  sparse_joint_control = list(min_cn = 1, max_cn = 4)
+)
+
+head(summarize_alfak2(fit))
+predict(fit, c("2.2.2.2", "2.3.2.2"))
+
+# the earlier two-layer pipeline
+two_layer <- fit_alfak2(
+  sim$counts,
+  dt = 1,
+  beta = 0.00005,
+  pipeline = "two_layer",
   min_cn = 1,
   max_cn = 4,
   max_nodes = 5000
 )
-
-head(summarize_alfak2(fit))
-plot_alfak2(fit)
+plot_alfak2(two_layer)
 ```
 
 ## Inference and biological dynamics
@@ -122,8 +138,8 @@ quantile approximations; they do not claim exact full posterior integration.
 
 ## Sparse joint model for two sparse samples
 
-`fit_sparse_joint()` is a separate model built for the case the package is
-meant for: two samples of a few hundred cells. It fits both samples with one
+`fit_sparse_joint()`, the default pipeline of `fit_alfak2()`, is built for the
+case the package is meant for: two samples of a few hundred cells. It fits both samples with one
 count likelihood on the well-sampled karyotypes and all their one-step
 neighbours, observed or not. A rare karyotype is held at mutation-selection
 balance by the clone it descends from, so its level, not its change in
@@ -136,7 +152,7 @@ fit$summary                                  # karyotypes of the fitted domain
 predict(fit, c("2.2.3.2.2", "2.2.3.3.2"))    # any karyotype, also two steps away
 
 # the same model through the main entry point
-fit <- fit_alfak2(counts, dt = 180, beta = 0.00005, pipeline = "sparse_joint",
+fit <- fit_alfak2(counts, dt = 180, beta = 0.00005,
                   sparse_joint_control = list(birth_rate = 0.5))
 ```
 
@@ -175,9 +191,45 @@ cohort$landscape                       # shared fitness of every karyotype
 predict(cohort, karyotypes, sample = "P1")
 ```
 
-`initial_state = "balance"` also reads the first sample's levels, by starting
-rare karyotypes at mutation-selection balance. It assumes that fitness before
-the first sample was what it is between the samples.
+By default (`initial_state = "balance"`) rare karyotypes start at
+mutation-selection balance with the clones next to them, so that their levels
+in the first sample inform their fitness as well. This takes fitness before
+the first sample to resemble fitness between the samples. On simulated
+landscapes it was more accurate than `initial_state = "free"`, which uses the
+first sample only as a starting point, even when the landscape changed at the
+first sample, but less accurate when the samples were only about 30 divisions
+apart.
+
+### Outputs in the format of alfakR
+
+`alfak_compat()` takes the arguments of `alfakR::alfak()` (branch `dev`), fits
+the sparse joint model, writes the same files to `outdir` and returns the
+cross-validation R-squared invisibly. A pipeline switches by calling it where
+it called `alfak()`:
+
+```r
+r2r <- alfak_compat(yi, outdir, minobs = 20, nboot = 45, n0 = 1e5, nb = 1e7, pm = 0.00005,
+             birth_rate = 0.05)   # further arguments go to fit_sparse_joint()
+readRDS(file.path(outdir, "landscape.Rds"))   # k, mean, median, sd, fq, nn
+```
+
+| File | Content |
+| --- | --- |
+| `landscape.Rds` | Frequent karyotypes (`fq`, at least `minobs` cells), their one-step neighbours (`nn`) and the neighbours' neighbours, in alfakR's order, with `mean`, `median` and `sd` of fitness |
+| `landscape_posterior_samples.Rds` | One row per landscape karyotype, one column per draw: joint draws from the model's posterior, in place of alfakR's Kriging bootstrap |
+| `bootstrap_res.Rds` | `initial_fitness`, `final_fitness`, `initial_frequencies`, `final_frequencies` and `nn_fitness`, one row per draw, with alfakR's retry attributes |
+| `xval.Rds` | `R2R`, `predictions`, `observations` and `xval_data`, plus `tmp`, the paired matrix earlier alfakR versions saved |
+| `landscape_data.Rds` | With `landscape_data_output = TRUE`: `mean` and `median` models whose `predict()` gives the fitness of any karyotype |
+| `alfak2_fit.Rds` | The alfak2 fit itself |
+
+The scale is alfakR's: net growth rate per unit of time, with the
+count-weighted mean of the major karyotypes set to `log(nb / n0) / dt`.
+`correct_efflux = TRUE` reports birth rates. `minobs` only chooses which
+karyotypes are listed as frequent; the fit uses every cell. The
+cross-validation holds out each frequent karyotype with its neighbours, as in
+alfakR's folds, but by removing their counts and refitting the model, so its
+R-squared measures how well alfak2 predicts a karyotype it has not seen.
+`as_alfakR()` and `write_alfakR_outputs()` do the same for an existing fit.
 
 Design, benchmark results and checks on real samples are recorded in
 [`validation/sparse_joint/README.md`](validation/sparse_joint/README.md); the

@@ -126,7 +126,7 @@ test_that("effective-depth fit defaults to dirichlet-multinomial controls", {
     byrow = TRUE,
     dimnames = list(c("2.2", "2.3"), c("t0", "t1"))
   )
-  fit <- fit_alfak2(
+  fit <- fit_alfak2(pipeline = "two_layer", 
     counts,
     dt = 1,
     beta = 0.01,
@@ -160,7 +160,7 @@ test_that("raw input depth keeps the existing multinomial default", {
     byrow = TRUE,
     dimnames = list(c("2.2", "2.3"), c("t0", "t1"))
   )
-  fit <- fit_alfak2(
+  fit <- fit_alfak2(pipeline = "two_layer", 
     counts,
     dt = 1,
     beta = 0.01,

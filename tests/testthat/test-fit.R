@@ -69,7 +69,7 @@ test_that("graph posterior and end-to-end fit smoke tests work", {
   expect_equal(nrow(gp$anchors), sum(local$summary$effective_count_total > 0))
   expect_gt(gp$diagnostics$anchor_count_excluded, 0)
 
-  full <- fit_alfak2(dat, local_shell_depth = 1, global_extra_shell = 0,
+  full <- fit_alfak2(pipeline = "two_layer", dat, local_shell_depth = 1, global_extra_shell = 0,
                      min_cn = 1, max_cn = 3, max_nodes = 200,
                      graph_edge_weight = "unit",
                      anchor_count_reference = 20,

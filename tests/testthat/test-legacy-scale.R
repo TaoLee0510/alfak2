@@ -6,7 +6,7 @@ test_that("alfakR scale columns preserve native estimates and match finite-time 
     byrow = TRUE,
     dimnames = list(c("2.2", "2.3"), c("t0", "t1"))
   )
-  fit <- fit_alfak2(
+  fit <- fit_alfak2(pipeline = "two_layer", 
     counts,
     dt = 2,
     beta = 0.01,
@@ -51,7 +51,7 @@ test_that("alfakR scale can apply efflux viability correction", {
     byrow = TRUE,
     dimnames = list(c("2.2", "2.3"), c("t0", "t1"))
   )
-  fit <- fit_alfak2(
+  fit <- fit_alfak2(pipeline = "two_layer", 
     counts,
     dt = 2,
     beta = 0.01,
@@ -96,7 +96,7 @@ test_that("alfakR scale requires calibration population sizes", {
     dimnames = list(c("2.2", "2.3"), c("t0", "t1"))
   )
   expect_error(
-    fit_alfak2(
+    fit_alfak2(pipeline = "two_layer", 
       counts,
       local_shell_depth = 1,
       global_extra_shell = 0,

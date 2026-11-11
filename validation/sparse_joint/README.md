@@ -183,7 +183,7 @@ karyotypes within it besides. What two timepoints say about individual
 unobserved karyotypes is limited by the mean dynamics and by which clones
 happened to establish, not by sampling.
 
-## Initial abundances at balance (option)
+## Initial abundances at balance (the default)
 
 `initial_state = "balance"` starts every non-major karyotype at
 mutation-selection balance with the majors next to it, so that the first
@@ -197,11 +197,16 @@ The balance prior is not log-linear either, and with the observed Hessian 4 of
 taken at zero residual, as for the counts; all 168 development and all 168
 held-out fits then finish.
 
-It is not the default. It assumes that fitness before the first sample was
-what it is between the samples, and its history (by default the interval
-between the samples) is too short when the samples are close: at 30 days it
-predicts worse than the default model (below). It takes about 1.5 times as
-long.
+It became the default on 2026-11-11, after the held-out confirmation, where
+it passed every criterion and the free model did not. It assumes that fitness
+before the first sample resembled fitness between the samples. On simulated
+landscapes that changed at the first sample it was still the more accurate
+of the two (stress scenarios, below), which matters for patients treated
+between the samples. Its history (by default the interval between the
+samples) is too short when the samples are close: at 30 days, about 27
+divisions, it predicts worse than the free model, at 60 days as well. It takes
+about 1.5 times as long. `initial_state = "free"` gives the earlier model; the
+benchmark entries without "balance" in their name use it.
 
 ## Development scoreboard
 
@@ -370,6 +375,49 @@ a residual of 0.003). The patients do not look like one landscape. Within a
 sample, estimates under the two trends agree (Spearman 0.94, median over
 samples). The fit takes about an hour for 16 000 states.
 
+## Outputs for alfakR pipelines
+
+Analyses built on `alfakR::alfak()` (branch `dev`) read four files from its
+output directory. `alfak_compat()` writes them from a sparse joint fit, with
+the same arguments; `as_alfakR()` builds them from an existing fit. It is not
+called `alfak()`: an earlier decision keeps that name out of alfak2, and it
+would mask `alfakR::alfak()` wherever both packages are loaded.
+
+- Karyotypes are chosen as in alfakR: frequent (`minobs` cells over both
+  samples), their one-step neighbours, and those neighbours' neighbours, in
+  alfakR's order. `minobs` does not change the fit.
+- alfakR's bootstrap replicates become joint posterior draws. Each karyotype's
+  draws are widened by independent noise to its calibrated standard
+  deviation, so differences between karyotypes keep the model's correlations.
+  Draws come in mirrored pairs and each row is scaled to that standard
+  deviation, so `landscape.Rds` is both the summary of the draws, as in
+  alfakR, and exactly the model's prediction and calibrated uncertainty.
+- The scale is alfakR's: the count-weighted mean of the majors is set to
+  `log(nb / n0) / dt`.
+- The cross-validation keeps alfakR's folds, each frequent karyotype with its
+  neighbours. A fold's counts leave the likelihood, its karyotypes get the
+  prior of an unseen karyotype and stop being reference points of the trend,
+  and the posterior mode is found again with the fitted scales. Karyotypes
+  outside the domain, whose fitness never came from their own counts, are not
+  tested, and a fold holding every major is skipped.
+
+Checks against alfakR dev (commit eddeb5e), run on the same three benchmark
+datasets: every file has the same classes, names, columns, dimensions and
+attributes, the landscape has the same karyotypes in the same order (868,
+13 157 and 20 126 rows), and the frequent karyotypes and neighbours agree. The
+one addition is `tmp` in `xval.Rds`, the paired matrix of earlier alfakR
+versions, which the PANcanKFLs scripts read before recomputing a Kriging
+cross-validation. On two GBM samples the PANcanKFLs reader
+`make_parent_neighbor_matrix()` runs on the output unchanged.
+
+The cross-validation R-squared measures something else than alfakR's. On a
+development dataset with 27 frequent karyotypes (`dev_L12_P01_unbalanced_100_3000_360d`)
+the full fit correlates 0.44 with the true fitness of the tested karyotypes,
+the held-out predictions 0.07, and `R2R` is -0.78 (alfakR: -0.18): a karyotype
+whose own and neighbours' counts are removed is barely predictable from the
+rest of the landscape. On `dev_L10_P01_unbalanced_3000_100_360d` it is 0.43
+(alfakR: -0.04). The cross-validation took 75 s for 27 folds.
+
 ## Open
 
 - The default model misses the information in a deep first sample (the
@@ -399,5 +447,6 @@ per scenario. `calibration.R` and `calibration_fit.R` examine and fit the
 reported uncertainty. `rate_sensitivity.R` sweeps the two supplied rates.
 `forward_prediction.R` scores forecasts of the later composition.
 `depth_limit.R` compares the fit with deep resamples and a perfect stratum
-mean. `real_cohort.R` runs the checks on real samples. The official verdict comes
+mean. `real_cohort.R` runs the checks on real samples. `alfakR_compat.R`
+compares the output files with those of alfakR. The official verdict comes
 from `benchmark/sparse_two_timepoint/run.R --stage=report`.

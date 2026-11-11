@@ -1,7 +1,16 @@
 #' Fit the complete alfak2 pipeline
 #'
-#' Runs data validation, local graph construction, TMB local posterior fitting,
-#' bounded global graph expansion, and compiled graph Gaussian posterior solving.
+#' By default fits the sparse joint count model, built for two sparse
+#' samples: see [fit_sparse_joint()], whose result is returned. Its outputs
+#' can be converted to those of alfakR with [as_alfakR()], or produced
+#' directly with alfakR's arguments by [alfak_compat()].
+#'
+#' The earlier pipelines remain available: `"two_layer"` runs data
+#' validation, local graph construction, TMB local posterior fitting, bounded
+#' global graph expansion and compiled graph Gaussian posterior solving;
+#' `"joint_count"` fits one count likelihood on the bounded target graph. All
+#' arguments from `transition_kernel` to `forward_max_refinements`, and `...`,
+#' belong to these two.
 #'
 #' @param counts Two-column count matrix or an `alfak2_data` object.
 #' @param dt Time interval if `counts` is not already prepared.
@@ -69,14 +78,14 @@
 #'   uses observed graph nodes, and `"uniform"` weights all finite summary rows
 #'   equally.
 #' @param ... Passed to `fit_local_posterior()`.
-#' @param pipeline `"two_layer"` retains separate local and extrapolation fits;
+#' @param pipeline `"sparse_joint"`, the default, fits the sparse joint count
+#'   model with [fit_sparse_joint()]; of the other arguments only `counts`,
+#'   `dt`, `beta` and `sparse_joint_control` then apply, and giving any other
+#'   is an error. `"two_layer"` retains separate local and extrapolation fits;
 #'   `"joint_count"` fits a single count likelihood and structured landscape
-#'   prior on the entire bounded target graph. The joint model is an explicitly
-#'   selectable candidate pending independent all-distance validation.
-#'   `"sparse_joint"` fits the sparse joint count model, which is built for two
-#'   sparse samples: see [fit_sparse_joint()], whose result it returns. Of the
-#'   other arguments only `counts`, `dt`, `beta` and `sparse_joint_control`
-#'   then apply.
+#'   prior on the entire bounded target graph. On simulated sparse samples the
+#'   sparse joint model predicted fitness at distances 0 to 2 better than both
+#'   (`validation/sparse_joint/README.md`).
 #' @param sparse_joint_control Named list of further arguments for
 #'   [fit_sparse_joint()] when `pipeline = "sparse_joint"`, such as
 #'   `birth_rate`, `min_cn` and `max_cn`.
@@ -94,8 +103,8 @@
 #'   maximum frequency change and log total growth change.
 #' @param forward_max_refinements Maximum joint forward step halvings and refits.
 #'
-#' @return An `alfak2_fit` object, or an `alfak2_sparse_joint_fit` object for
-#'   `pipeline = "sparse_joint"`.
+#' @return An `alfak2_sparse_joint_fit` object for `pipeline = "sparse_joint"`,
+#'   otherwise an `alfak2_fit` object.
 #' @export
 fit_alfak2 <- function(counts,
                        dt = 1,
@@ -149,7 +158,7 @@ fit_alfak2 <- function(counts,
                        nb = NULL,
                        correct_efflux = FALSE,
                        legacy_weight = c("pi0", "directly_informed", "uniform"),
-                       pipeline = c("two_layer", "joint_count", "sparse_joint"),
+                       pipeline = c("sparse_joint", "two_layer", "joint_count"),
                        joint_control = list(),
                        sparse_joint_control = list(),
                        target_karyotypes = NULL,
@@ -158,6 +167,15 @@ fit_alfak2 <- function(counts,
                        ...) {
   pipeline <- match.arg(pipeline)
   if (identical(pipeline, "sparse_joint")) {
+    # Arguments of the other pipelines would be ignored here; a call written
+    # for them must say so.
+    supplied <- setdiff(names(match.call())[-1L], c("counts", "dt", "beta", "pipeline", "sparse_joint_control"))
+    if (length(supplied)) {
+      stop(sprintf(paste0("%s %s not apply to the sparse joint pipeline, the default; set `pipeline = \"two_layer\"` ",
+                          "or `\"joint_count\"`, or pass arguments of fit_sparse_joint() in `sparse_joint_control`."),
+                   paste0("`", supplied, "`", collapse = ", "), if (length(supplied) == 1L) "does" else "do"),
+           call. = FALSE)
+    }
     if (!is.list(sparse_joint_control) || (length(sparse_joint_control) &&
         (is.null(names(sparse_joint_control)) || any(!nzchar(names(sparse_joint_control)))))) {
       stop("`sparse_joint_control` must be a named list.", call. = FALSE)
