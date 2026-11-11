@@ -899,7 +899,38 @@ daughters with a copy number outside $[1,8]$ are inviable, and populations
 reaching $2\times10^6$ cells are reduced to 1\% at random. Two samples are
 drawn from each population under eight scenarios, with 50 to 3000 cells per
 sample and intervals of 180 to 1080 days, including unbalanced sample sizes
-and a bottleneck. The first sample is drawn on day 1440. Twenty-four
+and a bottleneck. The first sample is drawn on day 1440. Each sampled cell
+contributes one karyotype, without calling error, and the input to every
+method is the resulting two-column count matrix. The number of distinct
+karyotypes observed in the two samples together increases with sample size
+and with landscape smoothness, because populations on smooth landscapes are
+more diverse:
+
+\begin{center}
+\footnotesize
+\begin{tabular}{llrrrr}
+\toprule
+Cells, first / second & Days & \multicolumn{4}{c}{Observed karyotypes, median (range)} \\
+\cmidrule(lr){3-6}
+sample & apart & $\lambda=0.4$ & $\lambda=0.8$ & $\lambda=1.2$ & $\lambda=1.6$ \\
+\midrule
+50 / 50 & 180 & 5 (3--7) & 20 (9--35) & 38 (35--57) & 66 (59--75) \\
+200 / 200 & 180 & 14 (10--17) & 56 (40--92) & 100 (95--144) & 188 (156--242) \\
+200 / 200 & 360 & 12 (10--16) & 62 (40--79) & 100 (93--157) & 204 (166--238) \\
+500 / 700 & 360 & 28 (25--35) & 105 (74--158) & 216 (189--325) & 402 (342--547) \\
+500 / 700 & 1080 & 29 (24--38) & 115 (82--144) & 220 (186--370) & 438 (296--482) \\
+500 / 700$^{a}$ & 360 & 30 (23--34) & 92 (69--151) & 226 (182--274) & 396 (333--482) \\
+100 / 3000 & 360 & 44 (36--52) & 130 (104--215) & 321 (231--401) & 568 (497--774) \\
+3000 / 100 & 360 & 38 (34--48) & 158 (94--265) & 292 (260--455) & 562 (408--742) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\noindent{\footnotesize $^{a}$ Regrown from 200 cells surviving a bottleneck at
+the first sample.}
+
+\noindent Across all datasets, 59\% of observed karyotypes (median) were seen
+in a single cell, and 12\% were seen in both samples. Twenty-four
 landscapes with independently drawn centroids, six per wavelength, were
 divided into twelve development landscapes, used for model construction, and
 twelve held-out landscapes, which were evaluated once after the method had
@@ -974,9 +1005,15 @@ constrained fits.
 The following tables report, for each wavelength $\lambda$ and distance $d$
 from the observed karyotypes, the root mean squared error of relative
 fitness, the Spearman correlation with the reference values and the coverage
-of nominal 95\% intervals, each computed as in (\ref{eq:rmse-pooled}). The
-null predictor has no rank correlation or intervals, and \texttt{alfakR}
-reports no intervals in this form.
+of nominal 95\% intervals, each computed as in (\ref{eq:rmse-pooled}).
+Coverage is the fraction of scored karyotypes whose reference value lies
+within the nominal 95\% interval of a method, the prediction plus or minus
+1.96 standard deviations; a calibrated method attains 0.95, and lower values
+indicate overconfident, higher values overly wide intervals. The null
+predictor provides neither a ranking nor intervals. The intervals of
+\texttt{alfakR} derive from the standard deviation of its Kriging predictions
+over bootstrap replicates; karyotypes outside its landscape have none and are
+omitted from its coverage.
 
 \noindent\textit{Root mean squared error.}
 \begin{center}
@@ -1042,10 +1079,24 @@ predictor, and \texttt{alfakR} exceeded it everywhere; 21\% of the
 joint model were higher than those of the two-layer pipeline and
 \texttt{alfakR} at every wavelength and distance, with one exception: for
 observed karyotypes on the smoothest landscapes ($\lambda=1.6$, $d=0$), the
-two-layer pipeline ranked them better (0.48 versus 0.34). Rank correlations
-at distances 1 and 2 decreased with ruggedness. Coverage ranged from 0.89 to
-1.00: intervals were slightly too narrow at two steps on intermediate
-landscapes ($\lambda=0.8$) and conservative on the smoothest. The acceptance
+two-layer pipeline ranked them better (0.48 versus 0.34). The exception
+arises from observed karyotypes with fewer than five cells. For karyotypes
+with at least five cells, the sparse joint model ranked better at every
+wavelength (0.74 versus 0.68 at $\lambda=1.6$). On smooth landscapes the
+populations are diverse, and 56\% of the rare observed karyotypes lay more
+than one step from every major karyotype, outside the domain, where the
+sparse joint model assigns them a common level (\ref{eq:predict-level}) that
+carries no ranking information. The two-layer pipeline instead estimates each
+of them by smoothing over neighbouring observed karyotypes, which is effective
+when neighbouring karyotypes have similar fitness (Spearman 0.44 for these
+karyotypes). Within the domain, the sparse joint model ranked rare karyotypes
+better (0.65 versus 0.53). Rank correlations at distances 1 and 2 decreased
+with ruggedness. Coverage of the sparse joint model
+ranged from 0.89 to 1.00: intervals were slightly too narrow at two steps on
+intermediate landscapes ($\lambda=0.8$) and conservative on the smoothest.
+The intervals of \texttt{alfakR} covered 17--68\% of reference values and
+were thus overconfident; those of the two-layer pipeline were close to one
+except for observed karyotypes on the most rugged landscapes. The acceptance
 criteria, specified before the held-out landscapes were evaluated, were
 applied to values averaged over all twelve landscapes and were all met: lower
 error than both the null predictor and the two-layer pipeline, higher rank
