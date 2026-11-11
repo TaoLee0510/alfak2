@@ -384,8 +384,12 @@ samples). The fit takes about an hour for 16 000 states.
   neighbours are still predicted too high (bias +0.02 at one step, +0.04 at
   two).
 - The calibration constants come from one family of simulated landscapes.
-- ALFA-K with minobs 5 has 70 of 96 development fits (HPC run still going) and
-  none on the held-out landscapes.
+- ALFA-K with minobs 5 has 75 of 96 development fits (the HPC run continues)
+  and none on the held-out landscapes. On those 75 its RMSE is 0.169 / 0.225
+  at distances 0 / 1, above no information, and both variants rank better
+  with intervals excluding zero.
+- Balance within a cohort, and a longer default history for balance, have not
+  been tried.
 
 ## Files
 
