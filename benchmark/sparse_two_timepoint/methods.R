@@ -9,6 +9,7 @@ stt_run_method <- function(method, dataset, nodes, work_dir) {
       zero = stt_method_zero(dataset, nodes),
       alfakR = stt_method_alfakR(dataset, nodes, method, work_dir),
       alfak2_two_layer = stt_method_alfak2_two_layer(dataset, nodes, method),
+      alfak2_sparse_joint = stt_method_alfak2_sparse_joint(dataset, nodes, method),
       stop("Unknown method type: ", method$type, call. = FALSE)
     ),
     error = function(e) list(status = "failed", prediction = NULL, detail = conditionMessage(e))
@@ -100,4 +101,22 @@ stt_method_alfak2_two_layer <- function(dataset, nodes, method) {
                                fitness = as.numeric(summary$fitness_mean)[index],
                                fitness_sd = as.numeric(summary$fitness_sd)[index],
                                stringsAsFactors = FALSE))
+}
+
+# Sparse joint count model. The baseline birth rate is an input; the benchmark
+# supplies one value for all datasets and never the simulated truth.
+stt_method_alfak2_sparse_joint <- function(dataset, nodes, method) {
+  counts <- dataset$counts
+  storage.mode(counts) <- "integer"
+  fit <- alfak2::fit_sparse_joint(counts, dt = dataset$interval, beta = dataset$beta,
+                                  birth_rate = method$birth_rate,
+                                  min_cn = method$min_cn, max_cn = method$max_cn)
+  prediction <- stats::predict(fit, nodes$karyotype)
+  diagnostics <- fit$diagnostics
+  list(status = "ok",
+       detail = sprintf("states=%d major=%d dropped=%d convergence=%d finite_sd=%s birth=%.2f",
+                        diagnostics$n_states, diagnostics$n_major, diagnostics$dropped_karyotypes,
+                        diagnostics$convergence, diagnostics$finite_uncertainty, diagnostics$fitted_birth_rate),
+       prediction = data.frame(karyotype = prediction$karyotype, fitness = prediction$fitness_mean,
+                               fitness_sd = prediction$fitness_sd, stringsAsFactors = FALSE))
 }

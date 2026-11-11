@@ -9,7 +9,8 @@
 #   Rscript benchmark/sparse_two_timepoint/run.R --stage=report   [--split=dev]
 #   Rscript benchmark/sparse_two_timepoint/run.R --stage=profile  [--split=dev] [--real-dir=DIR]
 #
-# Options: --workers=N (default 2), --output-dir=DIR, --cohort (also build the cohort
+# Options: --workers=N (default 2), --output-dir=DIR, --scenarios=REGEX (fit only
+# matching scenarios), --cohort (also build the cohort
 # datasets of every patient), --unseal-heldout (required for --split=heldout).
 # Set STT_R_LIB to a library directory holding the alfak2 and alfakR builds
 # under test; otherwise the installed packages are used.
@@ -127,10 +128,11 @@ stt_dataset_nodes <- function(config, dataset) {
   nodes
 }
 
-stt_stage_fit <- function(config, split, workers, method_names) {
+stt_stage_fit <- function(config, split, workers, method_names, scenarios = NULL) {
   index <- utils::read.csv(file.path(config$output_dir, sprintf("dataset_index_%s.csv", split)),
                            stringsAsFactors = FALSE)
   index <- index[index$scoreboard, , drop = FALSE]
+  if (!is.null(scenarios)) index <- index[grepl(scenarios, index$scenario), , drop = FALSE]
   tasks <- list()
   for (dataset_id in index$dataset_id) for (method_name in method_names) {
     if (!file.exists(stt_fit_path(config, dataset_id, method_name))) {
@@ -229,7 +231,7 @@ main <- function() {
     profile = stt_stage_profile(config, split, args$real_dir),
     truth = stt_stage_truth(config, split, workers, cohort),
     datasets = stt_stage_datasets(config, split, workers, cohort),
-    fit = stt_stage_fit(config, split, workers, method_names),
+    fit = stt_stage_fit(config, split, workers, method_names, args$scenarios),
     score = stt_stage_score(config, split, workers, method_names),
     report = stt_stage_report(config, split),
     stop("Unknown stage: ", stage, call. = FALSE)

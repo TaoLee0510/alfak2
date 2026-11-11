@@ -137,7 +137,9 @@ stt_stage_report <- function(config, split) {
   methods <- unique(metrics$method)
   acceptance <- config$acceptance
   baselines <- c(acceptance$zero, acceptance$current, acceptance$original)
-  candidates <- setdiff(methods, baselines)
+  # Methods that are neither baselines nor named candidates (sensitivity
+  # variants, for instance) are tabulated but not judged.
+  candidates <- intersect(acceptance$candidates, methods)
   # Every method against the no-information answer, and the current alfak2 and
   # every candidate against the original ALFA-K settings.
   pairs <- list()
