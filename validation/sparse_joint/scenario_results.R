@@ -72,14 +72,16 @@ dev_cells <- summarise_cells(dev)
 
 ## Figures -------------------------------------------------------------------
 
-# Categorical slots 1-3 of the reference palette, in fixed order; shapes are the
-# secondary encoding (the third hue is below 3:1 on white). alfakR is left to
-# the tables: its errors reach a hundred times the null predictor's and would
-# compress every other series.
+# Categorical slots 1-4 of the reference palette, in fixed order; shapes are the
+# secondary encoding (the third and fourth hues are below 3:1 on white).
 palette <- c("Sparse joint, balance (default)" = "#2a78d6", "Sparse joint, independent" = "#eb6834",
-             "Two-layer pipeline" = "#1baf7a")
+             "Two-layer pipeline" = "#1baf7a", "alfakR (minobs = 20)" = "#eda100")
 shapes <- c("Sparse joint, balance (default)" = 16, "Sparse joint, independent" = 17,
-            "Two-layer pipeline" = 15)
+            "Two-layer pipeline" = 15, "alfakR (minobs = 20)" = 18)
+# The error axis stops at `cap`: alfakR reaches about 300 times the null
+# predictor's error, which would compress every other series. Values above it
+# are drawn at the cap and labelled with their ratio.
+cap <- 8
 plotted <- held_cells[held_cells$label %in% names(palette), ]
 plotted$label <- factor(plotted$label, levels = names(palette))
 plotted$lambda <- factor(sub("^w", "lambda == ", plotted$wavelength_class),
@@ -94,12 +96,20 @@ theme_doc <- theme_minimal(base_size = 8) +
 separators <- geom_vline(xintercept = c(4.5, 5.5, 6.5), colour = "#d7d6d0", linewidth = 0.3)
 dodge <- position_dodge(width = 0.6)
 
-ratio_plot <- ggplot(plotted, aes(design, ratio, colour = label, shape = label)) +
+plotted$ratio_shown <- pmin(plotted$ratio, cap)
+plotted$low_shown <- pmin(plotted$ratio_low, cap)
+plotted$high_shown <- pmin(plotted$ratio_high, cap)
+plotted$above <- ifelse(plotted$ratio > cap, sprintf("%.0f", plotted$ratio), "")
+ratio_plot <- ggplot(plotted, aes(design, ratio_shown, colour = label, shape = label, group = label)) +
   separators +
   geom_hline(yintercept = 1, colour = "#8a8984", linewidth = 0.4, linetype = "22") +
-  geom_linerange(aes(ymin = ratio_low, ymax = ratio_high), position = dodge, linewidth = 0.45) +
+  geom_hline(yintercept = cap, colour = "#d7d6d0", linewidth = 0.3, linetype = "13") +
+  geom_linerange(aes(ymin = low_shown, ymax = high_shown), position = dodge, linewidth = 0.45) +
   geom_point(position = dodge, size = 1.5) +
-  scale_y_log10(breaks = c(0.25, 0.5, 1, 2, 4, 8), labels = c("0.25", "0.5", "1", "2", "4", "8")) +
+  geom_text(aes(label = above), position = dodge, colour = "#52514e", size = 1.9, vjust = -0.9,
+            show.legend = FALSE) +
+  scale_y_log10(breaks = c(0.25, 0.5, 1, 2, 4, 8), labels = c("0.25", "0.5", "1", "2", "4", "8+"),
+                limits = c(0.25, cap * 1.9)) +
   scale_colour_manual(values = palette) + scale_shape_manual(values = shapes) +
   facet_grid(lambda ~ distance, labeller = label_parsed) +
   labs(x = NULL, y = "Error relative to the null predictor (log scale)") + theme_doc
