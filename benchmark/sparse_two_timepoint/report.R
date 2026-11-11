@@ -31,29 +31,34 @@ stt_pooled_scoreboard <- function(cells, metrics) {
 }
 
 # Paired difference of a metric between a candidate and a baseline, by
-# distance, with a landscape bootstrap interval.
+# distance, with a landscape bootstrap interval. Only landscape x scenario
+# cells that both methods have are used, so a method fitted on part of the
+# benchmark is compared on that part.
 stt_paired_comparison <- function(cells, candidate, baseline, metric = "rmse",
                                   n_boot = 2000L, seed = 20261110L) {
-  per_landscape <- stats::aggregate(cells[metric], cells[c("landscape_id", "method", "stratum")], stt_mean)
+  key <- c("landscape_id", "scenario")
   rows <- lapply(c("d0", "d1", "d2"), function(d) {
     pick <- function(method) {
-      part <- per_landscape[per_landscape$method == method & per_landscape$stratum == d, ]
-      stats::setNames(part[[metric]], part$landscape_id)
+      part <- cells[cells$method == method & cells$stratum == d, c(key, metric)]
+      part[is.finite(part[[metric]]), ]
     }
-    a <- pick(candidate)
-    b <- pick(baseline)
-    common <- intersect(names(a)[is.finite(a)], names(b)[is.finite(b)])
-    if (length(common) < 3L) return(NULL)
-    difference <- a[common] - b[common]
+    both <- merge(pick(candidate), pick(baseline), by = key, suffixes = c(".candidate", ".baseline"))
+    if (!nrow(both)) return(NULL)
+    per_landscape <- stats::aggregate(both[paste0(metric, c(".candidate", ".baseline"))],
+                                      both["landscape_id"], mean)
+    if (nrow(per_landscape) < 3L) return(NULL)
+    a <- per_landscape[[2L]]
+    b <- per_landscape[[3L]]
+    difference <- a - b
     set.seed(seed)
     boot <- replicate(n_boot, mean(sample(difference, replace = TRUE)))
     data.frame(
       candidate = candidate, baseline = baseline, metric = metric, stratum = d,
-      n_landscapes = length(common),
-      baseline_mean = mean(b[common]), candidate_mean = mean(a[common]),
+      n_landscapes = nrow(per_landscape),
+      baseline_mean = mean(b), candidate_mean = mean(a),
       difference = mean(difference),
       ci_low = unname(stats::quantile(boot, 0.025)), ci_high = unname(stats::quantile(boot, 0.975)),
-      relative_change = mean(difference) / mean(b[common]),
+      relative_change = mean(difference) / mean(b),
       stringsAsFactors = FALSE
     )
   })
@@ -127,10 +132,14 @@ stt_acceptance <- function(cells, candidate, acceptance) {
 stt_stage_report <- function(config, split) {
   metrics <- utils::read.csv(file.path(config$output_dir, sprintf("metrics_%s.csv", split)),
                              stringsAsFactors = FALSE)
+  # The verdict is made on the core scenarios. Stress scenarios break an
+  # assumption on purpose and are tabulated after it.
+  stress <- metrics[metrics$scenario %in% config$scenarios$scenario[config$scenarios$role == "stress"], ]
+  metrics <- metrics[!metrics$scenario %in% stress$scenario, ]
   cells <- stt_landscape_scenario_means(metrics)
   board <- stt_pooled_scoreboard(cells, metrics)
-  # A method scored on fewer datasets is averaged over fewer landscapes, so its
-  # pooled row is not comparable; the paired tables use common landscapes only.
+  # A method scored on fewer datasets is averaged over fewer of them, so its
+  # pooled row is not comparable; the paired tables use common cells only.
   board$n_datasets <- as.integer(tapply(metrics$dataset_id, metrics$method,
                                         function(x) length(unique(x)))[board$method])
   board <- board[order(board$stratum, board$method), ]
@@ -161,6 +170,13 @@ stt_stage_report <- function(config, split) {
   }))
   if (is.null(paired)) stop("No paired comparison is available yet.", call. = FALSE)
   verdict <- do.call(rbind, lapply(candidates, function(candidate) stt_acceptance(cells, candidate, acceptance)))
+  # Cohort methods against the single-sample model, on the cohort scenario.
+  cohort_cells <- cells[cells$scenario == config$cohort_scenario, ]
+  cohort_paired <- do.call(rbind, lapply(intersect(acceptance$cohort, methods), function(method) {
+    do.call(rbind, lapply(c("rmse", "bias", "spearman", "coverage95"), function(metric) {
+      stt_paired_comparison(cohort_cells, method, acceptance$cohort_baseline, metric)
+    }))
+  }))
   report_dir <- file.path(config$output_dir, "report")
   dir.create(report_dir, recursive = TRUE, showWarnings = FALSE)
   utils::write.csv(cells, file.path(report_dir, sprintf("cells_%s.csv", split)), row.names = FALSE)
@@ -169,12 +185,21 @@ stt_stage_report <- function(config, split) {
   if (!is.null(verdict)) {
     utils::write.csv(verdict, file.path(report_dir, sprintf("acceptance_%s.csv", split)), row.names = FALSE)
   }
+  stress_table <- if (nrow(stress)) {
+    part <- stress[stress$stratum %in% c("d0", "d1", "d2"), ]
+    table <- stats::aggregate(part[c("rmse", "bias", "spearman", "coverage95")],
+                              part[c("scenario", "stratum", "method")], stt_mean)
+    table$n_datasets <- stats::aggregate(part$dataset_id, part[c("scenario", "stratum", "method")],
+                                         function(x) length(unique(x)))$x
+    utils::write.csv(table, file.path(report_dir, sprintf("stress_%s.csv", split)), row.names = FALSE)
+    table[order(table$scenario, table$stratum, table$method), ]
+  } else NULL
   show <- c("stratum", "method", "n_datasets", "rmse", "rmse_zero", "truth_sd", "median_abs_error",
             "slope", "spearman", "auc_beneficial", "edge_sign_accuracy", "coverage95",
             "extreme_fraction", "failure_fraction", "median_seconds")
   lines <- c(
     sprintf("# Sparse two-timepoint scoreboard (%s landscapes)", split), "",
-    sprintf("%d datasets, %d landscapes, %d scenarios. `rmse_zero` is the error of predicting no fitness differences; `truth_sd` is the error of knowing only the mean fitness of the stratum.",
+    sprintf("%d datasets, %d landscapes, %d core scenarios. `rmse_zero` is the error of predicting no fitness differences; `truth_sd` is the error of knowing only the mean fitness of the stratum.",
             length(unique(metrics$dataset_id)), length(unique(metrics$landscape_id)), length(unique(metrics$scenario))),
     "", "## Pooled over scenarios", "", stt_markdown_table(board[show]),
     "", "## Acceptance", "",
@@ -188,7 +213,14 @@ stt_stage_report <- function(config, split) {
     },
     "", "## Paired differences (candidate minus baseline, landscape bootstrap 95% interval)", "",
     stt_markdown_table(paired[c("candidate", "baseline", "metric", "stratum", "n_landscapes", "baseline_mean",
-                                "candidate_mean", "difference", "ci_low", "ci_high", "relative_change")], 4L)
+                                "candidate_mean", "difference", "ci_low", "ci_high", "relative_change")], 4L),
+    if (!is.null(cohort_paired)) {
+      utils::write.csv(cohort_paired, file.path(report_dir, sprintf("cohort_%s.csv", split)), row.names = FALSE)
+      c("", sprintf("## Cohort fits against the single-sample fit (scenario %s)", config$cohort_scenario), "",
+        stt_markdown_table(cohort_paired[c("candidate", "baseline", "metric", "stratum", "n_landscapes", "baseline_mean",
+                                           "candidate_mean", "difference", "ci_low", "ci_high")], 4L))
+    },
+    if (!is.null(stress_table)) c("", "## Stress scenarios (not part of the verdict)", "", stt_markdown_table(stress_table))
   )
   path <- file.path(report_dir, sprintf("scoreboard_%s.md", split))
   writeLines(lines, path)

@@ -72,16 +72,50 @@ stt_snapshot <- function(truth, day) {
   population
 }
 
-# Regrowth after a strong bottleneck: restart the ABM from `n_survivors` cells
-# drawn from the day-`t0` population and run it for `interval` days.
-stt_bottleneck_snapshot <- function(truth, config, t0, interval, n_survivors, seed) {
+# Restart the ABM from the day-`t0` population and run it for `interval` days.
+# With `n_survivors`, only that many cells drawn from the population survive
+# (a bottleneck); `centroids` may differ from those the population grew on.
+stt_restart_snapshot <- function(truth, config, t0, interval, seed, n_survivors = 0,
+                                 centroids = truth$centroids) {
   start <- stt_snapshot(truth, t0)
-  set.seed(seed)
-  survivors <- stats::rmultinom(1L, n_survivors, start / sum(start))[, 1L]
-  names(survivors) <- names(start)
-  survivors <- survivors[survivors > 0]
-  stt_run_abm(survivors, truth$centroids, truth$wavelength, config,
+  if (n_survivors > 0) {
+    set.seed(seed)
+    survivors <- stats::rmultinom(1L, n_survivors, start / sum(start))[, 1L]
+    names(survivors) <- names(start)
+    start <- survivors[survivors > 0]
+  }
+  stt_run_abm(start, centroids, truth$wavelength, config,
               record_days = interval, seed = seed, beta = truth$beta)[[1L]]
+}
+
+# A changed landscape. With `fraction` below one, that fraction of the waves is
+# redrawn, repeating the draw until the population's mean division rate is
+# within 10% of what it was: the change reorders karyotypes without stopping
+# growth, and fitness before and after stays correlated. With `fraction` one,
+# the whole landscape is turned about the most abundant karyotype by a random
+# signed permutation of the chromosomes. That karyotype keeps its fitness and
+# the landscape its statistics, but which neighbour is fit is drawn anew.
+stt_shift_centroids <- function(truth, population, fraction, seed, tolerance = 0.1, max_draws = 2e5) {
+  set.seed(seed)
+  centroids <- truth$centroids
+  top <- sort(population, decreasing = TRUE)
+  top <- top[seq_len(min(length(top), 50L))]
+  if (fraction >= 1) {
+    pivot <- as.numeric(stt_parse_karyotypes(names(top)[1L]))
+    order <- sample.int(ncol(centroids))
+    sign <- sample(c(-1, 1), ncol(centroids), replace = TRUE)
+    offset <- sweep(centroids, 2L, pivot, "-")
+    return(sweep(sweep(offset[, order, drop = FALSE], 2L, sign, "*"), 2L, pivot, "+"))
+  }
+  replaced <- sample.int(nrow(centroids), round(fraction * nrow(centroids)))
+  weight <- top / sum(top)
+  mean_rate <- function(cen) sum(weight * stt_grf_fitness(names(top), cen, truth$wavelength))
+  before <- mean_rate(centroids)
+  for (draw in seq_len(max_draws)) {
+    centroids[replaced, ] <- sample((-10):20, length(replaced) * ncol(centroids), replace = TRUE)
+    if (abs(mean_rate(centroids) / before - 1) <= tolerance) return(centroids)
+  }
+  stop("No changed landscape keeps the division rate within tolerance.", call. = FALSE)
 }
 
 # Multinomial cell sampling at both timepoints. Rows are the karyotypes seen
@@ -112,8 +146,12 @@ stt_make_dataset <- function(config, truth, scenario, t0, seed, force = FALSE) {
   if (!force && file.exists(path)) return(path)
   dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
   population_t0 <- stt_snapshot(truth, t0)
-  population_t1 <- if (isTRUE(scenario$bottleneck > 0)) {
-    stt_bottleneck_snapshot(truth, config, t0, scenario$interval, scenario$bottleneck, seed + 1L)
+  shifted <- isTRUE(scenario$shift > 0)
+  centroids <- if (shifted) stt_shift_centroids(truth, population_t0, scenario$shift, seed + 2L) else truth$centroids
+  recorded <- as.character(t0 + scenario$interval) %in% names(truth$snapshots)
+  population_t1 <- if (isTRUE(scenario$bottleneck > 0) || shifted || !recorded) {
+    stt_restart_snapshot(truth, config, t0, scenario$interval, seed + 1L,
+                         n_survivors = scenario$bottleneck, centroids = centroids)
   } else {
     stt_snapshot(truth, t0 + scenario$interval)
   }
@@ -124,9 +162,10 @@ stt_make_dataset <- function(config, truth, scenario, t0, seed, force = FALSE) {
     split = truth$split, wavelength_class = truth$wavelength_class,
     scenario = scenario$scenario, t0 = t0, interval = scenario$interval,
     depth_t0 = scenario$depth_t0, depth_t1 = scenario$depth_t1,
-    bottleneck = scenario$bottleneck, seed = seed, beta = truth$beta,
+    bottleneck = scenario$bottleneck, shift = scenario$shift, seed = seed, beta = truth$beta,
     counts = counts,
-    truth = list(centroids = truth$centroids, wavelength = truth$wavelength,
+    # The landscape between the samples, which is what a method estimates.
+    truth = list(centroids = centroids, wavelength = truth$wavelength,
                  abm_delta_t = truth$abm_delta_t,
                  frequency_t0 = population_t0 / sum(population_t0),
                  frequency_t1 = population_t1 / sum(population_t1))

@@ -62,6 +62,17 @@ development datasets); all eight form the cohort for cross-sample learning.
 | `long_500_700_1080d` | 500 / 700 | 1080 |
 | `bottleneck_500_700_360d` | 500 / 700, regrown from 200 surviving cells | 360 |
 
+These eight core scenarios make the acceptance verdict. Six stress scenarios
+break an assumption on purpose and are reported beside it:
+
+| Stress scenario | Cells at t0 / t1 | Interval (days) | What it breaks |
+| --- | --- | --- | --- |
+| `short_500_700_30d`, `short_500_700_60d` | 500 / 700 | 30, 60 | Few generations between the samples (27 and 54), as for a slowly dividing tumour |
+| `shift_500_700_360d`, `shift_3000_100_360d` | 500 / 700, 3000 / 100 | 360 | Half of the landscape's waves are redrawn at the first sample, as when treatment starts then; fitness before and after stays correlated |
+| `turned_500_700_360d`, `turned_3000_100_360d` | 500 / 700, 3000 / 100 | 360 | The landscape is turned about the dominant karyotype at the first sample: that karyotype keeps its fitness, but which neighbour is fit is drawn anew |
+
+In the last four, truth is the landscape between the samples.
+
 ## Scoring
 
 Scored nodes are defined from the counts alone: every observed karyotype

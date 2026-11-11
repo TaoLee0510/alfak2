@@ -37,19 +37,8 @@ exact solver would not.
 
 **Baseline birth rate supplied.** Left free under a wide prior it settled at
 3–16 divisions per day against a true 0.9, and inflated every fitness
-difference. It is now held within 0.05 (log scale) of a supplied value. On the
-typical scenario, RMSE at distances 0 / 1 / 2 for a supplied rate of:
-
-| Supplied | RMSE | Spearman | Coverage |
-| --- | --- | --- | --- |
-| 0.5 per day | 0.032 / 0.064 / 0.098 | 0.48 / 0.45 / 0.38 | 0.87 / 0.74 / 0.62 |
-| 1 per day | 0.028 / 0.050 / 0.075 | 0.49 / 0.45 / 0.38 | 0.97 / 0.92 / 0.86 |
-| 2 per day | 0.035 / 0.056 / 0.074 | 0.50 / 0.46 / 0.39 | 1.00 / 0.98 / 0.97 |
-| No information | 0.048 / 0.094 / 0.139 | | |
-
-Rank agreement does not depend on the supplied rate; error and interval width
-do. Too low a rate narrows the intervals. In one of the twelve fits at 2 per
-day the scale optimiser failed and the fit used the prior-centred scales.
+difference. It is held within 0.05 (log scale) of a supplied value. See "The
+two rates the model is given" below for what a wrong value does.
 
 **Majors need a share and a count.** Domain = karyotypes holding at least 1%
 of either sample and at least 3 cells, plus all their one-step neighbours.
@@ -88,49 +77,216 @@ a large share of a small sample.
 0.026 / 0.053 / 0.082 against 0.025 / 0.051 / 0.078 at distances 0 / 1 / 2 on
 the typical scenario), slower, one failed fit.
 
+## Uncertainty
+
+**Relative fitness.** Two samples identify fitness differences. The model
+reports fitness relative to the count-weighted mean of the majors, with the
+uncertainty of that difference. The posterior of every log birth rate also
+carries the uncertainty of the baseline (0.05), which is common to all
+karyotypes and cancels in a difference. Intervals that included it covered
+0.99 / 0.95 / 0.90 at distances 0 / 1 / 2; this was the baseline term, not
+calibration.
+
+**Expected information.** The covariance is the inverse of the Hessian with
+the counts replaced by their fitted expectations. In 9 of the 88 development
+fits examined the observed Hessian was not positive definite (the intensities are not
+log-linear in the birth rates) and gave posterior standard deviations of a
+major's log birth rate above 1, against a prior of 0.05.
+
+**Calibration.** The model's own 95% intervals of relative fitness cover 0.76
+of observed karyotypes with fewer than 5 cells, 0.72 of those with 5 or more,
+0.57 of unobserved karyotypes at distance 1 and 0.49 at distance 2. The spread
+of fitness among unobserved karyotypes cannot be learned from zero counts and
+is set by the observed karyotypes, which selection has made alike. The
+reported standard deviation is
+
+    sqrt(model sd^2 + (0.6 * relative fitness)^2 + (0.009 * birth rate * (1 + shell))^2)
+
+with `shell` the distance to the nearest major. The two constants are a
+Gaussian-likelihood fit on the 96 development datasets
+(`calibration_fit.R`: 0.0088 and 0.617). Coverage becomes 0.97 / 0.97 / 0.94 /
+0.91 for the four kinds above. By scenario and distance it lies between 0.89
+and 1.00, except after 1080 days (0.92 / 0.88 / 0.84). A free multiplier on
+the model's standard deviation fitted to zero once the other two terms were
+present, so it was fixed at one.
+
+## The two rates the model is given
+
+Typical scenario, 12 datasets; the simulated populations divide 0.9 times per
+day. RMSE and mean prediction relative to the reference, at distance 1:
+
+| Assumed birth rate | RMSE | Mean prediction per day | Per division | Spearman | Coverage |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 0.1 | 0.085 | -0.009 | -0.092 | 0.43 | 0.22 |
+| 0.25 | 0.076 | -0.019 | -0.077 | 0.44 | 0.45 |
+| 0.5 | 0.064 | -0.034 | -0.068 | 0.45 | 0.71 |
+| 1 | 0.050 | -0.061 | -0.061 | 0.45 | 0.92 |
+| 2 | 0.056 | -0.102 | -0.051 | 0.46 | 0.98 |
+| 4 | 0.132 | -0.188 | -0.047 | 0.45 | 0.93 |
+| No information | 0.094 | 0 | | | |
+
+- Rank agreement with truth does not depend on the assumed rate.
+- The deficit of unobserved karyotypes per division changes by a factor of 2
+  over a 40-fold range of rates; per day it follows the rate.
+- Too low a rate is safe for the error (predictions shrink towards no
+  differences) but its intervals are too narrow. Four times too high is worse
+  than no information.
+- The missegregation rate acts the same way, and only the product matters:
+  doubling one and halving the other gives RMSE 0.048 and 0.049 and mean
+  predictions -0.058 and -0.059, against 0.050 and -0.061 for the reference.
+- The marginal likelihood does not locate the rate: over 0.1–4 it is best at
+  0.1 in 9 datasets and at 0.5 in 3. The rate cannot be estimated this way.
+
+`fit_sparse_joint_rates()` fits across a range. With a 16-fold range centred
+on the truth, RMSE is 0.030 / 0.053 / 0.080 at distances 0 / 1 / 2 (known
+rate: 0.028 / 0.050 / 0.075) and its intervals cover everything. With the
+truth at the top of the range the error is 0.041 / 0.082 / 0.124, still below
+no information (0.048 / 0.094 / 0.139); with the truth at the bottom it is
+0.093 / 0.155 / 0.204. Predictions at the two ends of a range have rank
+correlation 0.71–1.00 (median 0.85).
+
+## Initial abundances at balance (option)
+
+`initial_state = "balance"` starts every non-major karyotype at
+mutation-selection balance with the majors next to it, so that the first
+sample's levels inform fitness. On the development landscapes it lowers RMSE
+from 0.033 / 0.055 / 0.079 to 0.028 / 0.047 / 0.070 and passes all 18
+acceptance criteria. Its spread around balance (`balance_sd`) hardly matters
+on the benchmark: 0.3, 0.5 and 1 give RMSE within 0.003 of each other. It
+stays at 1; tighter values moved the fitted baseline to 1.2 times the supplied
+one.
+
+It is not the default. It assumes that fitness before the first sample was
+what it is between the samples, and it takes several minutes on domains above
+1000 states. In the scored run 4 of its 96 development fits failed: the
+expected information was not positive definite, because the balance prior is
+not log-linear either. Its curvature is now taken at zero residual, as for
+the counts, and the two failed datasets tried since then fit. The scoreboard
+has not been rerun with that change.
+
 ## Development scoreboard
 
-Pooled over scenarios; RMSE, with Spearman correlation in brackets.
+Pooled over the eight core scenarios, 96 datasets; RMSE, with Spearman
+correlation in brackets, then coverage of the reported 95% intervals.
 
-| Distance | No information | Two-layer | ALFA-K (minobs 20) | Sparse joint |
-| --- | ---: | ---: | ---: | ---: |
-| 0 | 0.046 | 0.045 (0.30) | 1.073 (0.23) | 0.033 (0.44) |
-| 1 | 0.092 | 0.091 (0.24) | 1.186 (0.20) | 0.055 (0.43) |
-| 2 | 0.137 | 0.136 (0.15) | 1.297 (0.18) | 0.079 (0.36) |
+| Distance | No information | Two-layer | ALFA-K (minobs 20) | Sparse joint | With balance |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 0 | 0.046 | 0.045 (0.30) | 1.073 (0.23) | 0.033 (0.44), 0.97 | 0.028 (0.47), 0.98 |
+| 1 | 0.092 | 0.091 (0.24) | 1.186 (0.20) | 0.055 (0.43), 0.94 | 0.047 (0.45), 0.98 |
+| 2 | 0.137 | 0.136 (0.15) | 1.297 (0.18) | 0.079 (0.36), 0.91 | 0.070 (0.38), 0.96 |
 
-Coverage of 95% intervals is 0.99 / 0.95 / 0.90. All 96 fits finished with
-finite uncertainty, 83 with a converged scale optimiser; median 6 s, maximum
-111 s, at most 1538 states.
+The balance column counts its 4 failed fits as no-information predictions.
+All 168 fits of the default model (core and stress scenarios) finished;
+median 9 s, maximum 238 s.
 
-Acceptance: 17 of 18 criteria pass. RMSE is below the no-information answer
-and below the two-layer pipeline at every distance, and Spearman above both
-existing methods, all with landscape-bootstrap intervals excluding zero. The
-safety line fails in one cell: scenario `unbalanced_3000_100_360d` at distance
-0, RMSE 17% above the two-layer pipeline.
+Acceptance: the default model passes 17 of 18 criteria. RMSE is below the
+no-information answer and below the two-layer pipeline at every distance, and
+Spearman above both existing methods, all with landscape-bootstrap intervals
+excluding zero. The safety line fails in one cell: scenario
+`unbalanced_3000_100_360d` at distance 0, RMSE 17% above the two-layer
+pipeline. That cell is two near-monoclonal datasets whose information is in
+the deep first sample, which the default model does not read; with balance
+the worst cell is 0.71 of the two-layer pipeline and all 18 pass.
 
-That cell is two near-monoclonal datasets (wavelength 0.4). The deep first
-sample shows the cloud around the dominant clone, and the observed cloud
-members are its least unfit ones; the 100-cell second sample cannot tell them
-from the rest. The model predicts them at the level of the unobserved cloud,
-0.2 per day too low, because it leaves initial abundances free and so does not
-read the first sample's levels. The mirror scenario, with the deep sample
-second, is among the best (RMSE 0.56 of the two-layer pipeline).
+## Stress scenarios
+
+Twelve datasets each; RMSE at distances 0 / 1 / 2.
+
+| Scenario | No information | Sparse joint | With balance | Coverage, default |
+| --- | --- | --- | --- | --- |
+| 30 days between samples (27 generations) | 0.049 / 0.096 / 0.141 | 0.028 / 0.048 / 0.070 | | 1.00 / 0.98 / 0.96 |
+| 60 days (54 generations) | 0.050 / 0.096 / 0.142 | 0.026 / 0.046 / 0.069 | | 0.99 / 0.97 / 0.95 |
+| Half of the landscape redrawn at the first sample, 500 / 700 cells | 0.074 / 0.113 / 0.156 | 0.058 / 0.084 / 0.116 | 0.053 / 0.071 / 0.096 | 0.73 / 0.73 / 0.72 |
+| The same, 3000 / 100 cells | 0.070 / 0.110 / 0.147 | 0.060 / 0.083 / 0.108 | 0.050 / 0.066 / 0.082 | 0.82 / 0.80 / 0.79 |
+| Landscape turned about the dominant clone, 500 / 700 | 0.082 / 0.128 / 0.172 | 0.059 / 0.079 / 0.105 | 0.058 / 0.074 / 0.097 | 0.87 / 0.83 / 0.80 |
+| The same, 3000 / 100 | 0.093 / 0.138 / 0.180 | 0.088 / 0.113 / 0.134 | 0.069 / 0.082 / 0.099 | 0.85 / 0.88 / 0.88 |
+
+- Few generations between the samples do not hurt the error; rank agreement
+  falls (Spearman 0.32 / 0.29 / 0.25 at 30 days).
+- A landscape that changes at the first sample, as when treatment starts then,
+  leaves the model better than no information, with intervals that are too
+  narrow (0.72–0.88).
+- Balance was expected to fail there and does not: it is at least as accurate
+  in all four, including the scenario built against it, where which neighbour
+  is fit before says nothing about after. Its Spearman at distance 1–2 is lower
+  in the 3000 / 100 scenarios (0.50 / 0.45 against 0.58 / 0.54 when turned).
+  The gain is in the level of the deficits, not in which neighbour is which.
+
+## Forward prediction
+
+`forward_prediction.R`: total-variation distance between the predicted and
+the true composition of the domain 180 days after the second sample, 72
+development datasets.
+
+| Forecast | Distance |
+| --- | ---: |
+| Composition unchanged | 0.317 |
+| Run forward without selection | 0.469 |
+| Run forward with the fitted birth rates | 0.275 |
+| Run forward with the true rates | 0.164 |
+
+Fitted against unchanged: -0.042 (landscape bootstrap 95% interval -0.079 to
+-0.005). The fit closes about a quarter of the gap to what the true fitness
+would give with this forward model and starting point.
+
+## Real samples
+
+`real_cohort.R` on 20 GBM samples (22 chromosomes, 8–3889 cells per timepoint,
+179–3599 days apart), birth rates 0.02–1 per day, missegregation rate 5e-5.
+There is no truth; these are checks of behaviour.
+
+- All 20 samples fit at all three rates; in 17 the scale optimiser converged
+  at all three. Median 149 s for the three fits, maximum 679 s; median 849
+  states, maximum 1558.
+- Over the 50-fold range of rates the mean deficit of non-major karyotypes per
+  day changes 47-fold (median) and per division 0.94-fold. Predictions at the
+  two ends have rank correlation 0.66 / 0.76 / 0.96 (quartiles); one sample is
+  at -0.2.
+- Two halves of the cells of a sample (10 samples with at least 200 cells at
+  both timepoints) agree with Spearman 0.88 for karyotypes with 10 or more
+  cells, 0.76 with 2–9 cells and 0.33 with one cell. All differences are
+  within the reported intervals, and 98–100% within the model's own, which
+  describe sampling but not model error.
+- Pearson dispersion of the second sample's counts around the fit: quartiles
+  0.04 / 0.27 / 1.2; one sample at 15.
+- The samples overlap: a median 38% of a sample's karyotypes are seen in
+  another sample and 69% lie in another sample's domain. The recurrent ones
+  are chromosome 10 loss (17 samples), chromosome 7 gain (15) and both (14).
+  Simulated cohorts overlap less (0–38% in 9 of 12 landscapes).
+
+## Cohort
+
+`fit_sparse_joint_cohort()` shares the fitness of karyotypes between samples,
+with a between-sample deviation whose scale is estimated. On the one
+development landscape scored so far whose patients overlap as the real samples
+do (L05, eight patients), patient 1 improves from RMSE 0.023 / 0.049 / 0.080 to
+0.020 / 0.045 / 0.074 and Spearman from 0.59 / 0.40 / 0.28 to 0.66 / 0.50 /
+0.40. A cohort of eight takes 5 s to 10 min.
 
 ## Open
 
-- Tie the initial abundance of non-major states to mutation-selection balance
-  with their parents, as an option. It should fix the failing cell and add the
-  first sample's level information everywhere. It assumes the landscape before
-  the first sample was the same, which treatment between samples can break.
-- Shell coefficient is a lower bound from absence, so unobserved neighbours
-  are still predicted too high in rugged landscapes (bias +0.02 at one step,
-  +0.04 at two). Learning it across samples of a cohort is the planned remedy.
-- Intervals are too wide at distance 0 and slightly narrow at distance 2.
-- Held-out landscapes and the HPC confirmation have not been run.
+- **Not yet run:** the cohort fit and its control (patients of unrelated
+  landscapes) on all twelve development landscapes; the held-out landscapes,
+  which are simulated but neither fitted nor inspected; the cohort fit of the
+  real samples; the sweep of extreme rates on every core scenario.
+- Refit the balance variant with the corrected expected information; its
+  scoreboard column still counts 4 failed fits as no-information predictions.
+- The unknown rate has no remedy beyond the range fit. Intervals are too
+  narrow when the assumed rate is too low, because both calibration terms
+  scale with it.
+- Intervals are too narrow after 1080 days and when the landscape changes at
+  the first sample.
+- The shell coefficient is a lower bound from absence, so unobserved
+  neighbours are still predicted too high (bias +0.02 at one step, +0.04 at
+  two).
+- The calibration constants come from one family of simulated landscapes.
 
 ## Files
 
 `forward_study.R` reproduces the forward-model comparison. `compare.R` and
 `by_scenario.R` tabulate a method's fits against the baselines per stratum and
-per scenario; the official verdict comes from
-`benchmark/sparse_two_timepoint/run.R --stage=report`.
+per scenario. `calibration.R` and `calibration_fit.R` examine and fit the
+reported uncertainty. `rate_sensitivity.R` sweeps the two supplied rates.
+`forward_prediction.R` scores forecasts of the later composition.
+`real_cohort.R` runs the checks on real samples. The official verdict comes
+from `benchmark/sparse_two_timepoint/run.R --stage=report`.

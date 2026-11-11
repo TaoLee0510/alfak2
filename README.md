@@ -120,6 +120,64 @@ remain conditional assumptions; initial-abundance priors also depend on the
 observed support. Division summaries use lognormal moment and
 quantile approximations; they do not claim exact full posterior integration.
 
+## Sparse joint model for two sparse samples
+
+`fit_sparse_joint()` is a separate model built for the case the package is
+meant for: two samples of a few hundred cells. It fits both samples with one
+count likelihood on the well-sampled karyotypes and all their one-step
+neighbours, observed or not. A rare karyotype is held at mutation-selection
+balance by the clone it descends from, so its level, not its change in
+frequency, carries its fitness; an unobserved neighbour of an abundant clone is
+evidence that the neighbour is less fit.
+
+```r
+fit <- fit_sparse_joint(counts, dt = 180, beta = 0.00005, birth_rate = 0.5)
+fit$summary                                  # karyotypes of the fitted domain
+predict(fit, c("2.2.3.2.2", "2.2.3.3.2"))    # any karyotype, also two steps away
+
+# the same model through the main entry point
+fit <- fit_alfak2(counts, dt = 180, beta = 0.00005, pipeline = "sparse_joint",
+                  sparse_joint_control = list(birth_rate = 0.5))
+```
+
+Two samples identify fitness differences, not absolute fitness. Use
+`relative_fitness`, which is measured from the count-weighted mean of the
+major karyotypes, and `relative_sd`. `relative_sd` adds two terms of model
+error, fitted to simulated landscapes, to the model's own posterior standard
+deviation (`relative_sd_model`), which is too small on its own.
+
+The baseline birth rate has to be supplied; two samples do not identify it.
+Rankings hardly depend on it. Fitness differences between well-sampled clones
+do not depend on it either, but the deficit of a rare or unobserved karyotype
+is fixed per division, so per unit of time it is proportional to the assumed
+rate. When only a range is known, fit across it:
+
+```r
+fit <- fit_sparse_joint_rates(counts, dt = 180, beta = 0.00005,
+                              birth_rate_range = c(0.05, 1))
+predict(fit, karyotypes)   # relative fitness at the central rate, an interval
+                           # covering the range, and fitness per division
+```
+
+Several samples that share a landscape can be fitted together. Each keeps its
+own domain and initial abundances; a karyotype that is abundant in one sample
+and an unobserved neighbour in another is informed by both:
+
+```r
+cohort <- fit_sparse_joint_cohort(list(P1 = counts1, P2 = counts2),
+                                  dt = c(180, 360), birth_rate = 0.5)
+cohort$landscape                       # shared fitness of every karyotype
+predict(cohort, karyotypes, sample = "P1")
+```
+
+`initial_state = "balance"` also reads the first sample's levels, by starting
+rare karyotypes at mutation-selection balance. It assumes that fitness before
+the first sample was what it is between the samples.
+
+Design, benchmark results and checks on real samples are recorded in
+[`validation/sparse_joint/README.md`](validation/sparse_joint/README.md); the
+benchmark is [`benchmark/sparse_two_timepoint`](benchmark/sparse_two_timepoint/README.md).
+
 ## Accuracy validation
 
 The reproducible workflow in `validation/accuracy_upgrade/` freezes independent
