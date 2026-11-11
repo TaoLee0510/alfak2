@@ -1,10 +1,14 @@
-test_that("a range of birth rates is fitted at log-spaced rates around its centre", {
+test_that("a range of birth rates is fitted at log-spaced rates, with point predictions at the lowest", {
   sim <- simulate_sparse_joint_counts()
-  fit <- fit_sparse_joint_rates(sim$counts, dt = sim$dt, beta = sim$beta, major_frequency = 0.05, max_cn = 4,
-                                birth_rate_range = c(0.25, 4))
+  fit_at <- function(point) {
+    fit_sparse_joint_rates(sim$counts, dt = sim$dt, beta = sim$beta, major_frequency = 0.05, max_cn = 4,
+                           birth_rate_range = c(0.25, 4), point = point)
+  }
+  fit <- fit_at("centre")
   expect_s3_class(fit, "alfak2_sparse_joint_rate_fit")
   expect_equal(fit$rates, c(0.25, 1, 4))
   expect_equal(fit$central, 2L)
+  expect_equal(fit$point, 2L)
   expect_equal(vapply(fit$fits, function(f) f$diagnostics$birth_rate, numeric(1)), fit$rates)
   single <- fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, major_frequency = 0.05, max_cn = 4,
                              birth_rate = 1)
@@ -14,10 +18,22 @@ test_that("a range of birth rates is fitted at log-spaced rates around its centr
   expect_equal(prediction$relative_fitness, at_centre$relative_fitness)
   expect_equal(prediction$per_division, at_centre$relative_fitness)
   # the interval covers the interval at every rate
-  expect_true(all(prediction$relative_low <= at_centre$relative_fitness - stats::qnorm(0.975) * at_centre$relative_sd + 1e-12))
-  expect_true(all(prediction$relative_high >= at_centre$relative_fitness + stats::qnorm(0.975) * at_centre$relative_sd - 1e-12))
+  z <- stats::qnorm(0.975)
+  expect_true(all(prediction$relative_low <= at_centre$relative_fitness - z * at_centre$relative_sd + 1e-12))
+  expect_true(all(prediction$relative_high >= at_centre$relative_fitness + z * at_centre$relative_sd - 1e-12))
   expect_true(all(prediction$relative_sd >= at_centre$relative_sd - 1e-12))
-  expect_true(all(prediction$per_division_low <= prediction$per_division & prediction$per_division <= prediction$per_division_high))
+  expect_true(all(prediction$per_division_low <= prediction$per_division &
+                    prediction$per_division <= prediction$per_division_high))
+  # by default, point predictions come from the lowest rate; the interval is the same
+  lowest <- fit_at("lowest")
+  expect_equal(lowest$point, 1L)
+  expect_identical(fit_sparse_joint_rates(sim$counts, dt = sim$dt, beta = sim$beta, major_frequency = 0.05,
+                                          max_cn = 4, birth_rate_range = c(0.25, 4))$point, 1L)
+  at_lowest <- predict(lowest, targets)
+  expect_equal(at_lowest$relative_fitness, predict(lowest$fits[[1L]], targets)$relative_fitness)
+  expect_equal(at_lowest[c("relative_low", "relative_high")], prediction[c("relative_low", "relative_high")])
+  expect_true(all(at_lowest$relative_fitness - z * at_lowest$relative_sd <= at_lowest$relative_low + 1e-12))
+  expect_true(all(at_lowest$relative_fitness + z * at_lowest$relative_sd >= at_lowest$relative_high - 1e-12))
 })
 
 test_that("the assumed rate scales the deficit of neighbours and leaves their ranking", {

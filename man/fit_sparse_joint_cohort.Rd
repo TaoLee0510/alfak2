@@ -11,6 +11,7 @@ fit_sparse_joint_cohort(
   birth_rate = 1,
   birth_rate_log_sd = 0.05,
   sharing = c("partial", "full"),
+  trend = c("select", "sample", "shared"),
   major_frequency = 0.01,
   major_count = 3,
   max_states = 5000,
@@ -43,6 +44,8 @@ Used for count matrices only.}
 rate around \code{log(birth_rate)}.}
 
 \item{sharing}{\code{"partial"} or \code{"full"}; see above.}
+
+\item{trend}{\code{"select"}, \code{"sample"} or \code{"shared"}; see above.}
 
 \item{major_frequency}{Minimum share of either sample for a karyotype to
 anchor the domain as a major karyotype.}
@@ -109,4 +112,16 @@ With \code{sharing = "partial"} a karyotype's birth rate in a sample deviates
 from the shared value by an amount whose scale is estimated, so that
 samples which do not follow one landscape are not forced onto it. With
 \code{sharing = "full"} it is the shared value.
+
+With \code{trend = "sample"} every sample has its own trend: dosage and
+curvature about its own mean karyotype, and distance to its own major
+karyotypes. Samples then share only the karyotypes they have in common and
+the prior scales, and samples with no karyotype in common are fitted as if
+alone. \code{trend = "shared"} fits one trend for the cohort, which helps when
+the samples follow one landscape and on simulated cohorts from different
+landscapes predicted much worse than fitting each sample alone.
+\code{trend = "select"}, the default, fits both and keeps the one with the
+higher marginal likelihood; on simulated cohorts it chose the shared trend
+for samples of one landscape and separate trends otherwise. It takes twice
+as long. The marginal likelihoods are in \code{diagnostics$trend_objective}.
 }
