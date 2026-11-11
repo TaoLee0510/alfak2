@@ -86,6 +86,178 @@ sparse_joint_design <- function(karyotypes, centre, major, shell_power) {
        group = c(0L, rep(1L, ncol(dx)), rep(2L, ncol(dx)), 4L))
 }
 
+# Prior on the log expected count at the first timepoint. Seen then: the
+# count itself, essentially free. Seen only later: the later frequency. Never
+# seen: rare, on the frequency scale given by `initial_frequency`.
+sparse_joint_initial_prior <- function(y0, y1, initial_frequency) {
+  seen_first <- y0 > 0
+  list(
+    mean = ifelse(seen_first, log(pmax(y0, 1)),
+                  ifelse(y1 > 0, log(pmax(y1, 1) * sum(y0) / sum(y1)),
+                         log(sum(y0)) + initial_frequency[[1L]])),
+    sd = ifelse(seen_first, 10, initial_frequency[[2L]])
+  )
+}
+
+# Scale parameters by Laplace marginal likelihood, kept inside a finite box:
+# outside it the inner problem can become degenerate and return non-finite
+# gradients. If the optimiser still steps somewhere without a finite
+# gradient, the fit is usable at the starting, prior-centred scales.
+sparse_joint_optimise_scales <- function(objective, control, lower = log(1e-4), upper = log(0.5)) {
+  optimum <- tryCatch(
+    suppressWarnings(stats::nlminb(objective$par, objective$fn, objective$gr,
+                                   lower = lower, upper = upper, control = control)),
+    error = function(e) NULL
+  )
+  if (is.null(optimum)) {
+    warning("Scale optimisation failed; the prior-centred scales are used.", call. = FALSE)
+    optimum <- list(par = objective$par, objective = as.numeric(objective$fn(objective$par)), convergence = 99L,
+                    message = "scale optimisation failed; prior-centred scales used")
+  }
+  optimum
+}
+
+# Posterior covariance of the latent variables given the scales, as a solver.
+#
+# The covariance is the inverse of the expected information at the mode: the
+# Hessian of the same objective with the counts replaced by their fitted
+# expectations, and the residuals of the balance prior set to zero. The observed Hessian is not used. The intensities are not
+# log-linear in the birth rates, so where the fit to the counts is poor the
+# observed Hessian has directions of negative curvature, and its inverse then
+# gives standard deviations far wider than the prior or none at all. The
+# expected information is positive definite by construction.
+#
+# Returns the mode, a solver for right-hand sides, the variances of selected
+# latent variables, the names of the latent variables, and the fitted
+# expected counts.
+sparse_joint_posterior <- function(objective, tmb_data, parameters, map, random, par_fixed, inner_control) {
+  objective$fn(par_fixed)
+  mode <- objective$env$last.par
+  latent <- objective$env$random
+  report <- objective$report(mode)
+  expected <- tmb_data
+  expected$y0 <- exp(unname(mode[names(mode) == "zeta"]))
+  expected$y1 <- exp(as.numeric(report$log_intensity1))
+  # The balance prior on initial abundances is not log-linear either: its
+  # curvature is taken at zero residual in the same way.
+  expected$balance_offset <- as.numeric(report$balance_residual)
+  information <- TMB::MakeADFun(expected, parameters, map = map, random = random, DLL = "alfak2",
+                                silent = TRUE, inner.control = inner_control)$env$spHess(mode, random = TRUE)
+  factor <- Matrix::Cholesky(information, LDL = FALSE)
+  n <- nrow(information)
+  solve <- function(rhs) as.matrix(Matrix::solve(factor, rhs))
+  list(
+    mode = unname(mode[latent]), names = names(mode)[latent], solve = solve,
+    # Fitted expected counts, for comparison with the observed ones.
+    expected_t0 = expected$y0, expected_t1 = expected$y1,
+    # Diagonal of the inverse at `index`, a few hundred columns at a time.
+    variance = function(index) {
+      out <- numeric(length(index))
+      for (chunk in split(seq_along(index), ceiling(seq_along(index) / 400))) {
+        rhs <- Matrix::sparseMatrix(i = index[chunk], j = seq_along(chunk), x = 1, dims = c(n, length(chunk)))
+        out[chunk] <- solve(rhs)[cbind(index[chunk], seq_along(chunk))]
+      }
+      out
+    }
+  )
+}
+
+# Posterior covariance of the trend coefficients.
+sparse_joint_coef_covariance <- function(solver) {
+  coef_index <- which(solver$names == "coef")
+  selector <- Matrix::sparseMatrix(i = coef_index, j = seq_along(coef_index), x = 1,
+                                   dims = c(length(solver$names), length(coef_index)))
+  solver$solve(selector)[coef_index, , drop = FALSE]
+}
+
+# Calibration of the reported uncertainty of relative fitness.
+#
+# The model's own posterior standard deviation is too small. It is conditional
+# on the fitted scales, and it takes the model to be true: the dynamics are
+# first order in the mutational flux, and the spread of fitness among
+# unobserved karyotypes is set by the observed ones, which selection has made
+# alike. On simulated populations its 95% intervals cover about three in four
+# observed karyotypes and half of the unobserved ones. The reported standard
+# deviation adds two terms of model error to it:
+#
+#   sqrt(model sd^2 + (deficit * relative fitness)^2 +
+#        (floor * baseline birth rate * (1 + shell))^2).
+#
+# The first says that a karyotype predicted far from the reference is known
+# in proportion to that distance. The second is an error per division that no
+# amount of data removes, growing with `shell`, the distance to the nearest
+# major karyotype. Both constants were fitted to the development landscapes
+# of `benchmark/sparse_two_timepoint` (validation/sparse_joint/calibration_fit.R).
+sparse_joint_default_calibration <- c(floor = 0.009, deficit = 0.6)
+
+sparse_joint_validate_calibration <- function(calibration) {
+  if (is.null(calibration)) return(c(floor = 0, deficit = 0))
+  if (!is.numeric(calibration) || !setequal(names(calibration), c("floor", "deficit")) ||
+      any(!is.finite(calibration)) || any(calibration < 0)) {
+    stop("`calibration` must be NULL or non-negative numbers named floor and deficit.", call. = FALSE)
+  }
+  calibration
+}
+
+sparse_joint_calibrate <- function(model_sd, relative, shell, birth_rate, calibration) {
+  sqrt(model_sd^2 + (calibration[["deficit"]] * relative)^2 +
+         (calibration[["floor"]] * birth_rate * (1 + shell))^2)
+}
+
+# Fitness relative to a reference: the count-weighted mean fitness of the
+# major karyotypes. Two samples say nothing about absolute fitness, and the
+# posterior of every log birth rate carries the uncertainty of the baseline,
+# which is common to all karyotypes and cancels in a difference. `latent` is
+# the position of each row's log birth rate among the latent variables,
+# `weight` its weight in the reference (zero outside it).
+sparse_joint_relative <- function(solver, latent, fitness, log_birth_sd, weight) {
+  weight <- weight / sum(weight)
+  rhs <- numeric(length(solver$names))
+  contribution <- weight * fitness
+  rhs[unique(latent)] <- as.numeric(tapply(contribution, factor(latent, levels = unique(latent)), sum))
+  covariance <- as.numeric(solver$solve(rhs))
+  reference_variance <- sum(rhs * covariance)
+  list(
+    mean = fitness - sum(contribution),
+    sd = sqrt(pmax(fitness^2 * log_birth_sd^2 + reference_variance - 2 * fitness * covariance[latent], 0)),
+    # What `predict()` needs for karyotypes outside the domain.
+    reference = list(fitness = sum(contribution), variance = reference_variance,
+                     coef_covariance = covariance[solver$names == "coef"]),
+    covariance = covariance
+  )
+}
+
+# Relative fitness of karyotypes predicted from the trend or from the level
+# of the observed neighbours, neither of which is a latent variable.
+sparse_joint_relative_outside <- function(reference, fitness, log_birth_sd, design = NULL) {
+  covariance <- if (is.null(design)) 0 else as.numeric(design %*% reference$coef_covariance)
+  list(mean = fitness - reference$fitness,
+       sd = sqrt(pmax(fitness^2 * log_birth_sd^2 + reference$variance - 2 * fitness * covariance, 0)))
+}
+
+# Level of the observed karyotypes that are not major: used to predict the
+# observed karyotypes left out of the domain. An observed karyotype is much
+# closer in fitness to the majors than an unobserved one at the same distance.
+sparse_joint_observed_level <- function(summary) {
+  observed_minor <- !summary$major & (summary$count_t0 + summary$count_t1) > 0
+  if (!any(observed_minor)) return(NULL)
+  c(log_birth = mean(summary$log_birth_mean[observed_minor]),
+    sd = sqrt(mean(summary$log_birth_sd[observed_minor]^2) +
+                if (sum(observed_minor) > 1L) stats::var(summary$log_birth_mean[observed_minor]) else 0))
+}
+
+# Fitness columns from a log birth rate and its standard deviation. `self` is
+# 2 P_ii - 1, the factor between birth rate and net growth rate.
+sparse_joint_fitness_columns <- function(self, log_birth, log_birth_sd) {
+  z <- stats::qnorm(0.975)
+  data.frame(
+    log_birth_mean = log_birth, log_birth_sd = log_birth_sd,
+    fitness_mean = self * exp(log_birth), fitness_sd = self * exp(log_birth) * log_birth_sd,
+    conf_low = self * exp(log_birth - z * log_birth_sd),
+    conf_high = self * exp(log_birth + z * log_birth_sd)
+  )
+}
+
 # Probability that a daughter has exactly its parent's karyotype.
 sparse_joint_self_probability <- function(karyotypes, beta) {
   stay <- vapply(0:max(karyotypes), function(cn) alfak2_pij_cpp(cn, cn, beta), numeric(1))
@@ -108,6 +280,16 @@ sparse_joint_self_probability <- function(karyotypes, beta) {
 #' they were observed, while their unobserved siblings would not, which
 #' biases their fitness upwards. [predict()] places them at the level of the
 #' observed neighbours inside the domain.
+#'
+#' `relative_sd` is not the model's own posterior standard deviation, which
+#' is kept as `relative_sd_model`. That one takes the model to be exact, and
+#' on simulated populations its 95% intervals cover about three in four
+#' observed karyotypes and half of the unobserved ones. The reported value is
+#' `sqrt(model sd^2 + (deficit * relative fitness)^2 +
+#' (floor * birth_rate * (1 + shell))^2)`, where `shell` is the distance to
+#' the nearest major karyotype. The two constants were fitted to simulated
+#' landscapes, on which the resulting 95% intervals cover 91-97%. They carry
+#' over to real samples only as far as those landscapes resemble them.
 #'
 #' The baseline birth rate is supplied rather than estimated. Two samples
 #' identify it only weakly, and a free baseline drifts upwards and inflates
@@ -141,11 +323,28 @@ sparse_joint_self_probability <- function(karyotypes, beta) {
 #'   a small sample. A karyotype seen only at the second timepoint is centred
 #'   on its frequency there, with the same standard deviation: absent other
 #'   evidence its frequency is taken not to have changed.
+#' @param initial_state How abundances at the first timepoint are treated.
+#'   `"free"` estimates one for every karyotype and so uses the first sample
+#'   only as a starting point. `"balance"` starts every karyotype that is not
+#'   major at mutation-selection balance with the major karyotypes next to it,
+#'   so that its count in the first sample also informs its fitness. That
+#'   assumes fitness before the first sample was what it is between the
+#'   samples; do not use it when treatment starts at the first sample.
+#' @param history Time, in units of `dt`, over which the balance built up.
+#'   Defaults to the interval between the samples.
+#' @param balance_sd Spread, on the log scale, of initial abundances around
+#'   the balance.
+#' @param calibration Constants `floor` and `deficit` that turn the model's
+#'   posterior standard deviation of relative fitness into the reported
+#'   `relative_sd`; see Details. `NULL` reports the model's own.
 #' @param control List passed to [stats::nlminb()] for the scale parameters.
 #' @param inner_control TMB inner Newton controls.
 #'
 #' @return An `alfak2_sparse_joint_fit` object. `summary` has one row per
-#'   domain karyotype; `fitness_mean` is the net growth rate per unit of `dt`.
+#'   domain karyotype, with its counts and the counts the fit expects;
+#'   `fitness_mean` is the net growth rate per unit of `dt`,
+#'   and `relative_fitness` is that rate minus the count-weighted mean over
+#'   the major karyotypes, with `relative_sd` its uncertainty.
 #' @export
 fit_sparse_joint <- function(counts,
                              dt = 1,
@@ -160,6 +359,10 @@ fit_sparse_joint <- function(counts,
                              shell_power = 0.85,
                              shell_sd = 0.5,
                              initial_frequency = c(mean = log(1e-5), sd = 3),
+                             initial_state = c("free", "balance"),
+                             history = NULL,
+                             balance_sd = 1,
+                             calibration = sparse_joint_default_calibration,
                              control = list(eval.max = 200, iter.max = 100),
                              inner_control = list(maxit = 200, tol = 1e-10)) {
   data <- if (inherits(counts, "alfak2_data")) counts else prepare_alfak2_data(counts, dt = dt, beta = beta)
@@ -175,6 +378,11 @@ fit_sparse_joint <- function(counts,
       any(!is.finite(initial_frequency)) || initial_frequency[[2L]] <= 0) {
     stop("`initial_frequency` must give a finite mean and a positive standard deviation.", call. = FALSE)
   }
+  initial_state <- match.arg(initial_state)
+  calibration <- sparse_joint_validate_calibration(calibration)
+  if (is.null(history)) history <- data$dt
+  validate_scalar(history, "history", lower = .Machine$double.eps)
+  validate_scalar(balance_sd, "balance_sd", lower = .Machine$double.eps)
   started <- proc.time()[["elapsed"]]
   counts <- data$counts
   observed_cn <- parse_karyotypes(rownames(counts))
@@ -195,7 +403,7 @@ fit_sparse_joint <- function(counts,
   total <- domain$y0 + domain$y1
   centre <- colSums(domain$karyotypes * total) / sum(total)
   design <- sparse_joint_design(domain$karyotypes, centre, domain$major, shell_power)
-  seen0 <- domain$y0 > 0
+  initial <- sparse_joint_initial_prior(domain$y0, domain$y1, initial_frequency)
   scale_names <- c("dosage", "curvature", "interaction", "residual")
   tmb_data <- list(
     model = "sparse_joint",
@@ -204,18 +412,13 @@ fit_sparse_joint <- function(counts,
     edge_log_prob = kernel$log_prob, log_self = kernel$log_self,
     design = design$design, coef_group = design$group,
     reference = which.max(total) - 1L,
-    # Log expected count at the first timepoint. Seen then: the count itself,
-    # essentially free. Seen only later: the later frequency. Never seen: rare.
-    zeta_prior_mean = ifelse(
-      seen0, log(pmax(domain$y0, 1)),
-      ifelse(domain$y1 > 0, log(pmax(domain$y1, 1) * sum(domain$y0) / sum(domain$y1)),
-             log(sum(domain$y0)) + initial_frequency[[1L]])
-    ),
-    zeta_prior_sd = ifelse(seen0, 10, initial_frequency[[2L]]),
+    zeta_prior_mean = initial$mean, zeta_prior_sd = initial$sd,
     intercept_mean = log(birth_rate), intercept_sd = birth_rate_log_sd, shell_sd = shell_sd,
     # Centred on a 1% effect per step; wide enough to reach 0.05% and 20%.
     log_scale_prior_mean = rep(log(0.01), 4L),
-    log_scale_prior_sd = rep(1.5, 4L)
+    log_scale_prior_sd = rep(1.5, 4L),
+    n_major = domain$n_major, balance = as.integer(initial_state == "balance"),
+    history = history, balance_sd = balance_sd, balance_offset = rep(0, n)
   )
   parameters <- list(
     zeta = tmb_data$zeta_prior_mean,
@@ -226,80 +429,53 @@ fit_sparse_joint <- function(counts,
   )
   # There are no interaction terms in the design, so their scale is not free.
   free_scale <- c(TRUE, TRUE, FALSE, TRUE)
-  objective <- TMB::MakeADFun(
-    tmb_data, parameters,
-    map = list(log_scale = factor(ifelse(free_scale, cumsum(free_scale), NA))),
-    random = c("zeta", "g", "coef", "theta1"), DLL = "alfak2", silent = TRUE,
-    inner.control = inner_control
-  )
-  # Scales stay in a finite box: outside it the inner problem can become
-  # degenerate and return non-finite gradients.
-  optimum <- tryCatch(
-    suppressWarnings(stats::nlminb(objective$par, objective$fn, objective$gr,
-                                   lower = log(1e-4), upper = log(0.5), control = control)),
-    error = function(e) NULL
-  )
-  if (is.null(optimum)) {
-    # The optimiser stepped to scales where the inner problem has no finite
-    # gradient. The fit is still usable at the prior-centred scales.
-    warning("Scale optimisation failed; the prior-centred scales are used.", call. = FALSE)
-    optimum <- list(par = objective$par, objective = objective$fn(objective$par), convergence = 99L,
-                    message = "scale optimisation failed; prior-centred scales used")
-  }
-  # Uncertainty is conditional on the fitted scales. The marginal likelihood
-  # is often flat in a scale, and propagating that through a Hessian that is
-  # not positive definite gives unusable standard deviations.
-  sdrep <- TMB::sdreport(objective, par.fixed = optimum$par, ignore.parm.uncertainty = TRUE)
-  mode <- objective$env$last.par.best
-  random <- summary(sdrep, "random")
-  pick <- function(name) random[rownames(random) == name, , drop = FALSE]
-  g_hat <- pick("g")
-  coef_hat <- pick("coef")
-  report <- objective$report(mode)
-  hessian <- objective$env$spHess(mode, random = TRUE)
-  coef_index <- which(names(mode)[objective$env$random] == "coef")
-  selector <- Matrix::sparseMatrix(i = coef_index, j = seq_along(coef_index), x = 1,
-                                   dims = c(nrow(hessian), length(coef_index)))
-  coef_covariance <- as.matrix(Matrix::solve(hessian, selector)[coef_index, , drop = FALSE])
+  map <- list(log_scale = factor(ifelse(free_scale, cumsum(free_scale), NA)))
+  random <- c("zeta", "g", "coef", "theta1")
+  objective <- TMB::MakeADFun(tmb_data, parameters, map = map, random = random, DLL = "alfak2",
+                              silent = TRUE, inner.control = inner_control)
+  optimum <- sparse_joint_optimise_scales(objective, control)
+  # Uncertainty is conditional on the fitted scales: the marginal likelihood
+  # is often flat in a scale.
+  solver <- sparse_joint_posterior(objective, tmb_data, parameters, map, random, optimum$par, inner_control)
+  g_index <- which(solver$names == "g")
+  g_hat <- cbind(solver$mode[g_index], sqrt(solver$variance(g_index)))
+  coef_hat <- cbind(solver$mode[solver$names == "coef"])
+  coef_covariance <- sparse_joint_coef_covariance(solver)
   scale <- tmb_data$log_scale_prior_mean
   scale[free_scale] <- optimum$par
   scale <- stats::setNames(exp(scale), scale_names)
 
-  net <- as.numeric(report$net)
   self <- 2 * exp(kernel$log_self) - 1
-  summary <- data.frame(
-    karyotype = domain$labels,
-    count_t0 = domain$y0, count_t1 = domain$y1,
-    major = seq_len(n) <= domain$n_major,
-    shell = sparse_joint_major_distance(domain$karyotypes, domain$major),
-    log_birth_mean = g_hat[, 1L], log_birth_sd = g_hat[, 2L],
-    fitness_mean = net, fitness_sd = net * g_hat[, 2L],
-    conf_low = self * exp(g_hat[, 1L] - stats::qnorm(0.975) * g_hat[, 2L]),
-    conf_high = self * exp(g_hat[, 1L] + stats::qnorm(0.975) * g_hat[, 2L]),
-    stringsAsFactors = FALSE
+  summary <- cbind(
+    data.frame(karyotype = domain$labels, count_t0 = domain$y0, count_t1 = domain$y1,
+               expected_t0 = solver$expected_t0, expected_t1 = solver$expected_t1,
+               major = seq_len(n) <= domain$n_major,
+               shell = sparse_joint_major_distance(domain$karyotypes, domain$major),
+               stringsAsFactors = FALSE),
+    sparse_joint_fitness_columns(self, g_hat[, 1L], g_hat[, 2L])
   )
-  # Level of the observed karyotypes that are not major: used to predict the
-  # observed karyotypes left out of the domain. An observed karyotype is much
-  # closer in fitness to the majors than an unobserved one at the same distance.
-  observed_minor <- !summary$major & (summary$count_t0 + summary$count_t1) > 0
-  observed_level <- if (any(observed_minor)) {
-    c(log_birth = mean(summary$log_birth_mean[observed_minor]),
-      sd = sqrt(mean(summary$log_birth_sd[observed_minor]^2) +
-                  if (sum(observed_minor) > 1L) stats::var(summary$log_birth_mean[observed_minor]) else 0))
-  } else NULL
+  # Relative to the count-weighted mean fitness of the majors.
+  relative <- sparse_joint_relative(solver, g_index, summary$fitness_mean,
+                                    summary$log_birth_sd, ifelse(summary$major, total, 0))
+  summary$relative_fitness <- relative$mean
+  summary$relative_sd <- sparse_joint_calibrate(relative$sd, relative$mean, summary$shell, birth_rate, calibration)
+  summary$relative_sd_model <- relative$sd
+  observed_level <- sparse_joint_observed_level(summary)
   structure(list(
     data = data,
     summary = summary,
     dropped = domain$dropped,
     trend = list(coefficients = coef_hat[, 1L], covariance = coef_covariance, centre = centre,
                  major = domain$major, shell_power = shell_power, scales = scale,
-                 observed_level = observed_level),
+                 observed_level = observed_level, reference = relative$reference,
+                 calibration = calibration, birth_rate = birth_rate),
     diagnostics = list(
       convergence = optimum$convergence, message = optimum$message, objective = optimum$objective,
-      finite_uncertainty = all(is.finite(g_hat[, 2L])),
+      finite_uncertainty = all(is.finite(g_hat[, 2L])) && all(is.finite(relative$sd)),
       n_states = n, n_major = domain$n_major, n_edges = length(kernel$from),
       dropped_karyotypes = length(domain$dropped), dropped_cells = domain$dropped_cells,
       birth_rate = birth_rate, fitted_birth_rate = exp(coef_hat[1L, 1L]),
+      initial_state = initial_state, history = history,
       min_cn = as.integer(min_cn), max_cn = as.integer(max_cn),
       seconds = proc.time()[["elapsed"]] - started
     )
@@ -320,16 +496,23 @@ fit_sparse_joint <- function(counts,
 #' @param ... Unused.
 #'
 #' @return Data frame with `karyotype`, `fitness_mean` (net growth rate per
-#'   unit of `dt`), `fitness_sd`, `conf_low`, `conf_high`, `shell` and
-#'   `in_domain`.
+#'   unit of `dt`), `fitness_sd`, `conf_low`, `conf_high`, `relative_fitness`,
+#'   `relative_sd`, `relative_sd_model`, `shell` and `in_domain`.
+#'   `relative_fitness` is fitness minus the count-weighted mean fitness of
+#'   the major karyotypes, which is what two samples identify. `relative_sd`
+#'   is its calibrated uncertainty and `relative_sd_model` the model's own;
+#'   see [fit_sparse_joint()]. Neither includes the uncertainty of the
+#'   baseline birth rate, which is common to all karyotypes.
 #' @export
 predict.alfak2_sparse_joint_fit <- function(object, karyotypes, ...) {
   labels <- if (is.character(karyotypes)) karyotypes else format_karyotypes(as.matrix(karyotypes))
   inside <- match(labels, object$summary$karyotype)
   out <- data.frame(karyotype = labels, fitness_mean = NA_real_, fitness_sd = NA_real_,
-                    conf_low = NA_real_, conf_high = NA_real_, shell = NA_real_,
+                    conf_low = NA_real_, conf_high = NA_real_, relative_fitness = NA_real_,
+                    relative_sd = NA_real_, relative_sd_model = NA_real_, shell = NA_real_,
                     in_domain = !is.na(inside), stringsAsFactors = FALSE)
-  columns <- c("fitness_mean", "fitness_sd", "conf_low", "conf_high", "shell")
+  columns <- c("fitness_mean", "fitness_sd", "conf_low", "conf_high", "relative_fitness", "relative_sd",
+               "relative_sd_model", "shell")
   out[!is.na(inside), columns] <- object$summary[inside[!is.na(inside)], columns]
   outside <- which(is.na(inside))
   if (length(outside)) {
@@ -338,17 +521,22 @@ predict.alfak2_sparse_joint_fit <- function(object, karyotypes, ...) {
     design <- sparse_joint_design(cn, trend$centre, trend$major, trend$shell_power)$design
     log_birth <- as.numeric(design %*% trend$coefficients)
     log_birth_sd <- sqrt(rowSums((design %*% trend$covariance) * design) + trend$scales[["residual"]]^2)
-    left_out <- labels[outside] %in% object$dropped
-    if (any(left_out) && !is.null(trend$observed_level)) {
+    left_out <- labels[outside] %in% object$dropped & !is.null(trend$observed_level)
+    if (any(left_out)) {
       log_birth[left_out] <- trend$observed_level[["log_birth"]]
       log_birth_sd[left_out] <- trend$observed_level[["sd"]]
     }
     self <- 2 * sparse_joint_self_probability(cn, object$data$beta) - 1
-    out$fitness_mean[outside] <- self * exp(log_birth)
-    out$fitness_sd[outside] <- out$fitness_mean[outside] * log_birth_sd
-    out$conf_low[outside] <- self * exp(log_birth - stats::qnorm(0.975) * log_birth_sd)
-    out$conf_high[outside] <- self * exp(log_birth + stats::qnorm(0.975) * log_birth_sd)
+    fitness <- sparse_joint_fitness_columns(self, log_birth, log_birth_sd)
+    out[outside, c("fitness_mean", "fitness_sd", "conf_low", "conf_high")] <-
+      fitness[c("fitness_mean", "fitness_sd", "conf_low", "conf_high")]
+    relative <- sparse_joint_relative_outside(trend$reference, fitness$fitness_mean, log_birth_sd, design)
+    level <- sparse_joint_relative_outside(trend$reference, fitness$fitness_mean, log_birth_sd)
+    out$relative_fitness[outside] <- relative$mean
+    out$relative_sd_model[outside] <- ifelse(left_out, level$sd, relative$sd)
     out$shell[outside] <- sparse_joint_major_distance(cn, trend$major)
+    out$relative_sd[outside] <- sparse_joint_calibrate(out$relative_sd_model[outside], relative$mean,
+                                                       out$shell[outside], trend$birth_rate, trend$calibration)
   }
   out
 }

@@ -15,8 +15,13 @@
 }
 \value{
 Data frame with \code{karyotype}, \code{fitness_mean} (net growth rate per
-unit of \code{dt}), \code{fitness_sd}, \code{conf_low}, \code{conf_high}, \code{shell} and
-\code{in_domain}.
+unit of \code{dt}), \code{fitness_sd}, \code{conf_low}, \code{conf_high}, \code{relative_fitness},
+\code{relative_sd}, \code{relative_sd_model}, \code{shell} and \code{in_domain}.
+\code{relative_fitness} is fitness minus the count-weighted mean fitness of
+the major karyotypes, which is what two samples identify. \code{relative_sd}
+is its calibrated uncertainty and \code{relative_sd_model} the model's own;
+see \code{\link[=fit_sparse_joint]{fit_sparse_joint()}}. Neither includes the uncertainty of the
+baseline birth rate, which is common to all karyotypes.
 }
 \description{
 Karyotypes inside the fitted domain return their posterior. An observed

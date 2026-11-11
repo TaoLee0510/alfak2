@@ -73,6 +73,13 @@
 #'   `"joint_count"` fits a single count likelihood and structured landscape
 #'   prior on the entire bounded target graph. The joint model is an explicitly
 #'   selectable candidate pending independent all-distance validation.
+#'   `"sparse_joint"` fits the sparse joint count model, which is built for two
+#'   sparse samples: see [fit_sparse_joint()], whose result it returns. Of the
+#'   other arguments only `counts`, `dt`, `beta` and `sparse_joint_control`
+#'   then apply.
+#' @param sparse_joint_control Named list of further arguments for
+#'   [fit_sparse_joint()] when `pipeline = "sparse_joint"`, such as
+#'   `birth_rate`, `min_cn` and `max_cn`.
 #' @param joint_control Named prior controls passed to the joint landscape.
 #'   Experimental `interaction_support = "observed_nullspace"` separates pair
 #'   directions that vanish at observed design rows; this is not a likelihood
@@ -87,7 +94,8 @@
 #'   maximum frequency change and log total growth change.
 #' @param forward_max_refinements Maximum joint forward step halvings and refits.
 #'
-#' @return An `alfak2_fit` object.
+#' @return An `alfak2_fit` object, or an `alfak2_sparse_joint_fit` object for
+#'   `pipeline = "sparse_joint"`.
 #' @export
 fit_alfak2 <- function(counts,
                        dt = 1,
@@ -141,13 +149,22 @@ fit_alfak2 <- function(counts,
                        nb = NULL,
                        correct_efflux = FALSE,
                        legacy_weight = c("pi0", "directly_informed", "uniform"),
-                       pipeline = c("two_layer", "joint_count"),
+                       pipeline = c("two_layer", "joint_count", "sparse_joint"),
                        joint_control = list(),
+                       sparse_joint_control = list(),
                        target_karyotypes = NULL,
                        forward_tolerance = 1e-5,
                        forward_max_refinements = 3L,
                        ...) {
   pipeline <- match.arg(pipeline)
+  if (identical(pipeline, "sparse_joint")) {
+    if (!is.list(sparse_joint_control) || (length(sparse_joint_control) &&
+        (is.null(names(sparse_joint_control)) || any(!nzchar(names(sparse_joint_control)))))) {
+      stop("`sparse_joint_control` must be a named list.", call. = FALSE)
+    }
+    # A model of its own, with its own domain, result and prediction method.
+    return(do.call(fit_sparse_joint, c(list(counts, dt = dt, beta = beta), sparse_joint_control)))
+  }
   if (!is.list(joint_control) || (length(joint_control) &&
       (is.null(names(joint_control)) || any(!nzchar(names(joint_control))))))
     stop("`joint_control` must be a named list.", call. = FALSE)
