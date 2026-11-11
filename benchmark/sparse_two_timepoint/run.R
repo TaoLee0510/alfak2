@@ -95,7 +95,7 @@ stt_stage_datasets <- function(config, split, workers, cohort) {
     data.frame(
       dataset_id = dataset$dataset_id, split = dataset$split, landscape_id = dataset$landscape_id,
       wavelength_class = dataset$wavelength_class, patient = dataset$patient,
-      scenario = dataset$scenario, scoreboard = plan[[i]]$scoreboard,
+      scenario = dataset$scenario, role = plan[[i]]$scenario$role, scoreboard = plan[[i]]$scoreboard,
       t(stt_count_profile(dataset$counts)),
       stringsAsFactors = FALSE
     )

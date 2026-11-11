@@ -63,6 +63,10 @@ uncertainties. The second layer treats those local estimates as noisy anchors
 and propagates information over a larger bounded karyotype graph using a sparse
 Gaussian graph posterior.
 
+Section~\ref{sec:sparse-joint} describes a separate model for the same input,
+the sparse joint count model, which fits both samples with one likelihood and
+is selected with \texttt{pipeline = "sparse\_joint"}.
+
 \section{Notation}
 
 \begin{table}[h]
@@ -997,6 +1001,169 @@ copied back into the full graph summary; all nodes with $d(v)>d_{\max}$ are
 left \texttt{out\_of\_scope}. This method is useful when the goal is accurate
 direct and near-neighbor shape preservation without allowing far-field graph
 states to influence the near-field posterior.
+
+\section{Sparse Joint Count Model}
+\label{sec:sparse-joint}
+
+\texttt{fit\_sparse\_joint()} is a separate model for two sparse samples. It
+fits both samples with one count likelihood and reads fitness from a source
+the two-layer pipeline does not use: the level at which mutation and selection
+hold a rare karyotype relative to the clone it descends from.
+
+\subsection{Where the Information Is}
+
+A rare karyotype $j$ next to an abundant clone $p$ is replenished by
+missegregation at every division of $p$ and lost by selection at rate
+$d_p-d_j$, where $d$ is the net growth rate. Its abundance settles at
+\[
+  \frac{n_j}{n_p}\;\approx\;\frac{M_{jp}}{d_p-d_j},
+\]
+with $M_{jp}$ the mutational flux from $p$ to $j$ defined below. At this
+balance the frequency of $j$ follows that of $p$, so its \emph{change} between
+the samples says nothing about its fitness; its \emph{level} does. A neighbour
+that is absent from a sample in which its parent holds many cells is thereby
+evidence that the neighbour is less fit. The forward model therefore has to
+integrate mutational influx over the whole interval, which one transport step
+after growth does not.
+
+\subsection{Domain}
+
+A karyotype is \emph{major} if it holds at least a share $\phi$ (default 1\%)
+of either sample and at least $c$ cells (default 3) over both. The domain
+$\mathcal{D}$ is the majors and every one-step neighbour of a major within the
+viable copy-number bounds, observed or not. The count is required as well as
+the share: a major's neighbours enter the likelihood whether observed or not,
+and an unobserved neighbour is evidence only if a cell falling on it would
+have left it a neighbour. Observed karyotypes outside $\mathcal{D}$ are left
+out of the likelihood with their cells, since they would enter only because
+they were observed while their unobserved siblings would not.
+
+\subsection{Division Dynamics in Closed Form}
+
+Let $b_i$ be the birth (division) rate of state $i$ and $P_{ij}$ the
+probability that one daughter of $i$ has karyotype $j$. Expected abundances
+follow
+\[
+  \frac{dn}{dt}=(2P^\top-I)\operatorname{diag}(b)\,n
+  =\bigl(\operatorname{diag}(d)+M\bigr)n,
+  \qquad
+  d_i=(2P_{ii}-1)\,b_i,\quad M_{ji}=2P_{ij}\,b_i\ (j\ne i).
+\]
+The model keeps $\exp(\operatorname{diag}(d)\,t)$ exact and $M$ to first order:
+\[
+  n_j(T)=e^{d_jT}n_j(0)+\sum_{i\sim j}M_{ji}\,\varphi_1(d_j,d_i;T)\,n_i(0),
+  \qquad
+  \varphi_1(a,b;T)=\int_0^T e^{a(T-s)+bs}\,ds=\frac{e^{aT}-e^{bT}}{a-b}.
+\]
+A state then depends only on itself and its one-step neighbours, which keeps
+the Hessian of the latent variables sparse on domains of thousands of states.
+The neglected terms are clones that arise two or more missegregations away
+within the interval.
+
+\subsection{Count Likelihood}
+
+Each state has a free log expected count $\zeta_i$ at the first timepoint and
+a log birth rate $g_i=\log b_i$. With $y_{0i},y_{1i}$ the counts,
+\[
+  y_{0i}\sim\operatorname{Poisson}\bigl(e^{\zeta_i}\bigr),
+  \qquad
+  y_{1i}\sim\operatorname{Poisson}\bigl(e^{\theta_1-d_rT}\,n_i(T)\bigr),
+\]
+where $n(0)=e^{\zeta}$, $r$ is a reference state and $\theta_1$ absorbs the
+depth ratio and the common growth factor. This is the Poisson form of two
+multinomial samples; it is used because a softmax over the domain would couple
+every pair of states.
+
+\subsection{Landscape Prior}
+
+The log birth rates have a trend and an independent residual,
+\[
+  g_i\sim\Normal\bigl(z_i^\top\gamma,\ \sigma_r^2\bigr),
+\]
+where the covariates $z_i$ hold an intercept, the chromosome dosages and their squares about
+the count-weighted mean karyotype, and a shell term
+$\operatorname{dist}(i,\text{nearest major})^{0.85}$. Dosage and curvature
+coefficients have scales $\sigma_d,\sigma_c$; the three scales are set by
+maximising the Laplace marginal likelihood. The shell term is measured to
+majors only: were it measured to every observed karyotype, a neighbour's own
+count would decide its covariate. The intercept is held near the logarithm of
+a supplied baseline birth rate (Section~\ref{sec:sparse-joint-rate}).
+
+Fitness outside the domain is predicted from the trend with the residual scale
+as additional uncertainty. An observed karyotype that was left out of the
+domain is placed at the mean level of the observed, non-major karyotypes inside
+it, which is nearly independent of distance, unlike that of unobserved ones.
+
+\subsection{Initial Abundances}
+
+By default every $\zeta_i$ is free, with a weak prior on the frequency scale
+for states never observed. Optionally (\texttt{initial\_state = "balance"}) a
+non-major state starts at what the majors next to it would have fed it over a
+history $h$, had each grown at its present rate throughout:
+\[
+  \zeta_j\sim\Normal\Bigl(\log\sum_{p\ \mathrm{major},\,p\sim j}
+  M_{jp}\,e^{-d_ph}\,\varphi_1(d_j,d_p;h)\,e^{\zeta_p},\ \sigma_\zeta^2\Bigr),
+\]
+which tends to $M_{jp}n_p(0)/(d_p-d_j)$ for a long history and a less fit
+neighbour. The first sample's levels then inform fitness as well. This assumes
+that fitness before the first sample was what it is between the samples.
+
+\subsection{Relative Fitness and Its Uncertainty}
+
+Two samples identify fitness differences, not absolute fitness. The model
+reports fitness relative to the count-weighted mean over the majors,
+\[
+  \rho_i=d_i-\sum_{m\ \mathrm{major}}w_m d_m ,
+\]
+with the posterior covariance taken as the inverse of the \emph{expected}
+information at the mode: the Hessian of the objective with the counts replaced
+by their fitted expectations. The intensities are not log-linear in $g$, so
+where the fit to the counts is poor the observed Hessian has directions of
+negative curvature; the expected information is positive definite by
+construction. The uncertainty of the baseline birth rate is common to all
+karyotypes and cancels in $\rho$.
+
+The model's own standard deviation $s_i$ of $\rho_i$ takes the model to be
+exact and is too small. The reported standard deviation adds two terms of
+model error,
+\[
+  \tilde s_i^2=s_i^2+(\kappa\,\rho_i)^2
+  +\bigl(a\,b_0\,(1+\operatorname{dist}(i,\text{nearest major}))\bigr)^2 ,
+\]
+with $b_0$ the baseline birth rate and constants $a=0.009$, $\kappa=0.6$ fitted
+to simulated landscapes: a karyotype predicted far from the reference is known
+in proportion to that distance, and an error per division remains that grows
+away from the majors. Both $\tilde s$ and $s$ are returned.
+
+\subsection{Baseline Birth Rate}
+\label{sec:sparse-joint-rate}
+
+The baseline birth rate $b_0$ is supplied. Left free it is identified only
+weakly and drifts upwards. What it changes is known. The fitness difference
+between two well-sampled clones comes from their frequency change and does not
+depend on it. The deficit of a rare or unobserved karyotype comes from its
+level, which fixes the deficit \emph{per division}, $(d_p-d_j)/b_0$, given the
+missegregation rate; per unit of time it is proportional to $b_0$. Rankings
+barely move. When no value is known, \texttt{fit\_sparse\_joint\_rates()} fits
+at a few rates across a plausible range and reports relative fitness at the
+central rate, an interval that covers every fitted rate, and relative fitness
+per division.
+
+\subsection{Cohort Model}
+
+\texttt{fit\_sparse\_joint\_cohort()} fits several samples at once. Each sample
+$s$ keeps its own domain $\mathcal{D}_s$, initial abundances and depth. A
+karyotype $v$ in any domain has a shared log birth rate $m_v$ with the trend
+prior above, whose shell term is the distance to the nearest major of any
+sample, and each sample has
+\[
+  g_{sv}\sim\Normal\bigl(m_v,\ \tau^2\bigr),\qquad v\in\mathcal{D}_s ,
+\]
+with the between-sample scale $\tau$ estimated together with the other scales
+(\texttt{sharing = "partial"}), or $g_{sv}=m_v$ (\texttt{sharing = "full"}). A
+karyotype that is abundant in one sample and an unobserved neighbour in
+another is informed by both. With one sample and full sharing the model is the
+single-sample model.
 
 \section{Output}
 

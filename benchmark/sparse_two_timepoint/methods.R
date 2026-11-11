@@ -10,6 +10,8 @@ stt_run_method <- function(method, dataset, nodes, work_dir) {
       alfakR = stt_method_alfakR(dataset, nodes, method, work_dir),
       alfak2_two_layer = stt_method_alfak2_two_layer(dataset, nodes, method),
       alfak2_sparse_joint = stt_method_alfak2_sparse_joint(dataset, nodes, method),
+      alfak2_sparse_joint_cohort = stt_method_alfak2_sparse_joint_cohort(dataset, nodes, method),
+      alfak2_sparse_joint_rates = stt_method_alfak2_sparse_joint_rates(dataset, nodes, method),
       stop("Unknown method type: ", method$type, call. = FALSE)
     ),
     error = function(e) list(status = "failed", prediction = NULL, detail = conditionMessage(e))
@@ -108,15 +110,79 @@ stt_method_alfak2_two_layer <- function(dataset, nodes, method) {
 stt_method_alfak2_sparse_joint <- function(dataset, nodes, method) {
   counts <- dataset$counts
   storage.mode(counts) <- "integer"
-  fit <- alfak2::fit_sparse_joint(counts, dt = dataset$interval, beta = dataset$beta,
-                                  birth_rate = method$birth_rate,
-                                  min_cn = method$min_cn, max_cn = method$max_cn)
+  # `method$arguments` holds any further arguments of the variant under test.
+  fit <- do.call(alfak2::fit_sparse_joint, c(
+    list(counts, dt = dataset$interval, beta = dataset$beta, birth_rate = method$birth_rate,
+         min_cn = method$min_cn, max_cn = method$max_cn),
+    method$arguments
+  ))
   prediction <- stats::predict(fit, nodes$karyotype)
   diagnostics <- fit$diagnostics
   list(status = "ok",
        detail = sprintf("states=%d major=%d dropped=%d convergence=%d finite_sd=%s birth=%.2f",
                         diagnostics$n_states, diagnostics$n_major, diagnostics$dropped_karyotypes,
                         diagnostics$convergence, diagnostics$finite_uncertainty, diagnostics$fitted_birth_rate),
-       prediction = data.frame(karyotype = prediction$karyotype, fitness = prediction$fitness_mean,
-                               fitness_sd = prediction$fitness_sd, stringsAsFactors = FALSE))
+       # `model_sd` and `shell` are what the calibration is refitted from.
+       prediction = data.frame(karyotype = prediction$karyotype, fitness = prediction$relative_fitness,
+                               fitness_sd = prediction$relative_sd, model_sd = prediction$relative_sd_model,
+                               shell = prediction$shell, stringsAsFactors = FALSE))
+}
+
+# Datasets fitted together with `dataset`, which comes first. "landscape":
+# the other patients of its landscape. "other_landscapes": patient 1 of the
+# following landscapes of the split, a cohort that does not share a landscape.
+stt_cohort_members <- function(dataset, method) {
+  others <- if (identical(method$members, "landscape")) {
+    sprintf("%s_P%02d_%s", dataset$landscape_id, setdiff(seq_len(method$cohort_size), dataset$patient),
+            dataset$scenario)
+  } else {
+    ids <- method$landscapes$landscape_id[method$landscapes$split == dataset$split]
+    at <- match(dataset$landscape_id, ids)
+    sprintf("%s_P01_%s", ids[(at + seq_len(method$cohort_size - 1L) - 1L) %% length(ids) + 1L], dataset$scenario)
+  }
+  paths <- file.path(method$dataset_dir, paste0(others, ".rds"))
+  if (any(!file.exists(paths))) stop("Cohort datasets are missing: generate them with --cohort.", call. = FALSE)
+  c(list(dataset), lapply(paths, readRDS))
+}
+
+# Cohort fit of the sparse joint model, predicted for the first member.
+stt_method_alfak2_sparse_joint_cohort <- function(dataset, nodes, method) {
+  members <- stt_cohort_members(dataset, method)
+  samples <- lapply(members, function(member) {
+    counts <- member$counts
+    storage.mode(counts) <- "integer"
+    counts
+  })
+  names(samples) <- vapply(members, function(member) member$dataset_id, character(1))
+  fit <- do.call(alfak2::fit_sparse_joint_cohort, c(
+    list(samples, dt = vapply(members, function(member) member$interval, numeric(1)), beta = dataset$beta,
+         birth_rate = method$birth_rate, min_cn = method$min_cn, max_cn = method$max_cn),
+    method$arguments
+  ))
+  prediction <- stats::predict(fit, nodes$karyotype, sample = 1L)
+  diagnostics <- fit$diagnostics
+  list(status = "ok",
+       detail = sprintf("nodes=%d states=%d shared=%d convergence=%d finite_sd=%s deviation=%.4f",
+                        diagnostics$n_nodes, diagnostics$n_states, diagnostics$shared_nodes,
+                        diagnostics$convergence, diagnostics$finite_uncertainty, fit$trend$scales[["deviation"]]),
+       # `model_sd` and `shell` are what the calibration is refitted from.
+       prediction = data.frame(karyotype = prediction$karyotype, fitness = prediction$relative_fitness,
+                               fitness_sd = prediction$relative_sd, model_sd = prediction$relative_sd_model,
+                               shell = prediction$shell, stringsAsFactors = FALSE))
+}
+
+# Sparse joint model with the baseline birth rate known only as a range: the
+# prediction at the centre of the range, with an interval covering the range.
+stt_method_alfak2_sparse_joint_rates <- function(dataset, nodes, method) {
+  counts <- dataset$counts
+  storage.mode(counts) <- "integer"
+  fit <- alfak2::fit_sparse_joint_rates(counts, dt = dataset$interval, beta = dataset$beta,
+                                        min_cn = method$min_cn, max_cn = method$max_cn,
+                                        birth_rate_range = method$birth_rate_range)
+  prediction <- stats::predict(fit, nodes$karyotype)
+  list(status = "ok",
+       detail = sprintf("rates=%s rank_agreement=%.3f", paste(signif(fit$rates, 3), collapse = "/"),
+                        attr(prediction, "rank_agreement")),
+       prediction = data.frame(karyotype = prediction$karyotype, fitness = prediction$relative_fitness,
+                               fitness_sd = prediction$relative_sd, stringsAsFactors = FALSE))
 }
