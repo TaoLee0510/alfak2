@@ -1,9 +1,10 @@
 # alfak2 workflow, step by step
 
 This is how the default pipeline of alfak2 runs, from a two-sample count matrix
-to a fitted landscape and, optionally, to the output files of alfakR. The
-mathematics is in [`alfak2_method.tex`](alfak2_method.tex), the sparse joint
-count model section; the design decisions and benchmark results are in
+to a fitted landscape and, optionally, to the output files of alfakR. It is
+Section 4 of [`alfak2_method.tex`](alfak2_method.tex) in plain text; the model
+and its equations are Section 2 there, and the design decisions and benchmark
+results are in
 [`validation/sparse_joint/README.md`](../validation/sparse_joint/README.md).
 
 ## Entry points
