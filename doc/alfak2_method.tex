@@ -904,7 +904,9 @@ contributes one karyotype, without calling error, and the input to every
 method is the resulting two-column count matrix. The number of distinct
 karyotypes observed in the two samples together increases with sample size
 and with landscape smoothness, because populations on smooth landscapes are
-more diverse:
+more diverse. Each row of the following table is one sampling design
+(scenario); values are medians and ranges over the six landscapes of each
+wavelength, development and held-out:
 
 \begin{center}
 \footnotesize
@@ -984,8 +986,10 @@ landscapes,
   \mathrm{RMSE}_{\lambda,d}=\frac{1}{3}\sum_{L\in\Lambda_\lambda}\frac{1}{8}\sum_S\mathrm{RMSE}_{L,S,d},
   \label{eq:rmse-pooled}
 \end{equation}
-and rank correlations and coverage likewise. Landscapes are the independent
-units: the scenarios of a landscape are drawn from one simulated trajectory.
+and rank correlations and coverage likewise. Each value is thus the
+equally weighted mean of 24 datasets, three landscapes by eight sampling
+designs, so that every design counts equally irrespective of its sample size
+or number of karyotypes. Landscapes are the independent units: the scenarios of a landscape are drawn from one simulated trajectory.
 Comparisons between methods are therefore paired by landscape, and confidence
 intervals are obtained by resampling landscapes. For patient samples no
 reference values exist, and the assessments described below are indirect.
