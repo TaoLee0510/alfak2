@@ -1124,14 +1124,15 @@ whereas the sparse joint model reduced it by 25--56\%
 Figures~\ref{fig:design-error} and~\ref{fig:design-rank} resolve the held-out
 results by sampling design. For each wavelength and distance they show the
 error relative to the null predictor and the rank correlation of the sparse
-joint model, with and without the balance prior, and of the two-layer
-pipeline; points are means over the three landscapes of a wavelength and bars
-the range over those landscapes. Designs are ordered by sample size at fixed
+joint model, with and without the balance prior, of the two-layer pipeline
+and of \texttt{alfakR}; points are means over the three landscapes of a
+wavelength and bars the range over those landscapes. Designs are ordered by sample size at fixed
 interval (50/50 cells at 180 days, 200/200 at 180 and 360 days, 500/700 at 360
 days), followed by a longer interval, a bottleneck and the two unbalanced
-designs. \texttt{alfakR} is omitted from the figures because its errors reach
-up to 300 times those of the null predictor; it was below the null predictor
-in 4 of the 96 combinations of wavelength, design and distance (Supplement~\ref{sec:s-designs}).
+designs. Because the errors of \texttt{alfakR} reach about 300 times those of
+the null predictor, error ratios above 8 are drawn at the upper edge of
+Figure~\ref{fig:design-error} and labelled with their value; all values are
+given in Supplement~\ref{sec:s-designs}.
 
 Sparsity depends on the landscape as well as on the sample size. The number
 of cells per observed karyotype, a direct measure of sparsity, ranged from
@@ -1147,9 +1148,10 @@ smoothest landscapes:
 landscapes. Rows are wavelengths, columns distances from the observed
 karyotypes; the dashed line marks the null predictor. Points are the mean
 error over the three landscapes of a wavelength divided by that of the null
-predictor, and bars the range of this ratio over the landscapes. Vertical
-lines separate the sample-size series, the longer interval, the bottleneck and
-the unbalanced designs.}
+predictor, and bars the range of this ratio over the landscapes. Ratios of
+\texttt{alfakR} above 8 are drawn at the upper edge, with bars truncated
+there, and labelled with their value. Vertical lines separate the sample-size
+series, the longer interval, the bottleneck and the unbalanced designs.}
 \label{fig:design-error}
 \end{figure}
 
@@ -1178,7 +1180,10 @@ ruggedness ($\lambda=0.8$ and 1.2, ratios of 0.62 to 0.75 against 0.49 to 0.61
 at 360 days). Of the unbalanced designs, a deep first and shallow second
 sample gave the weakest result on the smoothest landscapes (0.83 at distance
 1). The two-layer pipeline attained 0.85 to 1.08 times the error of the null
-predictor in every design. On the development landscapes the sparse joint
+predictor in every design. \texttt{alfakR} exceeded the error of the null
+predictor in 92 of the 96 combinations, by more than a factor of eight in 10
+of them, and the sparse joint model attained a lower error than
+\texttt{alfakR} in all 96. On the development landscapes the sparse joint
 model was below the null predictor in all 96 combinations (ratios 0.39 to
 0.88; Supplement~\ref{sec:s-designs}).
 
@@ -1189,7 +1194,11 @@ and 0.33 on the most rugged landscapes in every design. The two-layer
 pipeline ranked observed karyotypes better in 7 of the 8 designs at
 $\lambda=1.6$ and in 2 of 8 at $\lambda=1.2$, for the reason given in
 Section~\ref{sec:val-wavelength}; it ranked them worse in every design at
-$\lambda\le0.8$. Coverage of the sparse joint model ranged from 0.77 to 1.00;
+$\lambda\le0.8$. The sparse joint model ranked karyotypes better than
+\texttt{alfakR} in 87 of the 93 combinations in which \texttt{alfakR} produced
+a ranking; the exceptions were observed karyotypes in four designs at
+$\lambda=1.6$ and two small differences at $\lambda=0.4$. Coverage of the
+sparse joint model ranged from 0.77 to 1.00;
 it fell below 0.90 mainly at distance 2 and mainly for the longer interval
 (0.81 to 0.83 at $\lambda\le0.8$) and for a shallow first sample (100/3000;
 0.77 to 0.86 at $\lambda\le0.8$), and was conservative on smooth landscapes.

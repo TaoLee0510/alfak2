@@ -457,7 +457,11 @@ and tables in `doc/generated/`). Each cell holds three landscapes.
   1.2 (0.62 to 0.75 against 0.49 to 0.61). 3000/100 is the weakest design at
   wavelength 1.6 (0.83 at distance 1).
 - The two-layer pipeline is at 0.85 to 1.08 everywhere; `alfakR` is below the
-  null predictor in 4 of 96 combinations and up to 300 times above it.
+  null predictor in 4 of 96 combinations and up to 300 times above it (the
+  error figure caps its ratios at 8 and labels the larger ones). The sparse
+  joint model has a lower error than `alfakR` in all 96 and ranks better in
+  87 of the 93 with an `alfakR` ranking; the exceptions are observed
+  karyotypes in four designs at wavelength 1.6 and two small ones at 0.4.
 - Rank correlation at distances 1 and 2 grows with depth on smooth landscapes
   (wavelength 1.6, distance 1: 0.28 at 50/50, 0.55 to 0.62 at 500/700) and
   stays at 0.12 to 0.33 on rugged ones. The two-layer pipeline ranks observed
