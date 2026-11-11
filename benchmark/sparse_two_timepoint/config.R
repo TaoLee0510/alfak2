@@ -103,7 +103,9 @@ stt_config <- function(output_dir = file.path("benchmark", "results", "sparse_tw
                       candidates = c("alfak2_sparse_joint", "alfak2_sparse_joint_balance"),
                       # Cohort methods exist for the cohort scenario only and are
                       # compared there with the single-sample model.
-                      cohort = c("alfak2_sparse_joint_cohort", "alfak2_sparse_joint_cohort_unrelated"),
+                      cohort = c("alfak2_sparse_joint_cohort", "alfak2_sparse_joint_cohort_unrelated",
+                                 "alfak2_sparse_joint_cohort_shared_trend",
+                                 "alfak2_sparse_joint_cohort_unrelated_shared_trend"),
                       cohort_baseline = "alfak2_sparse_joint"),
     methods = list(
       zero = list(type = "zero"),
@@ -135,10 +137,15 @@ stt_config <- function(output_dir = file.path("benchmark", "results", "sparse_tw
       alfak2_sparse_joint_range_high = list(type = "alfak2_sparse_joint_rates", birth_rate_range = c(1, 16),
                                             min_cn = 1L, max_cn = 8L),
       # Cohort fit of the eight patients of a landscape, scored on patient 1.
-      alfak2_sparse_joint_cohort = cohort_method("landscape"),
+      # The trend is shared or per sample, whichever has the higher marginal
+      # likelihood.
+      alfak2_sparse_joint_cohort = cohort_method("landscape", trend = "select"),
       # Control: the same patient with patients of seven other landscapes,
       # which share the statistics of a landscape but not the landscape.
-      alfak2_sparse_joint_cohort_unrelated = cohort_method("other_landscapes")
+      alfak2_sparse_joint_cohort_unrelated = cohort_method("other_landscapes", trend = "select"),
+      # The same two with one trend for the whole cohort, always.
+      alfak2_sparse_joint_cohort_shared_trend = cohort_method("landscape", trend = "shared"),
+      alfak2_sparse_joint_cohort_unrelated_shared_trend = cohort_method("other_landscapes", trend = "shared")
     )
   )
 }
