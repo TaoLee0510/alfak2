@@ -169,6 +169,18 @@ neighbours, which keeps the Hessian of the latent variables sparse for
 domains of several thousand states. Fitness is reported relative to the
 abundant clones, which is the quantity that two samples identify.
 
+\paragraph{Terminology.}
+The model is sparse in two respects. It is designed for sparse data: two
+samples of a few hundred to a few thousand cells in a karyotype space in which
+each clone has $2p=44$ one-step and $2p^2=968$ two-step neighbours, so that
+most karyotypes whose fitness is sought are not observed, even when the
+observed karyotypes themselves are well sampled. Its structure is sparse as
+well: the likelihood is restricted to the major karyotypes and their one-step
+neighbours, and the first-order dynamics couple each state only to its
+neighbours, so that the Hessian of the latent variables is sparse. The model
+is joint in that a single likelihood covers both samples and all states, and
+it models counts rather than frequencies.
+
 \subsection{Major Karyotypes and Model Domain}
 \label{sec:sj-domain}
 
