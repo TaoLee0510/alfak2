@@ -162,9 +162,13 @@ stt_method_alfak2_sparse_joint_cohort <- function(dataset, nodes, method) {
   prediction <- stats::predict(fit, nodes$karyotype, sample = 1L)
   diagnostics <- fit$diagnostics
   list(status = "ok",
-       detail = sprintf("nodes=%d states=%d shared=%d convergence=%d finite_sd=%s deviation=%.4f",
+       detail = sprintf("nodes=%d states=%d shared=%d convergence=%d finite_sd=%s deviation=%.4f trend=%s%s",
                         diagnostics$n_nodes, diagnostics$n_states, diagnostics$shared_nodes,
-                        diagnostics$convergence, diagnostics$finite_uncertainty, fit$trend$scales[["deviation"]]),
+                        diagnostics$convergence, diagnostics$finite_uncertainty, fit$trend$scales[["deviation"]],
+                        if (is.null(diagnostics$trend)) "shared" else diagnostics$trend,
+                        if (is.null(diagnostics$trend_objective)) "" else
+                          sprintf(" objective_shared=%.2f objective_sample=%.2f", diagnostics$trend_objective[["shared"]],
+                                  diagnostics$trend_objective[["sample"]])),
        # `model_sd` and `shell` are what the calibration is refitted from.
        prediction = data.frame(karyotype = prediction$karyotype, fitness = prediction$relative_fitness,
                                fitness_sd = prediction$relative_sd, model_sd = prediction$relative_sd_model,
