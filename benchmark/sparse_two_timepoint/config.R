@@ -72,9 +72,10 @@ stt_config <- function(output_dir = file.path("benchmark", "results", "sparse_tw
     # Scored nodes: all observed karyotypes, and up to `d1_cap` / `d2_cap`
     # uniformly sampled one- and two-step neighbours.
     scoring = list(min_cn = 1L, max_cn = 8L, d1_cap = 2000L, d2_cap = 2000L, reference_min_count = 5),
-    # Roles in the acceptance rule (report.R). Any other method is a candidate.
+    # Roles in the acceptance rule (report.R).
     acceptance = list(zero = "zero", current = "alfak2_two_layer_fixed",
-                      original = c("alfakR_minobs5", "alfakR_minobs20")),
+                      original = c("alfakR_minobs5", "alfakR_minobs20"),
+                      candidates = "alfak2_sparse_joint"),
     methods = list(
       zero = list(type = "zero"),
       alfakR_minobs5 = list(type = "alfakR", minobs = 5L, nboot = 45L, n0 = 5e4, nb = 2e6,
@@ -85,7 +86,13 @@ stt_config <- function(output_dir = file.path("benchmark", "results", "sparse_tw
       alfak2_two_layer_fixed = list(type = "alfak2_two_layer", local_shell_depth = 0L, max_nodes = 60000L,
                                     graph_hyperparameters = c(lambda_l = 1, lambda_e = 0.25, sigma_obs = 0.05)),
       # Package default: hyperparameters by leave-one-anchor-out selection.
-      alfak2_two_layer_cv = list(type = "alfak2_two_layer", local_shell_depth = 0L, max_nodes = 60000L)
+      alfak2_two_layer_cv = list(type = "alfak2_two_layer", local_shell_depth = 0L, max_nodes = 60000L),
+      # Candidate. One division per day is assumed for every dataset; the
+      # simulated populations divide about 0.9 times per day.
+      alfak2_sparse_joint = list(type = "alfak2_sparse_joint", birth_rate = 1, min_cn = 1L, max_cn = 8L),
+      # Sensitivity to the assumed baseline birth rate: half and double.
+      alfak2_sparse_joint_slow = list(type = "alfak2_sparse_joint", birth_rate = 0.5, min_cn = 1L, max_cn = 8L),
+      alfak2_sparse_joint_fast = list(type = "alfak2_sparse_joint", birth_rate = 2, min_cn = 1L, max_cn = 8L)
     )
   )
 }
