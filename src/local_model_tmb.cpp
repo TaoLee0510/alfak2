@@ -1,6 +1,7 @@
 #include <TMB.hpp>
 #include "division_forward.h"
 #include "sparse_joint_model.h"
+#include "sparse_joint_cohort_model.h"
 
 template<class Type>
 Type softplus_floor(Type x, Type floor) {
@@ -358,8 +359,10 @@ Type local_model(objective_function<Type>* obj) {
 template<class Type>
 Type objective_function<Type>::operator() () {
   SEXP model_name = getListElement(this->data, "model");
-  if (!Rf_isNull(model_name) && std::string(CHAR(STRING_ELT(model_name, 0))) == "sparse_joint") {
-    return sparse_joint_model(this);
+  if (!Rf_isNull(model_name)) {
+    std::string model = CHAR(STRING_ELT(model_name, 0));
+    if (model == "sparse_joint") return sparse_joint_model(this);
+    if (model == "sparse_joint_cohort") return sparse_joint_cohort_model(this);
   }
   return local_model(this);
 }

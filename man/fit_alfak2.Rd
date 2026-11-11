@@ -45,8 +45,9 @@ fit_alfak2(
   nb = NULL,
   correct_efflux = FALSE,
   legacy_weight = c("pi0", "directly_informed", "uniform"),
-  pipeline = c("two_layer", "joint_count"),
+  pipeline = c("two_layer", "joint_count", "sparse_joint"),
   joint_control = list(),
+  sparse_joint_control = list(),
   target_karyotypes = NULL,
   forward_tolerance = 1e-05,
   forward_max_refinements = 3L,
@@ -153,7 +154,11 @@ equally.}
 \item{pipeline}{\code{"two_layer"} retains separate local and extrapolation fits;
 \code{"joint_count"} fits a single count likelihood and structured landscape
 prior on the entire bounded target graph. The joint model is an explicitly
-selectable candidate pending independent all-distance validation.}
+selectable candidate pending independent all-distance validation.
+\code{"sparse_joint"} fits the sparse joint count model, which is built for two
+sparse samples: see \code{\link[=fit_sparse_joint]{fit_sparse_joint()}}, whose result it returns. Of the
+other arguments only \code{counts}, \code{dt}, \code{beta} and \code{sparse_joint_control}
+then apply.}
 
 \item{joint_control}{Named prior controls passed to the joint landscape.
 Experimental \code{interaction_support = "observed_nullspace"} separates pair
@@ -162,6 +167,10 @@ identifiability test. \code{unidentified_interaction_sd} controls their prior.
 Optional \code{prior_components} is a list of prior-control lists, with
 \code{model_prior} supplying component weights before conditional evidence
 updating. It cannot be combined with \code{model_scales}.}
+
+\item{sparse_joint_control}{Named list of further arguments for
+\code{\link[=fit_sparse_joint]{fit_sparse_joint()}} when \code{pipeline = "sparse_joint"}, such as
+\code{birth_rate}, \code{min_cn} and \code{max_cn}.}
 
 \item{target_karyotypes}{Optional explicit finite query states, as labels or a
 copy-number matrix. They define the global domain together with observed
@@ -175,7 +184,8 @@ maximum frequency change and log total growth change.}
 \item{...}{Passed to \code{fit_local_posterior()}.}
 }
 \value{
-An \code{alfak2_fit} object.
+An \code{alfak2_fit} object, or an \code{alfak2_sparse_joint_fit} object for
+\code{pipeline = "sparse_joint"}.
 }
 \description{
 Runs data validation, local graph construction, TMB local posterior fitting,

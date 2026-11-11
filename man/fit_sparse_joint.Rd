@@ -18,6 +18,10 @@ fit_sparse_joint(
   shell_power = 0.85,
   shell_sd = 0.5,
   initial_frequency = c(mean = log(1e-05), sd = 3),
+  initial_state = c("free", "balance"),
+  history = NULL,
+  balance_sd = 1,
+  calibration = sparse_joint_default_calibration,
   control = list(eval.max = 200, iter.max = 100),
   inner_control = list(maxit = 200, tol = 1e-10)
 )
@@ -62,13 +66,34 @@ a small sample. A karyotype seen only at the second timepoint is centred
 on its frequency there, with the same standard deviation: absent other
 evidence its frequency is taken not to have changed.}
 
+\item{initial_state}{How abundances at the first timepoint are treated.
+\code{"free"} estimates one for every karyotype and so uses the first sample
+only as a starting point. \code{"balance"} starts every karyotype that is not
+major at mutation-selection balance with the major karyotypes next to it,
+so that its count in the first sample also informs its fitness. That
+assumes fitness before the first sample was what it is between the
+samples; do not use it when treatment starts at the first sample.}
+
+\item{history}{Time, in units of \code{dt}, over which the balance built up.
+Defaults to the interval between the samples.}
+
+\item{balance_sd}{Spread, on the log scale, of initial abundances around
+the balance.}
+
+\item{calibration}{Constants \code{floor} and \code{deficit} that turn the model's
+posterior standard deviation of relative fitness into the reported
+\code{relative_sd}; see Details. \code{NULL} reports the model's own.}
+
 \item{control}{List passed to \code{\link[stats:nlminb]{stats::nlminb()}} for the scale parameters.}
 
 \item{inner_control}{TMB inner Newton controls.}
 }
 \value{
 An \code{alfak2_sparse_joint_fit} object. \code{summary} has one row per
-domain karyotype; \code{fitness_mean} is the net growth rate per unit of \code{dt}.
+domain karyotype, with its counts and the counts the fit expects;
+\code{fitness_mean} is the net growth rate per unit of \code{dt},
+and \code{relative_fitness} is that rate minus the count-weighted mean over
+the major karyotypes, with \code{relative_sd} its uncertainty.
 }
 \description{
 Fits fitness to two sparse karyotype samples with a single count likelihood
@@ -86,6 +111,15 @@ the likelihood, together with their cells. They would enter only because
 they were observed, while their unobserved siblings would not, which
 biases their fitness upwards. \code{\link[=predict]{predict()}} places them at the level of the
 observed neighbours inside the domain.
+
+\code{relative_sd} is not the model's own posterior standard deviation, which
+is kept as \code{relative_sd_model}. That one takes the model to be exact, and
+on simulated populations its 95\% intervals cover about three in four
+observed karyotypes and half of the unobserved ones. The reported value is
+\verb{sqrt(model sd^2 + (deficit * relative fitness)^2 + (floor * birth_rate * (1 + shell))^2)}, where \code{shell} is the distance to
+the nearest major karyotype. The two constants were fitted to simulated
+landscapes, on which the resulting 95\% intervals cover 91-97\%. They carry
+over to real samples only as far as those landscapes resemble them.
 
 The baseline birth rate is supplied rather than estimated. Two samples
 identify it only weakly, and a free baseline drifts upwards and inflates

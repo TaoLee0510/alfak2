@@ -49,6 +49,11 @@ Type sparse_joint_model(objective_function<Type>* obj) {
   DATA_SCALAR(shell_sd);
   DATA_VECTOR(log_scale_prior_mean);  // dosage, curvature, interaction, residual
   DATA_VECTOR(log_scale_prior_sd);
+  DATA_INTEGER(n_major);              // majors are the first n_major states
+  DATA_INTEGER(balance);              // 1: non-major states start at mutation-selection balance
+  DATA_SCALAR(history);               // time over which that balance built up
+  DATA_SCALAR(balance_sd);            // log-scale spread around it
+  DATA_VECTOR(balance_offset);        // zero, except to evaluate the expected information
 
   PARAMETER_VECTOR(zeta);             // log expected count at the first timepoint
   PARAMETER_VECTOR(g);                // log birth rate
@@ -69,14 +74,50 @@ Type sparse_joint_model(objective_function<Type>* obj) {
     else nll -= dnorm(coef(k), Type(0), scale(coef_group(k) - 1), true);
   }
   vector<Type> trend = design * coef;
-  for (int i = 0; i < n; ++i) {
-    nll -= dnorm(g(i), trend(i), scale(3), true);
-    nll -= dnorm(zeta(i), zeta_prior_mean(i), zeta_prior_sd(i), true);
-  }
+  for (int i = 0; i < n; ++i) nll -= dnorm(g(i), trend(i), scale(3), true);
 
   // Dynamics, in log space.
   vector<Type> net(n);
   for (int i = 0; i < n; ++i) net(i) = (Type(2) * exp(log_self(i)) - Type(1)) * exp(g(i));
+
+  // Initial abundances. Free by default. With `balance`, a non-major state
+  // starts at what the majors next to it would have fed it over `history`,
+  // had each major grown at its present rate throughout:
+  //
+  //   n_j(0) = sum_p M_jp exp(-d_p h) phi1(d_j, d_p; h) n_p(0),
+  //
+  // which tends to M_jp n_p(0) / (d_p - d_j) for a long history and a less
+  // fit neighbour. Its count in the first sample then informs its fitness.
+  // `balance_offset` shifts the residual of that prior. It is zero in a fit.
+  // Set to the residual at the mode, it leaves the Gauss-Newton part of the
+  // prior's curvature, which is positive semi-definite, as replacing counts
+  // by their expectations does for the likelihood.
+  vector<Type> balance_residual(n);
+  balance_residual.setZero();
+  if (balance == 1) {
+    vector<Type> log_start(n);
+    vector<int> fed(n);
+    fed.setZero();
+    for (int e = 0; e < edge_from.size(); ++e) {
+      int p = edge_from(e), j = edge_to(e);
+      if (p >= n_major || j < n_major) continue;
+      Type term = log(Type(2)) + edge_log_prob(e) + g(p) + zeta(p) - net(p) * history +
+        sparse_joint_log_phi1(net(j), net(p), history);
+      log_start(j) = fed(j) ? logspace_add(log_start(j), term) : term;
+      fed(j) = 1;
+    }
+    for (int i = 0; i < n; ++i) {
+      if (fed(i)) {
+        balance_residual(i) = zeta(i) - log_start(i);
+        nll -= dnorm(balance_residual(i) - balance_offset(i), Type(0), balance_sd, true);
+      } else {
+        nll -= dnorm(zeta(i), zeta_prior_mean(i), zeta_prior_sd(i), true);
+      }
+    }
+  } else {
+    for (int i = 0; i < n; ++i) nll -= dnorm(zeta(i), zeta_prior_mean(i), zeta_prior_sd(i), true);
+  }
+
   vector<Type> log_n1(n);
   for (int i = 0; i < n; ++i) log_n1(i) = zeta(i) + net(i) * dt;
   for (int e = 0; e < edge_from.size(); ++e) {
@@ -97,6 +138,7 @@ Type sparse_joint_model(objective_function<Type>* obj) {
   REPORT(net);
   REPORT(log_intensity1);
   REPORT(trend);
+  REPORT(balance_residual);
   return nll;
 }
 

@@ -1,0 +1,47 @@
+test_that("a range of birth rates is fitted at log-spaced rates around its centre", {
+  sim <- simulate_sparse_joint_counts()
+  fit <- fit_sparse_joint_rates(sim$counts, dt = sim$dt, beta = sim$beta, major_frequency = 0.05, max_cn = 4,
+                                birth_rate_range = c(0.25, 4))
+  expect_s3_class(fit, "alfak2_sparse_joint_rate_fit")
+  expect_equal(fit$rates, c(0.25, 1, 4))
+  expect_equal(fit$central, 2L)
+  expect_equal(vapply(fit$fits, function(f) f$diagnostics$birth_rate, numeric(1)), fit$rates)
+  single <- fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, major_frequency = 0.05, max_cn = 4,
+                             birth_rate = 1)
+  targets <- c(single$summary$karyotype, "2.2.3.3")
+  prediction <- predict(fit, targets)
+  at_centre <- predict(single, targets)
+  expect_equal(prediction$relative_fitness, at_centre$relative_fitness)
+  expect_equal(prediction$per_division, at_centre$relative_fitness)
+  # the interval covers the interval at every rate
+  expect_true(all(prediction$relative_low <= at_centre$relative_fitness - stats::qnorm(0.975) * at_centre$relative_sd + 1e-12))
+  expect_true(all(prediction$relative_high >= at_centre$relative_fitness + stats::qnorm(0.975) * at_centre$relative_sd - 1e-12))
+  expect_true(all(prediction$relative_sd >= at_centre$relative_sd - 1e-12))
+  expect_true(all(prediction$per_division_low <= prediction$per_division & prediction$per_division <= prediction$per_division_high))
+})
+
+test_that("the assumed rate scales the deficit of neighbours and leaves their ranking", {
+  sim <- simulate_sparse_joint_counts()
+  fit <- fit_sparse_joint_rates(sim$counts, dt = sim$dt, beta = sim$beta, major_frequency = 0.05, max_cn = 4,
+                                birth_rate_range = c(0.5, 2))
+  summaries <- lapply(fit$fits, function(f) f$summary)
+  minor <- !summaries[[1L]]$major
+  deficit <- vapply(summaries, function(s) mean(s$relative_fitness[minor]), numeric(1))
+  # per unit of time the mean deficit grows with the assumed rate ...
+  expect_true(all(diff(deficit) < 0))
+  expect_gt(deficit[1L] / deficit[3L], 0.2)
+  expect_lt(deficit[1L] / deficit[3L], 0.5)
+  # ... per division it changes much less
+  per_division <- deficit / fit$rates
+  expect_lt(max(per_division) / min(per_division), 1.5)
+  prediction <- predict(fit, summaries[[1L]]$karyotype)
+  expect_gt(attr(prediction, "rank_agreement"), 0.8)
+})
+
+test_that("invalid ranges are rejected", {
+  sim <- simulate_sparse_joint_counts()
+  expect_error(fit_sparse_joint_rates(sim$counts, dt = sim$dt, birth_rate_range = c(1, 1)), "birth_rate_range")
+  expect_error(fit_sparse_joint_rates(sim$counts, dt = sim$dt, birth_rate_range = 1), "birth_rate_range")
+  expect_error(fit_sparse_joint_rates(sim$counts, dt = sim$dt, birth_rate = 1, birth_rate_range = c(0.5, 2)),
+               "birth_rate_range")
+})
