@@ -5,6 +5,7 @@
 \usepackage{booktabs}
 \usepackage{hyperref}
 \usepackage{array}
+\usepackage{graphicx}
 \newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
 \emergencystretch=3em
 
@@ -881,6 +882,9 @@ approximately eight minutes for a GBM sample with 226 karyotypes.
 \section{Validation}
 \label{sec:validation}
 
+\subsection{Benchmark Design}
+\label{sec:val-design}
+
 \paragraph{Simulation.}
 Fitness landscapes are the Gaussian random fields of the ALFA-K simulations,
 \begin{equation}
@@ -1005,7 +1009,9 @@ differences. It serves as the benchmark for error in preference to
 \texttt{alfakR}, whose error is dominated by a small number of poorly
 constrained fits.
 
-\paragraph{Results on held-out landscapes.}
+\subsection{Results by Wavelength}
+\label{sec:val-wavelength}
+
 The following tables report, for each wavelength $\lambda$ and distance $d$
 from the observed karyotypes, the root mean squared error of relative
 fitness, the Spearman correlation with the reference values and the coverage
@@ -1112,7 +1118,85 @@ of the null predictor by more than 11\% at any wavelength and distance,
 whereas the sparse joint model reduced it by 25--56\%
 (Supplement~\ref{sec:s-extrapolation-results}).
 
-\paragraph{Additional assessments.}
+\subsection{Results by Sampling Design}
+\label{sec:val-sampling}
+
+Figures~\ref{fig:design-error} and~\ref{fig:design-rank} resolve the held-out
+results by sampling design. For each wavelength and distance they show the
+error relative to the null predictor and the rank correlation of the sparse
+joint model, with and without the balance prior, and of the two-layer
+pipeline; points are means over the three landscapes of a wavelength and bars
+the range over those landscapes. Designs are ordered by sample size at fixed
+interval (50/50 cells at 180 days, 200/200 at 180 and 360 days, 500/700 at 360
+days), followed by a longer interval, a bottleneck and the two unbalanced
+designs. \texttt{alfakR} is omitted from the figures because its errors reach
+up to 300 times those of the null predictor; it was below the null predictor
+in 4 of the 96 combinations of wavelength, design and distance (Supplement~\ref{sec:s-designs}).
+
+Sparsity depends on the landscape as well as on the sample size. The number
+of cells per observed karyotype, a direct measure of sparsity, ranged from
+1.4 to 76; for the sparsest design it was 20 on the most rugged and 1.4 on the
+smoothest landscapes:
+
+\input{generated/scenario_main.tex}
+
+\begin{figure}[p]
+\centering
+\includegraphics[width=\textwidth]{generated/scenario_rmse_ratio.pdf}
+\caption{Error relative to the null predictor by sampling design, held-out
+landscapes. Rows are wavelengths, columns distances from the observed
+karyotypes; the dashed line marks the null predictor. Points are the mean
+error over the three landscapes of a wavelength divided by that of the null
+predictor, and bars the range of this ratio over the landscapes. Vertical
+lines separate the sample-size series, the longer interval, the bottleneck and
+the unbalanced designs.}
+\label{fig:design-error}
+\end{figure}
+
+\begin{figure}[p]
+\centering
+\includegraphics[width=\textwidth]{generated/scenario_spearman.pdf}
+\caption{Spearman correlation with the reference values by sampling design,
+held-out landscapes; layout as in Figure~\ref{fig:design-error}. The dashed
+line marks zero correlation.}
+\label{fig:design-rank}
+\end{figure}
+
+The error of the sparse joint model with the balance prior was below that of
+the null predictor in 95 of the 96 combinations of wavelength, design and
+distance. The exception is the sparsest design on the most rugged landscapes
+at distance 0, where only three to seven karyotypes are observed and one
+landscape with three observed karyotypes had twice the error of the null
+predictor. In the sparsest design (50 cells per sample) the ratio was
+otherwise 0.53 to 0.84, a reduction of the error by one sixth to one half;
+in all other designs it was 0.41 to 0.83. The largest gain occurred between
+50 and 200 cells per sample; larger samples improved the error little
+further, consistent with accuracy being limited by the information in two
+time points (Section~\ref{sec:val-additional}). A threefold longer interval
+did not improve accuracy and reduced it on landscapes of intermediate
+ruggedness ($\lambda=0.8$ and 1.2, ratios of 0.62 to 0.75 against 0.49 to 0.61
+at 360 days). Of the unbalanced designs, a deep first and shallow second
+sample gave the weakest result on the smoothest landscapes (0.83 at distance
+1). The two-layer pipeline attained 0.85 to 1.08 times the error of the null
+predictor in every design. On the development landscapes the sparse joint
+model was below the null predictor in all 96 combinations (ratios 0.39 to
+0.88; Supplement~\ref{sec:s-designs}).
+
+Rank correlations of the sparse joint model at distances 1 and 2 increased
+with sample size on smooth landscapes ($\lambda=1.6$, distance 1: 0.28 at 50
+cells per sample against 0.55 to 0.62 at 500/700) but remained between 0.12
+and 0.33 on the most rugged landscapes in every design. The two-layer
+pipeline ranked observed karyotypes better in 7 of the 8 designs at
+$\lambda=1.6$ and in 2 of 8 at $\lambda=1.2$, for the reason given in
+Section~\ref{sec:val-wavelength}; it ranked them worse in every design at
+$\lambda\le0.8$. Coverage of the sparse joint model ranged from 0.77 to 1.00;
+it fell below 0.90 mainly at distance 2 and mainly for the longer interval
+(0.81 to 0.83 at $\lambda\le0.8$) and for a shallow first sample (100/3000;
+0.77 to 0.86 at $\lambda\le0.8$), and was conservative on smooth landscapes.
+
+\subsection{Additional Assessments}
+\label{sec:val-additional}
+
 Predicted compositions 180 days after the second sample were closer to the
 simulated compositions than the assumption of no change (total variation
 distance 0.251 versus 0.290). Increasing the sample size to 20\,000 cells per
@@ -1124,7 +1208,9 @@ each sample yielded rankings with a Spearman correlation of 0.88 for
 karyotypes with at least ten cells. Detailed results are reported in
 \texttt{validation/sparse\_joint/README.md}.
 
-\paragraph{Limitations.}
+\subsection{Limitations}
+\label{sec:val-limitations}
+
 All simulated landscapes, including the held-out ones, belong to a single
 family, the Gaussian random fields (\ref{eq:grf}); the calibration constants
 of (\ref{eq:calibration}) were estimated on the same family. The results
@@ -2420,5 +2506,24 @@ growth fall below a tolerance. In contrast to the sparse joint model, this
 pipeline has no balance prior, no domain constructed around abundant clones
 and no calibration of uncertainty, and it was not evaluated on the sparse
 two-sample benchmark.
+
+\section{Results by Sampling Design}
+\label{sec:s-designs}
+
+This section gives the numbers underlying Section~\ref{sec:val-sampling}: the
+range over the three held-out landscapes of each wavelength of the error ratio
+of the sparse joint model with the balance prior, and the error, rank
+correlation and interval coverage of every method by sampling design, for the
+held-out and the development landscapes. Each value averages the three
+landscapes of a wavelength under one design.
+
+\noindent\textit{Range over held-out landscapes of the error of the sparse
+joint model (balance) relative to the null predictor.}
+
+\input{generated/scenario_ranges.tex}
+
+\input{generated/scenario_supp_heldout.tex}
+
+\input{generated/scenario_supp_dev.tex}
 
 \end{document}
