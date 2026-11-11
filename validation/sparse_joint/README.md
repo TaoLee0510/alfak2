@@ -437,6 +437,35 @@ pipeline smooths them from their observed neighbours (Spearman 0.44). Inside
 the domain the sparse joint model ranks rare karyotypes better (0.65 against
 0.53).
 
+## Results by sampling design
+
+`scenario_results.R` resolves the held-out results by sampling design and
+wavelength (Section 5.3 and Supplement S4 of `doc/alfak2_method.tex`; figures
+and tables in `doc/generated/`). Each cell holds three landscapes.
+
+- Sparsity, as cells per observed karyotype, ranges from 1.4 (50/50 cells,
+  wavelength 1.6) to 76 (3000/100, wavelength 0.4).
+- The sparse joint model with balance is below the null predictor in 95 of 96
+  combinations of wavelength, design and distance. The exception is 50/50
+  cells at wavelength 0.4 and distance 0 (ratio 1.03), where three to seven
+  karyotypes are observed and one landscape with three had twice the null
+  error. In the 50/50 design it is otherwise 0.53 to 0.84; in all other
+  designs 0.41 to 0.83. On the development landscapes all 96 are below (0.39
+  to 0.88).
+- Most of the gain comes between 50 and 200 cells per sample; 500/700 adds
+  little. A 1080-day interval is worse than 360 days at wavelengths 0.8 and
+  1.2 (0.62 to 0.75 against 0.49 to 0.61). 3000/100 is the weakest design at
+  wavelength 1.6 (0.83 at distance 1).
+- The two-layer pipeline is at 0.85 to 1.08 everywhere; `alfakR` is below the
+  null predictor in 4 of 96 combinations and up to 300 times above it.
+- Rank correlation at distances 1 and 2 grows with depth on smooth landscapes
+  (wavelength 1.6, distance 1: 0.28 at 50/50, 0.55 to 0.62 at 500/700) and
+  stays at 0.12 to 0.33 on rugged ones. The two-layer pipeline ranks observed
+  karyotypes better in 7 of 8 designs at wavelength 1.6 and 2 of 8 at 1.2.
+- Coverage 0.77 to 1.00; below 0.90 mostly at distance 2 with the long
+  interval (0.81 to 0.83) or a shallow first sample (100/3000: 0.77 to 0.86),
+  at wavelengths up to 0.8.
+
 ## Outputs for alfakR pipelines
 
 Analyses built on `alfakR::alfak()` (branch `dev`) read four files from its
@@ -517,5 +546,6 @@ reported uncertainty. `rate_sensitivity.R` sweeps the two supplied rates.
 `depth_limit.R` compares the fit with deep resamples and a perfect stratum
 mean. `real_cohort.R` runs the checks on real samples. `alfakR_compat.R`
 compares the output files with those of alfakR. `wavelength_tables.R` writes
-the tables by wavelength of the method document. The official verdict comes
+the tables by wavelength of the method document. `scenario_results.R` writes the figures and
+tables by sampling design to `doc/generated/`. The official verdict comes
 from `benchmark/sparse_two_timepoint/run.R --stage=report`.
