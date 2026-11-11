@@ -37,6 +37,10 @@
 #'   Used for count matrices only.
 #' @param sharing `"partial"` or `"full"`; see above.
 #' @param trend `"select"`, `"sample"` or `"shared"`; see above.
+#' @param initial_state `"free"` or `"balance"`; see [fit_sparse_joint()].
+#'   Unlike a single sample, a cohort starts free by default: with balance,
+#'   the scale optimisation of some simulated cohorts failed and left no
+#'   marginal likelihood to choose the trend by.
 #' @inheritParams fit_sparse_joint
 #'
 #' @return An `alfak2_sparse_joint_cohort_fit` object. `landscape` has one row
@@ -80,7 +84,14 @@ fit_sparse_joint_cohort <- function(samples,
     failed <- vapply(fits, inherits, logical(1), what = "error")
     if (all(failed)) stop(conditionMessage(fits[[1L]]), call. = FALSE)
     objective <- vapply(fits, function(fit) if (inherits(fit, "error")) Inf else fit$diagnostics$objective, numeric(1))
-    best <- fits[[which.min(objective)]]
+    # A fit whose scale optimisation failed has no marginal likelihood to
+    # compare; without one on either side there is nothing to choose by.
+    usable <- is.finite(objective)
+    if (!any(usable)) {
+      stop("Neither trend has a finite marginal likelihood (the scale optimisation failed for both); ",
+           "choose one with `trend = \"shared\"` or `trend = \"sample\"`.", call. = FALSE)
+    }
+    best <- fits[[which(usable)[which.min(objective[usable])]]]
     best$diagnostics$trend_objective <- objective
     best$diagnostics$seconds <- sum(vapply(fits[!failed], function(fit) fit$diagnostics$seconds, numeric(1)))
     return(best)
