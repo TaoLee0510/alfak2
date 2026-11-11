@@ -1,5 +1,6 @@
 #include <TMB.hpp>
 #include "division_forward.h"
+#include "sparse_joint_model.h"
 
 template<class Type>
 Type softplus_floor(Type x, Type floor) {
@@ -73,8 +74,15 @@ Type weighted_dirichlet_multinomial_score_loglik(vector<Type> prob, vector<Type>
   return out;
 }
 
+// The local hierarchical model, also used with a structured prior by the
+// `joint_count` pipeline. TMB's data and parameter macros act on
+// TMB_OBJECTIVE_PTR, which is pointed at `obj` so that the model can live in
+// an ordinary function and be selected by the dispatcher below.
+#undef TMB_OBJECTIVE_PTR
+#define TMB_OBJECTIVE_PTR obj
+
 template<class Type>
-Type objective_function<Type>::operator() () {
+Type local_model(objective_function<Type>* obj) {
   DATA_VECTOR(y0);
   DATA_VECTOR(y1);
   DATA_INTEGER(n_nodes);
@@ -340,4 +348,18 @@ Type objective_function<Type>::operator() () {
   REPORT(f_raw);
   REPORT(f_center_weights);
   return nll;
+}
+
+#undef TMB_OBJECTIVE_PTR
+#define TMB_OBJECTIVE_PTR this
+
+// One DLL, several models. `model` is optional in the data list so that
+// existing callers of the local model need no change.
+template<class Type>
+Type objective_function<Type>::operator() () {
+  SEXP model_name = getListElement(this->data, "model");
+  if (!Rf_isNull(model_name) && std::string(CHAR(STRING_ELT(model_name, 0))) == "sparse_joint") {
+    return sparse_joint_model(this);
+  }
+  return local_model(this);
 }
