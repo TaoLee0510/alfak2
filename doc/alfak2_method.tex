@@ -1153,9 +1153,11 @@ per division.
 
 \texttt{fit\_sparse\_joint\_cohort()} fits several samples at once. Each sample
 $s$ keeps its own domain $\mathcal{D}_s$, initial abundances and depth. A
-karyotype $v$ in any domain has a shared log birth rate $m_v$ with the trend
-prior above, whose shell term is the distance to the nearest major of any
-sample, and each sample has
+karyotype $v$ in any domain has a shared log birth rate
+\[
+  m_v\sim\Normal\Bigl(\frac{1}{|S_v|}\sum_{s\in S_v} z_{sv}^\top\gamma_s,\ \sigma_r^2\Bigr),
+\]
+where $S_v$ is the set of samples whose domain holds $v$, and each sample has
 \[
   g_{sv}\sim\Normal\bigl(m_v,\ \tau^2\bigr),\qquad v\in\mathcal{D}_s ,
 \]
@@ -1164,6 +1166,20 @@ with the between-sample scale $\tau$ estimated together with the other scales
 karyotype that is abundant in one sample and an unobserved neighbour in
 another is informed by both. With one sample and full sharing the model is the
 single-sample model.
+
+The trend is either per sample or shared. Per sample, $z_{sv}$ is centred on
+sample $s$'s own mean karyotype and its shell term is the distance to that
+sample's majors, and every $\gamma_s$ has the single-sample prior; samples
+with no karyotype in common are then fitted as if alone, apart from the
+scales. Shared, $\gamma_s=\gamma$ for all samples, with $z_{sv}=z_v$ centred
+on the average of the samples' means and measured to the majors of all
+samples. Both models have the same hyperparameters, and by default the one
+with the higher Laplace marginal likelihood is kept. On simulated cohorts a
+shared trend helped samples of one landscape and was much worse than fitting
+each sample alone for samples of different landscapes; the marginal
+likelihood preferred separate trends for 11 of 12 cohorts of different
+landscapes, and the shared trend for 15 of 24 cohorts of one landscape, the
+others coming from rugged landscapes whose samples sit on different peaks.
 
 \section{Output}
 

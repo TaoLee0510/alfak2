@@ -150,7 +150,9 @@ The baseline birth rate has to be supplied; two samples do not identify it.
 Rankings hardly depend on it. Fitness differences between well-sampled clones
 do not depend on it either, but the deficit of a rare or unobserved karyotype
 is fixed per division, so per unit of time it is proportional to the assumed
-rate. When only a range is known, fit across it:
+rate. When only a range is known, fit across it. Point predictions are taken at the
+lowest rate of the range: too low a rate shrinks deficits towards zero, while
+one four times too high predicts worse than no differences at all.
 
 ```r
 fit <- fit_sparse_joint_rates(counts, dt = 180, beta = 0.00005,
@@ -159,9 +161,12 @@ predict(fit, karyotypes)   # relative fitness at the central rate, an interval
                            # covering the range, and fitness per division
 ```
 
-Several samples that share a landscape can be fitted together. Each keeps its
-own domain and initial abundances; a karyotype that is abundant in one sample
-and an unobserved neighbour in another is informed by both:
+Several samples can be fitted together. Each keeps its own domain and initial
+abundances; a karyotype that is abundant in one sample and an unobserved
+neighbour in another is informed by both, and its fitness may deviate between
+samples by an estimated amount. The trend is either shared by all samples or
+fitted per sample, whichever has the higher marginal likelihood, so that
+samples from different landscapes are not forced onto one trend:
 
 ```r
 cohort <- fit_sparse_joint_cohort(list(P1 = counts1, P2 = counts2),
