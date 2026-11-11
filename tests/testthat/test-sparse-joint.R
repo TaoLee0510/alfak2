@@ -60,7 +60,8 @@ test_that("compiled forward model equals the R closed form", {
     reference = 0L,
     zeta_prior_mean = rep(0, n), zeta_prior_sd = rep(3, n), intercept_mean = 0, intercept_sd = 1,
     shell_sd = 0.5, log_scale_prior_mean = rep(log(0.05), 4), log_scale_prior_sd = rep(1.5, 4),
-    n_major = domain$n_major, balance = 0L, history = sim$dt, balance_sd = 1, balance_offset = rep(0, n)
+    n_major = domain$n_major, balance = 0L, history = sim$dt, balance_sd = 1, balance_offset = rep(0, n),
+    weight = rep(1, n)
   )
   parameters <- list(zeta = zeta, g = g, coef = rep(0, ncol(design$design)), theta1 = theta1,
                      log_scale = rep(log(0.05), 4))
@@ -161,7 +162,7 @@ test_that("the balance prior is the closed-form influx from the majors", {
       zeta_prior_mean = prior_mean, zeta_prior_sd = rep(3, n), intercept_mean = 0, intercept_sd = 1,
       shell_sd = 0.5, log_scale_prior_mean = rep(log(0.05), 4), log_scale_prior_sd = rep(1.5, 4),
       n_major = domain$n_major, balance = balance, history = history, balance_sd = balance_sd,
-      balance_offset = rep(0, n)
+      balance_offset = rep(0, n), weight = rep(1, n)
     ), parameters, DLL = "alfak2", silent = TRUE)$fn()
   }
   net <- (2 * exp(kernel$log_self) - 1) * exp(parameters$g)
@@ -251,4 +252,17 @@ test_that("fit_alfak2 reaches the sparse joint model as a pipeline", {
   expect_equal(summarize_alfak2(through), direct$summary)
   expect_error(fit_alfak2(sim$counts, dt = sim$dt, pipeline = "sparse_joint", sparse_joint_control = list(4)),
                "sparse_joint_control")
+  # It is the default, and arguments of the other pipelines are refused there.
+  by_default <- fit_alfak2(sim$counts, dt = sim$dt, beta = sim$beta,
+                           sparse_joint_control = list(major_frequency = 0.05, max_cn = 4))
+  expect_equal(by_default$summary, direct$summary)
+  expect_error(fit_alfak2(sim$counts, dt = sim$dt, beta = sim$beta, local_shell_depth = 1),
+               "local_shell_depth.*pipeline")
+})
+
+test_that("mutation-selection balance is the default initial state", {
+  sim <- simulate_sparse_joint_counts()
+  fit <- fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, major_frequency = 0.05, max_cn = 4)
+  expect_equal(fit$diagnostics$initial_state, "balance")
+  expect_equal(fit$settings$initial_state, "balance")
 })

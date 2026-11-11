@@ -45,7 +45,7 @@ fit_alfak2(
   nb = NULL,
   correct_efflux = FALSE,
   legacy_weight = c("pi0", "directly_informed", "uniform"),
-  pipeline = c("two_layer", "joint_count", "sparse_joint"),
+  pipeline = c("sparse_joint", "two_layer", "joint_count"),
   joint_control = list(),
   sparse_joint_control = list(),
   target_karyotypes = NULL,
@@ -151,14 +151,14 @@ missegregation-efflux viability correction to the legacy-scale columns.}
 uses observed graph nodes, and \code{"uniform"} weights all finite summary rows
 equally.}
 
-\item{pipeline}{\code{"two_layer"} retains separate local and extrapolation fits;
+\item{pipeline}{\code{"sparse_joint"}, the default, fits the sparse joint count
+model with \code{\link[=fit_sparse_joint]{fit_sparse_joint()}}; of the other arguments only \code{counts},
+\code{dt}, \code{beta} and \code{sparse_joint_control} then apply, and giving any other
+is an error. \code{"two_layer"} retains separate local and extrapolation fits;
 \code{"joint_count"} fits a single count likelihood and structured landscape
-prior on the entire bounded target graph. The joint model is an explicitly
-selectable candidate pending independent all-distance validation.
-\code{"sparse_joint"} fits the sparse joint count model, which is built for two
-sparse samples: see \code{\link[=fit_sparse_joint]{fit_sparse_joint()}}, whose result it returns. Of the
-other arguments only \code{counts}, \code{dt}, \code{beta} and \code{sparse_joint_control}
-then apply.}
+prior on the entire bounded target graph. On simulated sparse samples the
+sparse joint model predicted fitness at distances 0 to 2 better than both
+(\code{validation/sparse_joint/README.md}).}
 
 \item{joint_control}{Named prior controls passed to the joint landscape.
 Experimental \code{interaction_support = "observed_nullspace"} separates pair
@@ -184,10 +184,20 @@ maximum frequency change and log total growth change.}
 \item{...}{Passed to \code{fit_local_posterior()}.}
 }
 \value{
-An \code{alfak2_fit} object, or an \code{alfak2_sparse_joint_fit} object for
-\code{pipeline = "sparse_joint"}.
+An \code{alfak2_sparse_joint_fit} object for \code{pipeline = "sparse_joint"},
+otherwise an \code{alfak2_fit} object.
 }
 \description{
-Runs data validation, local graph construction, TMB local posterior fitting,
-bounded global graph expansion, and compiled graph Gaussian posterior solving.
+By default fits the sparse joint count model, built for two sparse
+samples: see \code{\link[=fit_sparse_joint]{fit_sparse_joint()}}, whose result is returned. Its outputs
+can be converted to those of alfakR with \code{\link[=as_alfakR]{as_alfakR()}}, or produced
+directly with alfakR's arguments by \code{\link[=alfak_compat]{alfak_compat()}}.
+}
+\details{
+The earlier pipelines remain available: \code{"two_layer"} runs data
+validation, local graph construction, TMB local posterior fitting, bounded
+global graph expansion and compiled graph Gaussian posterior solving;
+\code{"joint_count"} fits one count likelihood on the bounded target graph. All
+arguments from \code{transition_kernel} to \code{forward_max_refinements}, and \code{...},
+belong to these two.
 }

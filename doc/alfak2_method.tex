@@ -42,7 +42,9 @@ copy-number vector
 \]
 where $p$ is the chromosome dimension.
 
-The current method is a two-layer model:
+Since November 2026 the default pipeline is the sparse joint count model of
+Section~\ref{sec:sparse-joint}. The earlier default, still available as
+\texttt{pipeline = "two\_layer"}, is a two-layer model:
 \[
 \begin{aligned}
 \text{count data}
@@ -1096,17 +1098,22 @@ it, which is nearly independent of distance, unlike that of unobserved ones.
 
 \subsection{Initial Abundances}
 
-By default every $\zeta_i$ is free, with a weak prior on the frequency scale
-for states never observed. Optionally (\texttt{initial\_state = "balance"}) a
-non-major state starts at what the majors next to it would have fed it over a
-history $h$, had each grown at its present rate throughout:
+By default (\texttt{initial\_state = "balance"}) a non-major state starts at
+what the majors next to it would have fed it over a history $h$, had each
+grown at its present rate throughout:
 \[
   \zeta_j\sim\Normal\Bigl(\log\sum_{p\ \mathrm{major},\,p\sim j}
   M_{jp}\,e^{-d_ph}\,\varphi_1(d_j,d_p;h)\,e^{\zeta_p},\ \sigma_\zeta^2\Bigr),
 \]
 which tends to $M_{jp}n_p(0)/(d_p-d_j)$ for a long history and a less fit
-neighbour. The first sample's levels then inform fitness as well. This assumes
-that fitness before the first sample was what it is between the samples.
+neighbour. The first sample's levels then inform fitness as well. This takes
+fitness before the first sample to resemble fitness between the samples. On
+simulated landscapes that changed at the first sample it was nevertheless more
+accurate than free initial abundances; with samples only about 30 divisions
+apart, where the default $h$, the interval between the samples, is too short
+for the balance to build up, it was less accurate. With
+\texttt{initial\_state = "free"} every $\zeta_i$ is free, with a weak prior on
+the frequency scale for states never observed.
 
 \subsection{Relative Fitness and Its Uncertainty}
 
@@ -1180,6 +1187,34 @@ each sample alone for samples of different landscapes; the marginal
 likelihood preferred separate trends for 11 of 12 cohorts of different
 landscapes, and the shared trend for 15 of 24 cohorts of one landscape, the
 others coming from rugged landscapes whose samples sit on different peaks.
+
+\subsection{Outputs in the Format of \texttt{alfakR}}
+
+\texttt{as\_alfakR()} and \texttt{alfak\_compat()} produce the four objects
+that \texttt{alfakR::alfak()} saves, with its names, columns and karyotypes:
+the frequent set $F=\{v:y_{v0}+y_{v1}\ge\texttt{minobs}\}$, its one-step
+neighbours $N$ without nullisomy, and the landscape on $F\cup N\cup\partial N$.
+In place of bootstrap replicates they hold $B$ joint draws of relative fitness
+from the Laplace posterior: with $\bm H=\bm P^\top\bm L\bm L^\top\bm P$ the
+expected information, latent draws $\bm P^\top\bm L^{-\top}\bm z$,
+$\bm z\sim\Normal(\bm 0,\bm I)$, are mapped to relative fitness to first
+order, together with the trend residual off the domain, and each karyotype
+receives independent noise with variance $s_v^2-s_{v,\mathrm{model}}^2$, the
+calibrated minus the model variance. Draws are used in mirrored pairs and each
+row is scaled to standard deviation $s_v$, so that the row mean, median and
+standard deviation are exactly the prediction and $s_v$. Fitness is shifted so
+that the count-weighted mean of the majors equals $\log(N_b/N_0)/\Delta t$, the
+level \texttt{alfakR} assigns to the population.
+
+The cross-validation uses \texttt{alfakR}'s folds: each frequent karyotype
+with those of its neighbours not in an earlier fold. For a fold $K$, the
+counts of $K$ leave the likelihood, $\zeta_v$ for $v\in K$ receives the prior
+of a never-observed state, the trend's centre and major set are recomputed
+without $K$, and the posterior mode is found again with the scales fixed. The
+held-out predictions for $K$ inside the domain, aligned to the full fit on the
+majors outside $K$, are compared with the full fit by
+$R^2=1-\sum_v(\tilde p_v-\tilde o_v)^2/\sum_v\tilde o_v^2$, with both series
+centred.
 
 \section{Output}
 

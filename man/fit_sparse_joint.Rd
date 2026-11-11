@@ -18,7 +18,7 @@ fit_sparse_joint(
   shell_power = 0.85,
   shell_sd = 0.5,
   initial_frequency = c(mean = log(1e-05), sd = 3),
-  initial_state = c("free", "balance"),
+  initial_state = c("balance", "free"),
   history = NULL,
   balance_sd = 1,
   calibration = sparse_joint_default_calibration,
@@ -67,12 +67,16 @@ on its frequency there, with the same standard deviation: absent other
 evidence its frequency is taken not to have changed.}
 
 \item{initial_state}{How abundances at the first timepoint are treated.
-\code{"free"} estimates one for every karyotype and so uses the first sample
-only as a starting point. \code{"balance"} starts every karyotype that is not
-major at mutation-selection balance with the major karyotypes next to it,
-so that its count in the first sample also informs its fitness. That
-assumes fitness before the first sample was what it is between the
-samples; do not use it when treatment starts at the first sample.}
+\code{"balance"}, the default, starts every karyotype that is not major at
+mutation-selection balance with the major karyotypes next to it, so that
+its count in the first sample also informs its fitness. \code{"free"}
+estimates one for every karyotype and so uses the first sample only as a
+starting point. Balance takes fitness before the first sample to have
+resembled fitness between the samples. On simulated landscapes it was
+still more accurate than \code{"free"} when the landscape changed at the first
+sample, as under a new treatment, but less accurate when the samples were
+only about 30 divisions apart: \code{history} then defaults to a time too
+short for the balance to build up.}
 
 \item{history}{Time, in units of \code{dt}, over which the balance built up.
 Defaults to the interval between the samples.}

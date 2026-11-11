@@ -128,8 +128,8 @@ sparse_joint_optimise_scales <- function(objective, control, lower = log(1e-4), 
 # expected information is positive definite by construction.
 #
 # Returns the mode, a solver for right-hand sides, the variances of selected
-# latent variables, the names of the latent variables, and the fitted
-# expected counts.
+# latent variables, draws of all latent variables about the mode, the names of
+# the latent variables, and the fitted expected counts.
 sparse_joint_posterior <- function(objective, tmb_data, parameters, map, random, par_fixed, inner_control) {
   objective$fn(par_fixed)
   mode <- objective$env$last.par
@@ -150,6 +150,12 @@ sparse_joint_posterior <- function(objective, tmb_data, parameters, map, random,
     mode = unname(mode[latent]), names = names(mode)[latent], solve = solve,
     # Fitted expected counts, for comparison with the observed ones.
     expected_t0 = expected$y0, expected_t1 = expected$y1,
+    # `k` draws of the latent variables from the Gaussian posterior, centred on
+    # zero, as columns. With P A P' = L L', P' L^-T z has covariance A^-1.
+    draw = function(k) {
+      z <- matrix(stats::rnorm(n * k), n, k)
+      as.matrix(Matrix::solve(factor, Matrix::solve(factor, z, system = "Lt"), system = "Pt"))
+    },
     # Diagonal of the inverse at `index`, a few hundred columns at a time.
     variance = function(index) {
       out <- numeric(length(index))
@@ -264,6 +270,81 @@ sparse_joint_self_probability <- function(karyotypes, beta) {
   exp(rowSums(matrix(log(stay)[karyotypes + 1L], nrow = nrow(karyotypes))))
 }
 
+# Everything a fit needs that follows from the data and the settings alone:
+# the domain, the division kernel, the trend design and the TMB inputs. Used by
+# the fit and to rebuild a fit's posterior later from its stored settings.
+sparse_joint_problem <- function(data, settings) {
+  domain <- sparse_joint_domain(data$counts, settings$major_frequency, settings$major_count, settings$max_states,
+                                as.integer(settings$min_cn), as.integer(settings$max_cn))
+  n <- length(domain$labels)
+  kernel <- sparse_division_kernel(domain$karyotypes, data$beta)
+  total <- domain$y0 + domain$y1
+  centre <- colSums(domain$karyotypes * total) / sum(total)
+  design <- sparse_joint_design(domain$karyotypes, centre, domain$major, settings$shell_power)
+  initial <- sparse_joint_initial_prior(domain$y0, domain$y1, settings$initial_frequency)
+  tmb_data <- list(
+    model = "sparse_joint",
+    y0 = domain$y0, y1 = domain$y1, dt = data$dt,
+    edge_from = kernel$from - 1L, edge_to = kernel$to - 1L,
+    edge_log_prob = kernel$log_prob, log_self = kernel$log_self,
+    design = design$design, coef_group = design$group,
+    reference = which.max(total) - 1L,
+    zeta_prior_mean = initial$mean, zeta_prior_sd = initial$sd,
+    intercept_mean = log(settings$birth_rate), intercept_sd = settings$birth_rate_log_sd,
+    shell_sd = settings$shell_sd,
+    # Centred on a 1% effect per step; wide enough to reach 0.05% and 20%.
+    log_scale_prior_mean = rep(log(0.01), 4L),
+    log_scale_prior_sd = rep(1.5, 4L),
+    n_major = domain$n_major, balance = as.integer(settings$initial_state == "balance"),
+    history = settings$history, balance_sd = settings$balance_sd, balance_offset = rep(0, n),
+    weight = rep(1, n)
+  )
+  parameters <- list(
+    zeta = tmb_data$zeta_prior_mean,
+    g = rep(log(settings$birth_rate), n),
+    coef = c(log(settings$birth_rate), rep(0, ncol(design$design) - 1L)),
+    theta1 = log(sum(domain$y1) / sum(domain$y0)),
+    log_scale = tmb_data$log_scale_prior_mean
+  )
+  # There are no interaction terms in the design, so their scale is not free.
+  free_scale <- c(TRUE, TRUE, FALSE, TRUE)
+  list(domain = domain, kernel = kernel, total = total, centre = centre, design = design,
+       tmb_data = tmb_data, parameters = parameters, free_scale = free_scale,
+       map = list(log_scale = factor(ifelse(free_scale, cumsum(free_scale), NA))),
+       random = c("zeta", "g", "coef", "theta1"))
+}
+
+# The posterior of a fitted model, rebuilt from its stored settings and mode
+# with the scales fixed at their fitted values. `weight`,
+# `zeta_prior_mean`/`zeta_prior_sd` and `design` replace the defaults, for
+# instance to hold out the counts of some states. Returns the problem, the solver of
+# `sparse_joint_posterior()` and the TMB objective; with `posterior = FALSE`
+# only the mode, as a list of the latent parameters.
+sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zeta_prior_sd = NULL,
+                                 design = NULL, posterior = TRUE) {
+  if (is.null(fit$settings) || is.null(fit$posterior)) {
+    stop("This fit predates stored settings; refit it with the current alfak2.", call. = FALSE)
+  }
+  problem <- sparse_joint_problem(fit$data, fit$settings)
+  tmb_data <- problem$tmb_data
+  if (!is.null(weight)) tmb_data$weight <- as.numeric(weight)
+  if (!is.null(zeta_prior_mean)) tmb_data$zeta_prior_mean <- as.numeric(zeta_prior_mean)
+  if (!is.null(zeta_prior_sd)) tmb_data$zeta_prior_sd <- as.numeric(zeta_prior_sd)
+  if (!is.null(design)) tmb_data$design <- design
+  parameters <- fit$posterior[c("zeta", "g", "coef", "theta1", "log_scale")]
+  map <- list(log_scale = factor(rep(NA, length(parameters$log_scale))))
+  inner_control <- fit$settings$inner_control
+  objective <- TMB::MakeADFun(tmb_data, parameters, map = map, random = problem$random, DLL = "alfak2",
+                              silent = TRUE, inner.control = inner_control)
+  if (!posterior) {
+    objective$fn(numeric(0))
+    mode <- objective$env$last.par
+    return(lapply(stats::setNames(nm = problem$random), function(name) unname(mode[names(mode) == name])))
+  }
+  solver <- sparse_joint_posterior(objective, tmb_data, parameters, map, problem$random, numeric(0), inner_control)
+  list(problem = problem, solver = solver, objective = objective, tmb_data = tmb_data)
+}
+
 #' Fit the sparse joint count model
 #'
 #' Fits fitness to two sparse karyotype samples with a single count likelihood
@@ -324,12 +405,16 @@ sparse_joint_self_probability <- function(karyotypes, beta) {
 #'   on its frequency there, with the same standard deviation: absent other
 #'   evidence its frequency is taken not to have changed.
 #' @param initial_state How abundances at the first timepoint are treated.
-#'   `"free"` estimates one for every karyotype and so uses the first sample
-#'   only as a starting point. `"balance"` starts every karyotype that is not
-#'   major at mutation-selection balance with the major karyotypes next to it,
-#'   so that its count in the first sample also informs its fitness. That
-#'   assumes fitness before the first sample was what it is between the
-#'   samples; do not use it when treatment starts at the first sample.
+#'   `"balance"`, the default, starts every karyotype that is not major at
+#'   mutation-selection balance with the major karyotypes next to it, so that
+#'   its count in the first sample also informs its fitness. `"free"`
+#'   estimates one for every karyotype and so uses the first sample only as a
+#'   starting point. Balance takes fitness before the first sample to have
+#'   resembled fitness between the samples. On simulated landscapes it was
+#'   still more accurate than `"free"` when the landscape changed at the first
+#'   sample, as under a new treatment, but less accurate when the samples were
+#'   only about 30 divisions apart: `history` then defaults to a time too
+#'   short for the balance to build up.
 #' @param history Time, in units of `dt`, over which the balance built up.
 #'   Defaults to the interval between the samples.
 #' @param balance_sd Spread, on the log scale, of initial abundances around
@@ -359,7 +444,7 @@ fit_sparse_joint <- function(counts,
                              shell_power = 0.85,
                              shell_sd = 0.5,
                              initial_frequency = c(mean = log(1e-5), sd = 3),
-                             initial_state = c("free", "balance"),
+                             initial_state = c("balance", "free"),
                              history = NULL,
                              balance_sd = 1,
                              calibration = sparse_joint_default_calibration,
@@ -393,44 +478,28 @@ fit_sparse_joint <- function(counts,
   }
   if (any(colSums(counts) <= 0)) stop("Both timepoints need at least one cell.", call. = FALSE)
 
-  domain <- sparse_joint_domain(counts, major_frequency, major_count, max_states,
-                                as.integer(min_cn), as.integer(max_cn))
+  settings <- list(birth_rate = birth_rate, birth_rate_log_sd = birth_rate_log_sd,
+                   major_frequency = major_frequency, major_count = major_count, max_states = max_states,
+                   min_cn = as.integer(min_cn), max_cn = as.integer(max_cn), shell_power = shell_power,
+                   shell_sd = shell_sd, initial_frequency = initial_frequency, initial_state = initial_state,
+                   history = history, balance_sd = balance_sd, calibration = calibration,
+                   inner_control = inner_control)
+  problem <- sparse_joint_problem(data, settings)
+  domain <- problem$domain
   n <- length(domain$labels)
   if (any(c(sum(domain$y0), sum(domain$y1)) <= 0)) {
     stop("A timepoint has no cell inside the model domain.", call. = FALSE)
   }
-  kernel <- sparse_division_kernel(domain$karyotypes, data$beta)
-  total <- domain$y0 + domain$y1
-  centre <- colSums(domain$karyotypes * total) / sum(total)
-  design <- sparse_joint_design(domain$karyotypes, centre, domain$major, shell_power)
-  initial <- sparse_joint_initial_prior(domain$y0, domain$y1, initial_frequency)
+  kernel <- problem$kernel
+  total <- problem$total
+  centre <- problem$centre
+  design <- problem$design
   scale_names <- c("dosage", "curvature", "interaction", "residual")
-  tmb_data <- list(
-    model = "sparse_joint",
-    y0 = domain$y0, y1 = domain$y1, dt = data$dt,
-    edge_from = kernel$from - 1L, edge_to = kernel$to - 1L,
-    edge_log_prob = kernel$log_prob, log_self = kernel$log_self,
-    design = design$design, coef_group = design$group,
-    reference = which.max(total) - 1L,
-    zeta_prior_mean = initial$mean, zeta_prior_sd = initial$sd,
-    intercept_mean = log(birth_rate), intercept_sd = birth_rate_log_sd, shell_sd = shell_sd,
-    # Centred on a 1% effect per step; wide enough to reach 0.05% and 20%.
-    log_scale_prior_mean = rep(log(0.01), 4L),
-    log_scale_prior_sd = rep(1.5, 4L),
-    n_major = domain$n_major, balance = as.integer(initial_state == "balance"),
-    history = history, balance_sd = balance_sd, balance_offset = rep(0, n)
-  )
-  parameters <- list(
-    zeta = tmb_data$zeta_prior_mean,
-    g = rep(log(birth_rate), n),
-    coef = c(log(birth_rate), rep(0, ncol(design$design) - 1L)),
-    theta1 = log(sum(domain$y1) / sum(domain$y0)),
-    log_scale = tmb_data$log_scale_prior_mean
-  )
-  # There are no interaction terms in the design, so their scale is not free.
-  free_scale <- c(TRUE, TRUE, FALSE, TRUE)
-  map <- list(log_scale = factor(ifelse(free_scale, cumsum(free_scale), NA)))
-  random <- c("zeta", "g", "coef", "theta1")
+  tmb_data <- problem$tmb_data
+  parameters <- problem$parameters
+  free_scale <- problem$free_scale
+  map <- problem$map
+  random <- problem$random
   objective <- TMB::MakeADFun(tmb_data, parameters, map = map, random = random, DLL = "alfak2",
                               silent = TRUE, inner.control = inner_control)
   optimum <- sparse_joint_optimise_scales(objective, control)
@@ -441,9 +510,9 @@ fit_sparse_joint <- function(counts,
   g_hat <- cbind(solver$mode[g_index], sqrt(solver$variance(g_index)))
   coef_hat <- cbind(solver$mode[solver$names == "coef"])
   coef_covariance <- sparse_joint_coef_covariance(solver)
-  scale <- tmb_data$log_scale_prior_mean
-  scale[free_scale] <- optimum$par
-  scale <- stats::setNames(exp(scale), scale_names)
+  log_scale <- tmb_data$log_scale_prior_mean
+  log_scale[free_scale] <- optimum$par
+  scale <- stats::setNames(exp(log_scale), scale_names)
 
   self <- 2 * exp(kernel$log_self) - 1
   summary <- cbind(
@@ -465,6 +534,11 @@ fit_sparse_joint <- function(counts,
     data = data,
     summary = summary,
     dropped = domain$dropped,
+    # What rebuilding the posterior needs: see sparse_joint_rebuild().
+    settings = settings,
+    posterior = list(zeta = solver$mode[solver$names == "zeta"], g = solver$mode[solver$names == "g"],
+                     coef = solver$mode[solver$names == "coef"], theta1 = solver$mode[solver$names == "theta1"],
+                     log_scale = log_scale),
     trend = list(coefficients = coef_hat[, 1L], covariance = coef_covariance, centre = centre,
                  major = domain$major, shell_power = shell_power, scales = scale,
                  observed_level = observed_level, reference = relative$reference,

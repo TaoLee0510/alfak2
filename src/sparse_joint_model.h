@@ -54,6 +54,7 @@ Type sparse_joint_model(objective_function<Type>* obj) {
   DATA_SCALAR(history);               // time over which that balance built up
   DATA_SCALAR(balance_sd);            // log-scale spread around it
   DATA_VECTOR(balance_offset);        // zero, except to evaluate the expected information
+  DATA_VECTOR(weight);                // 1: a state's counts enter the likelihood; 0: held out
 
   PARAMETER_VECTOR(zeta);             // log expected count at the first timepoint
   PARAMETER_VECTOR(g);                // log birth rate
@@ -131,8 +132,9 @@ Type sparse_joint_model(objective_function<Type>* obj) {
   Type centre = net(reference) * dt;
   vector<Type> log_intensity1 = log_n1 - centre + theta1;
   for (int i = 0; i < n; ++i) {
-    nll -= dpois(y0(i), exp(zeta(i)), true);
-    nll -= dpois(y1(i), exp(log_intensity1(i)), true);
+    if (weight(i) == Type(0)) continue;
+    nll -= weight(i) * dpois(y0(i), exp(zeta(i)), true);
+    nll -= weight(i) * dpois(y1(i), exp(log_intensity1(i)), true);
   }
 
   REPORT(net);
