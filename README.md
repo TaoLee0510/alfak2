@@ -231,7 +231,9 @@ alfakR's folds, but by removing their counts and refitting the model, so its
 R-squared measures how well alfak2 predicts a karyotype it has not seen.
 `as_alfakR()` and `write_alfakR_outputs()` do the same for an existing fit.
 
-Design, benchmark results and checks on real samples are recorded in
+[`doc/alfak2_workflow.md`](doc/alfak2_workflow.md) follows the default pipeline
+step by step, and [`doc/alfak2_method.tex`](doc/alfak2_method.tex) gives the
+mathematics. Design, benchmark results and checks on real samples are recorded in
 [`validation/sparse_joint/README.md`](validation/sparse_joint/README.md); the
 benchmark is [`benchmark/sparse_two_timepoint`](benchmark/sparse_two_timepoint/README.md).
 

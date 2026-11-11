@@ -73,13 +73,10 @@ a small sample. A karyotype seen only at the second timepoint is centred
 on its frequency there, with the same standard deviation: absent other
 evidence its frequency is taken not to have changed.}
 
-\item{initial_state}{How abundances at the first timepoint are treated.
-\code{"free"} estimates one for every karyotype and so uses the first sample
-only as a starting point. \code{"balance"} starts every karyotype that is not
-major at mutation-selection balance with the major karyotypes next to it,
-so that its count in the first sample also informs its fitness. That
-assumes fitness before the first sample was what it is between the
-samples; do not use it when treatment starts at the first sample.}
+\item{initial_state}{\code{"free"} or \code{"balance"}; see \code{\link[=fit_sparse_joint]{fit_sparse_joint()}}.
+Unlike a single sample, a cohort starts free by default: with balance,
+the scale optimisation of some simulated cohorts failed and left no
+marginal likelihood to choose the trend by.}
 
 \item{history}{Time, in units of \code{dt}, over which the balance built up.
 Defaults to the interval between the samples.}
