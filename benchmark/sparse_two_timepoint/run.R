@@ -184,6 +184,14 @@ stt_stage_score <- function(config, split, workers, method_names) {
   }, workers)
   metrics <- merge(index, do.call(rbind, scored), by = "dataset_id")
   path <- file.path(config$output_dir, sprintf("metrics_%s.csv", split))
+  # Scoring some methods replaces their rows and keeps those of the others.
+  if (file.exists(path)) {
+    previous <- utils::read.csv(path, stringsAsFactors = FALSE)
+    previous <- previous[!previous$method %in% method_names, , drop = FALSE]
+    if (nrow(previous) && setequal(names(previous), names(metrics))) {
+      metrics <- rbind(previous[names(metrics)], metrics)
+    }
+  }
   utils::write.csv(metrics, path, row.names = FALSE)
   cat("Scored rows:", nrow(metrics), " file:", path, "\n")
 }
