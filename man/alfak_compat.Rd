@@ -50,9 +50,11 @@ pipeline built on alfakR can switch by calling this function. The fit
 itself is also saved, as \code{alfak2_fit.Rds}.
 }
 \details{
-alfak2 fits two samples. \code{yi$x} must have two columns; the time between
-them is \code{diff(passage_times)} or, without \code{passage_times},
-\code{diff(as.numeric(colnames(yi$x))) * yi$dt}, as in alfakR. \code{pm} is the
+alfak2 fits two samples. \code{yi$x} must have two columns; their times are
+\code{passage_times} or, without \code{passage_times},
+\code{as.numeric(colnames(yi$x)) * yi$dt}, as in alfakR. The fit uses the time
+between them; the time of the first sets the time 0 of the reported
+frequencies (\code{first_time} of \code{\link[=as_alfakR]{as_alfakR()}}). \code{pm} is the
 missegregation rate, \code{beta} of \code{\link[=fit_sparse_joint]{fit_sparse_joint()}}. alfakR's arguments
 for its own neighbour prior and Kriging (\code{nn_prior}, \code{nn_prior_sd},
 \code{nn_prior_sd_floor}, \code{krig_bootstrap_mode}) have no counterpart; giving

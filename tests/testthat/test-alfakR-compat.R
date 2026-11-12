@@ -85,6 +85,32 @@ test_that("as_alfakR keeps the model's level or reports birth rates on request",
   expect_equal(births$landscape$mean, (prediction$relative_fitness + log(100) / sim$dt) / self, tolerance = 1e-12)
   single <- as_alfakR(fit, minobs = 20, nboot = 1, xval = FALSE)
   expect_true(all(is.na(single$landscape$sd)))
+  expect_error(as_alfakR(fit, first_time = NA), "first_time")
+})
+
+test_that("as_alfakR reports frequencies at time 0 as alfakR does", {
+  sim <- simulate_sparse_joint_counts()
+  fit <- fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, max_cn = 4)
+  set.seed(6)
+  at_first <- as_alfakR(fit, minobs = 20, nboot = 4, correct_efflux = TRUE, xval = FALSE)$bootstrap_res
+  set.seed(6)
+  shifted <- as_alfakR(fit, minobs = 20, nboot = 4, correct_efflux = TRUE, xval = FALSE, first_time = 40)$bootstrap_res
+  expect_equal(shifted$final_fitness, at_first$final_fitness)
+  # alfakR's projection to the first sample, x0 * exp(f * t), gives back the
+  # frequencies at the first sample.
+  projected <- shifted$final_frequencies * exp(shifted$final_fitness * 40)
+  expect_equal(projected / rowSums(projected), at_first$final_frequencies, tolerance = 1e-10)
+  expect_equal(shifted$initial_frequencies, shifted$final_frequencies)
+  expect_false(isTRUE(all.equal(shifted$final_frequencies, at_first$final_frequencies)))
+  # With the default, the frequencies are the model's at the first sample
+  # (a single draw is the posterior mode; karyotypes outside the domain keep
+  # their observed count).
+  one <- as_alfakR(fit, minobs = 20, nboot = 1, xval = FALSE)$bootstrap_res$final_frequencies
+  fq <- colnames(one)
+  inside <- match(fq, fit$summary$karyotype)
+  level <- log(pmax(fit$data$counts[fq, 1L], .Machine$double.xmin))
+  level[!is.na(inside)] <- fit$posterior$zeta[inside[!is.na(inside)]]
+  expect_equal(as.numeric(one), unname(exp(level - max(level)) / sum(exp(level - max(level)))), tolerance = 1e-12)
   expect_error(as_alfakR(fit, minobs = 1e6), "no frequent karyotypes")
   expect_error(as_alfakR(fit, n0 = 1e5, nb = NULL), "both")
 })
@@ -115,6 +141,11 @@ test_that("alfak_compat() takes alfakR's input and writes its files", {
   alfak_compat(list(x = bare), again, passage_times = c(10, 10 + sim$dt), minobs = 20, nboot = 5, pm = sim$beta,
         max_cn = 4)
   expect_equal(readRDS(file.path(again, "landscape.Rds")), landscape)
+  # The first sample at time 10 moves the reported frequencies to time 0.
+  boot0 <- readRDS(file.path(dir, "bootstrap_res.Rds"))
+  boot10 <- readRDS(file.path(again, "bootstrap_res.Rds"))
+  projected <- boot10$final_frequencies * exp(boot10$final_fitness * 10)
+  expect_equal(projected / rowSums(projected), boot0$final_frequencies, tolerance = 1e-10)
 
   expect_error(alfak_compat(list(x = cbind(x, x[, 1L]), dt = 1), dir), "two samples")
   expect_error(alfak_compat(list(x = x, dt = sim$dt), dir, nn_prior = "none"), "nn_prior")

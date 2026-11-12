@@ -217,7 +217,7 @@ readRDS(file.path(outdir, "landscape.Rds"))   # k, mean, median, sd, fq, nn
 | --- | --- |
 | `landscape.Rds` | Frequent karyotypes (`fq`, at least `minobs` cells), their one-step neighbours (`nn`) and the neighbours' neighbours, in alfakR's order, with `mean`, `median` and `sd` of fitness |
 | `landscape_posterior_samples.Rds` | One row per landscape karyotype, one column per draw: joint draws from the model's posterior, in place of alfakR's Kriging bootstrap |
-| `bootstrap_res.Rds` | `initial_fitness`, `final_fitness`, `initial_frequencies`, `final_frequencies` and `nn_fitness`, one row per draw, with alfakR's retry attributes |
+| `bootstrap_res.Rds` | `initial_fitness`, `final_fitness`, `initial_frequencies`, `final_frequencies` and `nn_fitness`, one row per draw, with alfakR's retry attributes; the frequencies are at time 0 of alfakR's time axis, so `x0 * exp(f * t)` gives them at time `t` as in alfakR |
 | `xval.Rds` | `R2R`, `predictions`, `observations` and `xval_data`, plus `tmp`, the paired matrix earlier alfakR versions saved |
 | `landscape_data.Rds` | With `landscape_data_output = TRUE`: `mean` and `median` models whose `predict()` gives the fitness of any karyotype |
 | `alfak2_fit.Rds` | The alfak2 fit itself |

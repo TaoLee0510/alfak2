@@ -198,6 +198,15 @@ sparse_joint_alfakR_xval <- function(fit, fq, observation, level, divisor) {
 #' alfakR. `initial_fitness` equals `final_fitness`: the model has no
 #' separate first estimate.
 #'
+#' The frequencies of the frequent karyotypes follow alfakR's convention:
+#' they are the frequencies at time 0 of alfakR's time axis, from which
+#' alfakR projects to time `t` as `x0 * exp(f * t)`. The model estimates them
+#' at the first sample, so each draw is moved back from `first_time`, the
+#' time of the first sample on that axis, with the draw's `final_fitness`;
+#' projecting the reported frequencies to `first_time` in alfakR's way gives
+#' back the model's frequencies at the first sample. With `first_time = 0`
+#' the two coincide.
+#'
 #' The scale is alfakR's. Fitness is the net growth rate per unit of time,
 #' shifted so that the count-weighted mean of the major karyotypes is
 #' `log(nb / n0) / dt`, the growth rate alfakR assigns to the population.
@@ -232,6 +241,9 @@ sparse_joint_alfakR_xval <- function(fit, fq, observation, level, divisor) {
 #'   counterpart of alfakR's Kriging models: a list with elements `mean` and
 #'   `median`, each an object whose [predict()] method returns the fitness of
 #'   any karyotypes on the same scale as `landscape`.
+#' @param first_time Time of the first sample on alfakR's time axis (the
+#'   first passage time, or column name times `dt`); sets the time 0 of the
+#'   reported frequencies.
 #'
 #' @return An `alfak2_alfakR_output` list with `bootstrap_res`, `landscape`,
 #'   `landscape_posterior_samples`, `xval` (`R2R`, `predictions`,
@@ -239,13 +251,14 @@ sparse_joint_alfakR_xval <- function(fit, fq, observation, level, divisor) {
 #'   alfakR versions), `landscape_data` (`NULL` unless requested) and `fit`.
 #' @export
 as_alfakR <- function(fit, minobs = 20, nboot = 45, n0 = 1e5, nb = 1e7, correct_efflux = FALSE,
-                      xval = TRUE, landscape_data_output = FALSE) {
+                      xval = TRUE, landscape_data_output = FALSE, first_time = 0) {
   if (inherits(fit, "alfak2_sparse_joint_rate_fit")) fit <- fit$fits[[fit$point]]
   if (!inherits(fit, "alfak2_sparse_joint_fit")) {
     stop("`fit` must come from fit_sparse_joint() or fit_sparse_joint_rates().", call. = FALSE)
   }
   validate_scalar(minobs, "minobs", lower = 0)
   validate_scalar(nboot, "nboot", lower = 1)
+  validate_scalar(first_time, "first_time")
   if (nboot != round(nboot)) stop("`nboot` must be a whole number.", call. = FALSE)
   nboot <- as.integer(nboot)
   if (xor(is.null(n0), is.null(nb))) stop("Give both `n0` and `nb`, or neither.", call. = FALSE)
@@ -283,9 +296,12 @@ as_alfakR <- function(fit, minobs = 20, nboot = 45, n0 = 1e5, nb = 1e7, correct_
                           sd = alfakR_row_summary(samples, stats::sd),
                           fq = k %in% fq, nn = k %in% nn, stringsAsFactors = FALSE)
 
-  # Frequencies of the frequent karyotypes at the first sample, among
-  # themselves: drawn with the fitness for those in the domain, the observed
-  # count for the others.
+  final_fitness <- t(samples[match(fq, k), , drop = FALSE])
+  colnames(final_fitness) <- fq
+
+  # Frequencies of the frequent karyotypes among themselves: at the first
+  # sample, drawn with the fitness for those in the domain, the observed count
+  # for the others; then moved back to time 0 with each draw's fitness.
   zeta_index <- which(solver$names == "zeta")
   inside <- match(fq, fit$summary$karyotype)
   log_count <- matrix(log(pmax(counts[fq, 1L], .Machine$double.xmin)), length(fq), nboot)
@@ -301,12 +317,11 @@ as_alfakR <- function(fit, minobs = 20, nboot = 45, n0 = 1e5, nb = 1e7, correct_
     }
     log_count[rows, ] <- mode + shift
   }
+  log_count <- log_count - first_time * t(final_fitness)
   frequency <- t(exp(sweep(log_count, 2L, apply(log_count, 2L, max), "-")))
   frequency <- frequency / rowSums(frequency)
   colnames(frequency) <- fq
 
-  final_fitness <- t(samples[match(fq, k), , drop = FALSE])
-  colnames(final_fitness) <- fq
   nn_fitness <- if (length(nn)) t(samples[match(nn, k), , drop = FALSE]) else matrix(numeric(0), nboot, 0L)
   if (length(nn)) colnames(nn_fitness) <- nn
   bootstrap_res <- list(initial_fitness = final_fitness, final_fitness = final_fitness,
@@ -375,9 +390,11 @@ write_alfakR_outputs <- function(x, outdir) {
 #' pipeline built on alfakR can switch by calling this function. The fit
 #' itself is also saved, as `alfak2_fit.Rds`.
 #'
-#' alfak2 fits two samples. `yi$x` must have two columns; the time between
-#' them is `diff(passage_times)` or, without `passage_times`,
-#' `diff(as.numeric(colnames(yi$x))) * yi$dt`, as in alfakR. `pm` is the
+#' alfak2 fits two samples. `yi$x` must have two columns; their times are
+#' `passage_times` or, without `passage_times`,
+#' `as.numeric(colnames(yi$x)) * yi$dt`, as in alfakR. The fit uses the time
+#' between them; the time of the first sets the time 0 of the reported
+#' frequencies (`first_time` of [as_alfakR()]). `pm` is the
 #' missegregation rate, `beta` of [fit_sparse_joint()]. alfakR's arguments
 #' for its own neighbour prior and Kriging (`nn_prior`, `nn_prior_sd`,
 #' `nn_prior_sd_floor`, `krig_bootstrap_mode`) have no counterpart; giving
@@ -444,7 +461,7 @@ alfak_compat <- function(yi, outdir, passage_times = NULL, minobs = 20, nboot = 
   if (interval <= 0) stop("The second sample must come after the first.", call. = FALSE)
   fit <- fit_sparse_joint(x, dt = interval, beta = pm, ...)
   out <- as_alfakR(fit, minobs = minobs, nboot = nboot, n0 = n0, nb = nb, correct_efflux = correct_efflux,
-                   landscape_data_output = landscape_data_output)
+                   landscape_data_output = landscape_data_output, first_time = as.numeric(times)[1L])
   write_alfakR_outputs(out, outdir)
   invisible(out$xval$R2R)
 }
