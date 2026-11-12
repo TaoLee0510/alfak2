@@ -5,7 +5,8 @@
 #
 # Distances 0-2 come from the scoreboard (metrics_<split>.csv), distances 3-4
 # from far_distance.R (sweeps/far/metrics_far_<split>.csv). Both are centred on
-# the same reference karyotypes. Values are averaged over the scenarios of each
+# the same reference karyotypes. Direction accuracy, for the four main methods,
+# comes from direction_accuracy.R (sweeps/direction/direction_<split>.csv). Values are averaged over the scenarios of each
 # landscape and then over the three landscapes of each wavelength; error
 # ratios divide the mean error by the mean error of the null predictor.
 
@@ -31,15 +32,20 @@ labels <- c(
 )
 waves <- c("w0.4", "w0.8", "w1.2", "w1.6")
 mean_na <- function(v) if (all(is.na(v))) NA_real_ else mean(v, na.rm = TRUE)
-cols <- c("rmse", "rmse_zero", "bias", "spearman", "coverage95", "prediction_fraction")
+cols <- c("rmse", "rmse_zero", "bias", "spearman", "coverage95", "prediction_fraction", "direction")
 
 load <- function(split) {
   near <- utils::read.csv(file.path(results, sprintf("metrics_%s.csv", split)), stringsAsFactors = FALSE)
   far <- utils::read.csv(file.path(results, "sweeps", "far", sprintf("metrics_far_%s.csv", split)), stringsAsFactors = FALSE)
   near <- near[near$stratum %in% c("d0", "d1", "d2"), ]
   far <- far[far$stratum %in% c("d3", "d4"), ]
-  keep <- c("dataset_id", "method", "landscape_id", "wavelength_class", "scenario", "role", "scoreboard", "stratum", cols)
+  keep <- c("dataset_id", "method", "landscape_id", "wavelength_class", "scenario", "role", "scoreboard", "stratum",
+            setdiff(cols, "direction"))
   m <- rbind(near[keep], far[keep])
+  direction <- utils::read.csv(file.path(results, "sweeps", "direction", sprintf("direction_%s.csv", split)),
+                               stringsAsFactors = FALSE)
+  m <- merge(m, direction[c("dataset_id", "method", "stratum", "direction")], by = c("dataset_id", "method", "stratum"),
+             all.x = TRUE)
   m <- m[m$role == "core" & m$scoreboard & m$method %in% names(labels), ]
   cell <- stats::aggregate(m[cols], m[c("method", "wavelength_class", "landscape_id", "scenario", "stratum")], mean_na)
   land <- stats::aggregate(cell[cols], cell[c("method", "wavelength_class", "landscape_id", "stratum")], mean_na)
@@ -92,6 +98,16 @@ rank_plot <- ggplot(plotted[is.finite(plotted$spearman), ], aes(distance, spearm
   labs(x = "Distance from the nearest observed karyotype", y = "Spearman correlation") + theme_doc
 ggsave(file.path(out_dir, "far_distance_spearman.pdf"), rank_plot, width = 6.5, height = 2.9, device = grDevices::cairo_pdf)
 
+direction_plot <- ggplot(plotted[is.finite(plotted$direction), ], aes(distance, direction, colour = label, shape = label)) +
+  far_band() +
+  geom_hline(yintercept = 0.5, colour = "#8a8984", linewidth = 0.4, linetype = "22") +
+  geom_line(linewidth = 0.5) + geom_point(size = 1.7) +
+  scale_y_continuous(limits = c(0.3, 1), breaks = seq(0.3, 1, 0.1)) +
+  scale_colour_manual(values = palette) + scale_shape_manual(values = shapes) +
+  facet_wrap(~lambda, nrow = 1, labeller = label_parsed) +
+  labs(x = "Distance from the nearest observed karyotype", y = "Direction accuracy") + theme_doc
+ggsave(file.path(out_dir, "far_distance_direction.pdf"), direction_plot, width = 6.5, height = 2.9, device = grDevices::cairo_pdf)
+
 ## Tables: every method at distances 3 and 4 ---------------------------------
 fmt <- function(v, digits) ifelse(is.finite(v), formatC(v, format = "f", digits = digits), "--")
 table_tex <- function(wl, column, digits, title, methods = names(labels)) {
@@ -115,6 +131,7 @@ table_tex <- function(wl, column, digits, title, methods = names(labels)) {
 }
 main_methods <- c("zero", "alfak2_two_layer_fixed", "alfakR_minobs20", "alfak2_sparse_joint", "alfak2_sparse_joint_balance")
 writeLines(c(table_tex(held, "ratio", 2, "Error relative to the null predictor, held-out landscapes.", main_methods[-1]), "",
+             table_tex(held, "direction", 2, "Direction accuracy, held-out landscapes.", main_methods[-1]), "",
              table_tex(held, "spearman", 2, "Spearman correlation, held-out landscapes.", main_methods[-1])),
            file.path(out_dir, "far_main.tex"))
 supp <- unlist(lapply(c("heldout", "dev"), function(split) {
@@ -122,6 +139,7 @@ supp <- unlist(lapply(c("heldout", "dev"), function(split) {
   name <- if (split == "heldout") "held-out" else "development"
   c(table_tex(wl, "rmse", 3, sprintf("Root mean squared error, %s landscapes.", name)), "",
     table_tex(wl, "bias", 3, sprintf("Mean error (prediction minus reference), %s landscapes.", name)), "",
+    table_tex(wl, "direction", 2, sprintf("Direction accuracy, %s landscapes (main methods).", name), main_methods[-1]), "",
     table_tex(wl, "spearman", 2, sprintf("Spearman correlation, %s landscapes.", name), names(labels)[-1]), "",
     table_tex(wl, "coverage95", 2, sprintf("Coverage of nominal 95\\%% intervals, %s landscapes.", name), names(labels)[-1]), "",
     table_tex(wl, "prediction_fraction", 2, sprintf("Fraction of karyotypes predicted, %s landscapes.", name), names(labels)[-1]), "")
@@ -141,6 +159,7 @@ for (split in c("heldout", "dev")) {
   wl <- if (split == "heldout") held else dev
   cat("==", split, "ratio\n"); show(wl, main_methods[-1], "ratio")
   cat("==", split, "spearman\n"); show(wl, main_methods[-1], "spearman")
+  cat("==", split, "direction\n"); show(wl, main_methods[-1], "direction")
   cat("==", split, "bias (null bias = minus mean truth)\n"); show(wl, main_methods, "bias", 3)
   cat("==", split, "coverage\n"); show(wl, c("alfak2_sparse_joint_balance", "alfakR_minobs20", "alfak2_two_layer_fixed"), "coverage95")
   cat("==", split, "near-field prediction fraction at d3/d4\n")

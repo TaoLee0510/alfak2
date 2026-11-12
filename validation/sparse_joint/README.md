@@ -516,6 +516,50 @@ identical predictions for all but `alfakR`, whose bootstrap is unseeded
   distance 3, 2.28 / 1.26 / 1.42 / 15.3 at distance 4; Spearman 0.01 to 0.25.
 - Development landscapes: balance 0.42 to 0.59, Spearman 0.14 to 0.49.
 
+## Three measures of accuracy
+
+The method document now states two design goals, numerical and direction
+accuracy, and reports them together with the overall similarity of predicted
+and true fitness (Section 2.1 and 5.1 of `doc/alfak2_method.tex`):
+
+- Numerical accuracy: RMSE relative to the null predictor (null = 1).
+- Direction accuracy: over pairs of scored karyotypes one copy of one
+  chromosome apart, the share whose predicted fitness change has the true
+  sign; a tie (equal predictions) counts one half, pairs with equal true
+  fitness are skipped, and a pair belongs to the distance of its farther
+  member (null = random = 1/2). `direction_accuracy.R` computes it from the
+  saved fits (`sweeps/direction/direction_<split>.csv`); at distances 3 and 4
+  the pairs include the intermediate nodes of the sampling walks. The score
+  stage's `edge_sign_accuracy` counts ties as wrong, so the null predictor and
+  failed fits score 0 there; it is not used. Direction accuracy was added
+  after the held-out evaluation, from the same fits, and was not an acceptance
+  criterion.
+- Overall similarity: Spearman correlation (null = 0), not a direction
+  measure.
+
+Held-out, means of 24 datasets per wavelength and distance:
+
+| | error ÷ null, d0–2 | direction, d0–2 | direction, d3–4 | direction above 1/2, by design |
+|---|---|---|---|---|
+| sparse joint, balance | 0.47–0.74 | 0.64–0.96 | 0.76–0.81 | 96 / 96 |
+| sparse joint, independent | 0.53–0.96 | 0.66–0.96 | 0.76–0.81 | 96 / 96 |
+| two-layer (graph Gaussian) | 0.92–1.00 | 0.49–0.57 | 0.49–0.52 | 62 / 96 |
+| alfakR (minobs 20) | 1.39–41.6 | 0.36–0.52 | 0.45–0.53 | 28 / 96 |
+
+- alfakR is below one half in 10 of 12 wavelength × distance cells at
+  distances 0–2: it predicts the wrong direction more often than the right
+  one. Its failed fits score one half (all ties).
+- The default's lowest value, 0.64 for observed karyotypes at wavelength 1.6,
+  comes from rare observed karyotypes outside the domain: they share one log
+  birth rate, so their fitness differs only through the missegregation term.
+- By design at distance 1 the default is 0.76 to 0.90 everywhere; unlike the
+  error, direction hardly changes with sample size.
+- Development: default 0.67 to 0.93 (d0–2), above one half in 96 / 96.
+
+`accuracy_by_wavelength.R` draws the three measures by wavelength (Section
+5.2); `scenario_results.R` and `far_results.R` add the direction figures and
+tables by design and at distances 3 and 4.
+
 ## Outputs for alfakR pipelines
 
 Analyses built on `alfakR::alfak()` (branch `dev`) read four files from its
@@ -601,5 +645,8 @@ compares the output files with those of alfakR. `wavelength_tables.R` writes
 the tables by wavelength of the method document. `scenario_results.R` writes the figures and
 tables by sampling design to `doc/generated/`. `far_distance.R` fits and
 scores all methods at distances 3 and 4, and `far_results.R` writes its
-figures and tables to `doc/generated/`. The official verdict comes
+figures and tables to `doc/generated/`. `direction_accuracy.R` computes the
+direction accuracy of the main methods from the saved fits, and
+`accuracy_by_wavelength.R` draws the three accuracy measures by wavelength.
+The official verdict comes
 from `benchmark/sparse_two_timepoint/run.R --stage=report`.
