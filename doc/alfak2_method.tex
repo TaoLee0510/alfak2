@@ -131,6 +131,22 @@ $\rho_i$, $\tilde s_i$ & Relative fitness and its calibrated standard deviation 
 \subsection{Model Rationale}
 \label{sec:sj-design}
 
+\paragraph{Design goals.}
+The input is fixed: counts at two time points, sparse in the sense described
+below; the method does not require further samples. Within this setting the
+estimates are required to be accurate in two respects. \emph{Numerical
+accuracy}: the estimated relative fitness of each karyotype, observed or not,
+should be close to its true value. \emph{Direction accuracy}: for two
+karyotypes that differ by one copy of one chromosome, the sign of the
+estimated fitness difference, that is, whether the gain or loss of that copy
+increases or decreases fitness, should be correct. The two requirements are
+distinct. Shrinking all estimates towards zero yields a moderate error without
+any directional information, whereas a few extreme estimates can leave most
+directions correct and yet produce a large error. Both are evaluated in
+Section~\ref{sec:validation}, together with the overall similarity of
+estimated and true fitness.
+
+\paragraph{Sources of information.}
 Two cross-sectional samples provide three sources of information about
 fitness.
 
@@ -1002,13 +1018,44 @@ landscapes,
   \mathrm{RMSE}_{\lambda,d}=\frac{1}{3}\sum_{L\in\Lambda_\lambda}\frac{1}{8}\sum_S\mathrm{RMSE}_{L,S,d},
   \label{eq:rmse-pooled}
 \end{equation}
-and rank correlations and coverage likewise. Each value is thus the
+and the other measures defined below likewise. Each value is thus the
 equally weighted mean of 24 datasets, three landscapes by eight sampling
 designs, so that every design counts equally irrespective of its sample size
 or number of karyotypes. Landscapes are the independent units: the scenarios of a landscape are drawn from one simulated trajectory.
 Comparisons between methods are therefore paired by landscape, and confidence
 intervals are obtained by resampling landscapes. For patient samples no
 reference values exist, and the assessments described below are indirect.
+
+\paragraph{Measures of accuracy.}
+Three measures are reported, each computed per landscape, scenario and
+distance and aggregated as in (\ref{eq:rmse-pooled}).
+\emph{Numerical accuracy} is the error (\ref{eq:rmse}), reported as the ratio
+of the aggregated error of a method to that of the null predictor defined
+below; values below one indicate that the method extracts information on
+fitness differences. \emph{Direction accuracy} concerns pairs of scored
+karyotypes $x$ and $x+e_c$ that differ by one copy of chromosome $c$. With
+$\Delta=\rho^{\mathrm{true}}_{x+e_c}-\rho^{\mathrm{true}}_x$ and
+$\hat\Delta=\rho^{\mathrm{pred}}_{x+e_c}-\rho^{\mathrm{pred}}_x$,
+\begin{equation}
+  A_{L,S,d}=\frac{1}{|E_d|}\sum_{(x,c)\in E_d}
+  \Bigl(\mathbf{1}\bigl\{\operatorname{sign}\hat\Delta=\operatorname{sign}\Delta\bigr\}
+  +\tfrac12\,\mathbf{1}\bigl\{\hat\Delta=0\bigr\}\Bigr),
+  \label{eq:direction}
+\end{equation}
+where $E_d$ is the set of such pairs with $\Delta\neq0$ whose farther member
+lies at distance $d$ from the observed karyotypes. A tie, an equal prediction
+for both members of a pair, counts one half, so that a method without
+directional information scores one half, as does random guessing. Centring
+cancels in the differences. The median number of pairs per dataset was 28 to
+462 at distance 0, depending on the wavelength, and 780 to 5070 at distances 1
+and 2. Direction accuracy was introduced after the held-out landscapes had
+been evaluated and is computed from the same fits; it was not among the
+acceptance criteria. \emph{Overall similarity} is the Spearman correlation
+between $\rho^{\mathrm{pred}}$ and $\rho^{\mathrm{true}}$ over the scored
+karyotypes at a distance. It measures whether karyotypes are placed in the
+right order across the whole set, including karyotypes that are far apart,
+whereas direction accuracy concerns neighbouring karyotypes only. Coverage of
+nominal 95\% intervals, finally, assesses the reported uncertainty.
 
 \paragraph{Reference predictor.}
 The null predictor, denoted \emph{no fitness differences}, assigns a relative
@@ -1019,15 +1066,19 @@ differences to be estimated at each distance. A method that does not attain a
 lower error than this predictor extracts no usable information on fitness
 differences. It serves as the benchmark for error in preference to
 \texttt{alfakR}, whose error is dominated by a small number of poorly
-constrained fits.
+constrained fits. Its error ratio is one by definition and its direction
+accuracy one half, since every pair is a tie; it provides no ordering, and its
+rank correlation is taken as zero.
 
 \subsection{Results by Wavelength}
 \label{sec:val-wavelength}
 
 The following tables report, for each wavelength $\lambda$ and distance $d$
 from the observed karyotypes, the root mean squared error of relative
-fitness, the Spearman correlation with the reference values and the coverage
-of nominal 95\% intervals, each computed as in (\ref{eq:rmse-pooled}).
+fitness, the direction accuracy (\ref{eq:direction}), the Spearman correlation
+with the reference values and the coverage of nominal 95\% intervals, each
+computed as in (\ref{eq:rmse-pooled}); Figure~\ref{fig:wavelength} shows the
+first three relative to the null predictor.
 Coverage is the fraction of scored karyotypes whose reference value lies
 within the nominal 95\% interval of a method, the prediction plus or minus
 1.96 standard deviations; a calibrated method attains 0.95, and lower values
@@ -1036,6 +1087,19 @@ predictor provides neither a ranking nor intervals. The intervals of
 \texttt{alfakR} derive from the standard deviation of its Kriging predictions
 over bootstrap replicates; karyotypes outside its landscape have none and are
 omitted from its coverage.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth]{generated/accuracy_by_wavelength.pdf}
+\caption{Numerical accuracy (top: error relative to the null predictor, log
+scale), direction accuracy (middle) and overall similarity (bottom: Spearman
+correlation with the reference values) against distance from the nearest
+observed karyotype, held-out landscapes. Each point is the mean of 24
+datasets, three landscapes by eight sampling designs. Dashed lines mark the
+null predictor (1, one half and 0). Ratios of \texttt{alfakR} above 8 are
+drawn at the upper edge and labelled with their value.}
+\label{fig:wavelength}
+\end{figure}
 
 \noindent\textit{Root mean squared error.}
 \begin{center}
@@ -1055,6 +1119,9 @@ Sparse joint, balance & 0.055 & 0.110 & 0.161 & 0.020 & 0.039 & 0.062 & 0.014 & 
 \bottomrule
 \end{tabular}
 \end{center}
+
+\noindent\textit{Direction accuracy.}
+\input{generated/wavelength_direction.tex}
 
 \noindent\textit{Spearman correlation with the reference values.}
 \begin{center}
@@ -1097,8 +1164,29 @@ null predictor at every wavelength and distance, at 0.47 to 0.74 times its
 value, with the largest reductions on the most rugged landscapes. The
 two-layer pipeline attained 0.92 to 1.00 times the error of the null
 predictor, and \texttt{alfakR} exceeded it everywhere; 21\% of the
-\texttt{alfakR} fits failed at $\lambda=1.6$. Rank correlations of the sparse
-joint model were higher than those of the two-layer pipeline and
+\texttt{alfakR} fits failed at $\lambda=1.6$.
+
+Direction accuracy of the sparse joint model with the balance prior was 0.64
+to 0.96. It was highest for observed karyotypes on the most rugged landscapes
+(0.96), where fitness differences are largest, and 0.79 to 0.88 at distances 1
+and 2. It was lowest for observed karyotypes on the smoothest landscapes
+(0.64), for the reason that also explains the exception in rank correlation
+below: rare observed karyotypes outside the domain share one level of the log
+birth rate, so that their predicted fitness differs only through the
+missegregation term, which depends on copy number rather than on the data.
+Independent initial abundances gave similar values (0.66 to 0.96); the
+balance prior improves mainly the numerical accuracy. The two-layer pipeline
+attained 0.49 to 0.57, close to the one half of a method without directional
+information, and \texttt{alfakR} 0.36 to 0.52, below one half in 10 of the 12
+combinations of wavelength and distance: it predicted the wrong direction
+more often than the right one. The sparse joint model was thus the only
+method better than the null predictor in both numerical and direction
+accuracy at every wavelength and distance. On the development landscapes its
+direction accuracy was 0.67 to 0.93.
+
+Rank correlations, which measure the overall similarity of predicted and true
+fitness rather than the direction of individual changes, were higher for the
+sparse joint model than for the two-layer pipeline and
 \texttt{alfakR} at every wavelength and distance, with one exception: for
 observed karyotypes on the smoothest landscapes ($\lambda=1.6$, $d=0$), the
 two-layer pipeline ranked them better (0.48 versus 0.34). The exception
@@ -1133,9 +1221,10 @@ whereas the sparse joint model reduced it by 25--56\%
 \subsection{Results by Sampling Design}
 \label{sec:val-sampling}
 
-Figures~\ref{fig:design-error} and~\ref{fig:design-rank} resolve the held-out
-results by sampling design. For each wavelength and distance they show the
-error relative to the null predictor and the rank correlation of the sparse
+Figures~\ref{fig:design-error}, \ref{fig:design-direction}
+and~\ref{fig:design-rank} resolve the held-out results by sampling design.
+For each wavelength and distance they show the error relative to the null
+predictor, the direction accuracy and the rank correlation of the sparse
 joint model, with and without the balance prior, of the two-layer pipeline
 and of \texttt{alfakR}; points are means over the three landscapes of a
 wavelength and bars the range over those landscapes. Designs are ordered by sample size at fixed
@@ -1165,6 +1254,15 @@ predictor, and bars the range of this ratio over the landscapes. Ratios of
 there, and labelled with their value. Vertical lines separate the sample-size
 series, the longer interval, the bottleneck and the unbalanced designs.}
 \label{fig:design-error}
+\end{figure}
+
+\begin{figure}[p]
+\centering
+\includegraphics[width=\textwidth]{generated/scenario_direction.pdf}
+\caption{Direction accuracy (\ref{eq:direction}) by sampling design, held-out
+landscapes; layout as in Figure~\ref{fig:design-error}. The dashed line marks
+one half, the value of the null predictor and of random guessing.}
+\label{fig:design-direction}
 \end{figure}
 
 \begin{figure}[p]
@@ -1199,6 +1297,16 @@ of them, and the sparse joint model attained a lower error than
 model was below the null predictor in all 96 combinations (ratios 0.39 to
 0.88; Supplement~\ref{sec:s-designs}).
 
+Direction accuracy of the sparse joint model exceeded one half in all 96
+combinations of wavelength, design and distance (0.55 to 1.00;
+Figure~\ref{fig:design-direction}). At distance 1 it was 0.76 to 0.90 in
+every design, so that even 50 cells per sample identified the direction of
+most changes between neighbouring karyotypes; unlike the error, it changed
+little with sample size. The two-layer pipeline exceeded one half in 62 and
+\texttt{alfakR} in 28 of the 96 combinations (0.33 to 0.72 and 0.12 to 0.72).
+On the development landscapes the sparse joint model exceeded one half in all
+96 combinations (0.60 to 1.00).
+
 Rank correlations of the sparse joint model at distances 1 and 2 increased
 with sample size on smooth landscapes ($\lambda=1.6$, distance 1: 0.28 at 50
 cells per sample against 0.55 to 0.62 at 500/700) but remained between 0.12
@@ -1232,17 +1340,22 @@ pipeline have a path from the observed karyotypes. Reference values and
 centring are those of Section~\ref{sec:val-design}, so that distances 0 to 4
 share one origin. Because fitness declines with distance from the observed
 karyotypes, the error at large distances contains a mean deficit that the
-null predictor does not capture; the mean error and the rank correlation are
-therefore reported alongside the error ratio.
+null predictor does not capture; the mean error, the direction accuracy and
+the rank correlation are therefore reported alongside the error ratio. For
+direction accuracy, a karyotype at distance 3 or 4 is paired with its
+neighbours among all nodes of the walks, so that each has neighbours one step
+closer to the observed karyotypes; it is computed for the four main methods.
 
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=\textwidth]{generated/far_distance_ratio.pdf}
 
+\includegraphics[width=\textwidth]{generated/far_distance_direction.pdf}
+
 \includegraphics[width=\textwidth]{generated/far_distance_spearman.pdf}
-\caption{Error relative to the null predictor (top) and Spearman correlation
-with the reference values (bottom) against distance from the nearest observed
-karyotype, held-out landscapes. Distances 0 to 2 are those of the scoreboard;
+\caption{Error relative to the null predictor (top), direction accuracy
+(middle) and Spearman correlation with the reference values (bottom) against
+distance from the nearest observed karyotype, held-out landscapes. Distances 0 to 2 are those of the scoreboard;
 the shaded region marks distances 3 and 4. Ratios of \texttt{alfakR} above 8
 are drawn at the upper edge and labelled with their value. Graph Gaussian
 denotes the two-layer pipeline with its default second layer.}
@@ -1281,13 +1394,18 @@ and 1.00 at $\lambda=1.6$; the intervals were too narrow at $\lambda=0.8$ and
 conservative on smooth landscapes. With independent initial states the error
 was higher than with the balance prior at every wavelength and both distances
 (ratios 0.48 to 0.82), and the rank correlations were similar (0.11 to 0.43).
+Direction accuracy of the sparse joint model at distances 3 and 4 was 0.76 to
+0.81, slightly below that at distance 2 (0.79 to 0.84) and similar with
+independent initial states.
 
 The graph Gaussian second layer of the two-layer pipeline attained 0.98 to
 1.00 times the error of the null predictor at distances 3 and 4, and its mean
 error agreed with that of the null predictor to within 0.001: its predictions
 shrink to zero away from the observed karyotypes. Its rank correlation ranged
 from $-0.04$ to 0.28 and was lower than that of the sparse joint model at
-every wavelength and both distances. Its standard deviations grew with
+every wavelength and both distances, and its direction accuracy was 0.49 to
+0.52, that of a method without directional information. Its standard
+deviations grew with
 distance, to 0.6 to 1.2 at distances 3 and 4 in the datasets examined, so
 that its intervals contained 99.9 to 100\% of the reference values; such
 intervals carry little information. The seven near-field
@@ -1296,12 +1414,12 @@ therefore equivalent to the null predictor there
 (Supplement~\ref{sec:s-far}). \texttt{alfakR} predicts these karyotypes from
 its Kriging mean surface, without an uncertainty. Its error was 2.35, 1.32,
 1.50 and 18.2 times that of the null predictor at distance 3 and 2.28, 1.26,
-1.42 and 15.3 times at distance 4, and its rank correlation ranged from 0.01
-to 0.25.
+1.42 and 15.3 times at distance 4, its direction accuracy was 0.45 to 0.53,
+and its rank correlation ranged from 0.01 to 0.25.
 
-The development landscapes gave the same results: ratios of 0.42 to 0.59 and
-rank correlations of 0.14 to 0.49 for the sparse joint model at distances 3
-and 4 (Supplement~\ref{sec:s-far}). One qualification applies to the
+The development landscapes gave the same results: ratios of 0.42 to 0.59,
+direction accuracy of 0.76 to 0.81 and rank correlations of 0.14 to 0.49 for
+the sparse joint model at distances 3 and 4 (Supplement~\ref{sec:s-far}). One qualification applies to the
 comparison across distances. The scoreboard samples distances 1 and 2
 uniformly within each shell, whereas distances 3 and 4 are sampled by random
 walks, which are not uniform within a shell. Differences between distances 2
@@ -1309,8 +1427,10 @@ and 3 therefore partly reflect the sampling; the rank correlation of the graph
 Gaussian layer at $\lambda=1.6$, which rose from 0.19 at distance 2 to 0.28
 at distance 3, is an example. Beyond the domain, the sparse joint model thus
 retains a constant advantage over the null predictor, because its trend
-captures the decline of fitness with distance, but it does not rank
-individual karyotypes far from the data reliably on rugged landscapes.
+captures the decline of fitness with distance, and it identifies the
+direction of 76 to 81\% of changes between neighbouring karyotypes; but
+it does not rank individual karyotypes far from the data reliably on rugged
+landscapes.
 
 \subsection{Additional Assessments}
 \label{sec:val-additional}
@@ -1363,7 +1483,11 @@ The default pipeline of \texttt{alfak2} can be summarised as
 \end{aligned}
 \]
 with calibrated uncertainty and, optionally, output in the \texttt{alfakR}
-format. The earlier pipelines are described in the Supplement.
+format. On held-out simulated landscapes it was better than the null
+predictor in both numerical and direction accuracy at every wavelength and
+distance, which neither the earlier two-layer pipeline nor \texttt{alfakR}
+achieved (Section~\ref{sec:validation}). The earlier pipelines are described
+in the Supplement.
 
 \clearpage
 \sloppy
@@ -2635,10 +2759,11 @@ two-sample benchmark.
 
 This section gives the numbers underlying Section~\ref{sec:val-sampling}: the
 range over the three held-out landscapes of each wavelength of the error ratio
-of the sparse joint model with the balance prior, and the error, rank
-correlation and interval coverage of every method by sampling design, for the
-held-out and the development landscapes. Each value averages the three
-landscapes of a wavelength under one design.
+of the sparse joint model with the balance prior, and the error, direction
+accuracy, rank correlation and interval coverage of every method by sampling
+design, for the held-out and the development landscapes. Each value averages
+the three landscapes of a wavelength under one design. The direction accuracy
+of the null predictor is one half by construction and is not listed.
 
 \noindent\textit{Range over held-out landscapes of the error of the sparse
 joint model (balance) relative to the null predictor.}
@@ -2654,7 +2779,11 @@ joint model (balance) relative to the null predictor.}
 
 This section gives, for every method and both sets of landscapes, the error,
 mean error, rank correlation, interval coverage and fraction of karyotypes
-predicted at distances 3 and 4 (Section~\ref{sec:val-far}). As in the
+predicted at distances 3 and 4 (Section~\ref{sec:val-far}), and the direction
+accuracy of the four main methods. For the near-field methods direction
+accuracy was not computed: their predictions within distance 2 enter pairs
+with karyotypes at distance 3, so it is not fixed by their absence of
+predictions beyond. As in the
 scoreboard, a karyotype for which a method provides no prediction receives
 the prediction zero, and a method that fails on a dataset is scored as the
 null predictor on it. The seven near-field second-layer methods report

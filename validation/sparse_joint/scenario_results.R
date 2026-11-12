@@ -6,15 +6,19 @@
 # Reads metrics_heldout.csv and metrics_dev.csv of benchmark/sparse_two_timepoint
 # and writes, to OUT_DIR (default doc/generated):
 #   scenario_rmse_ratio.pdf   error relative to the null predictor (held-out)
+#   scenario_direction.pdf    direction accuracy (held-out)
 #   scenario_spearman.pdf     rank correlation with the reference (held-out)
 #   scenario_main.tex         cells per karyotype and the default model's error
-#                             ratio, by design and wavelength (held-out)
-#   scenario_supp_<split>.tex error, rank correlation and coverage of every
-#                             method by design and wavelength
+#                             ratio and direction accuracy, by design and
+#                             wavelength (held-out)
+#   scenario_supp_<split>.tex error, direction accuracy, rank correlation and
+#                             coverage of every method by design and wavelength
 #   scenario_ranges.tex       range over landscapes of the default model's ratio
 # Each cell of a table holds the three landscapes of one wavelength under one
 # design; ratios are the mean error over those landscapes divided by the mean
-# error of the null predictor on the same karyotypes.
+# error of the null predictor on the same karyotypes. Direction accuracy comes
+# from direction_accuracy.R (sweeps/direction/direction_<split>.csv); it is not
+# computed for the null predictor, which scores 1/2 by construction.
 
 suppressMessages(library(ggplot2))
 args <- commandArgs(TRUE)
@@ -47,7 +51,10 @@ load_split <- function(split) {
   m$label <- names(methods)[match(m$method, methods)]
   m$design <- factor(designs[m$scenario], levels = designs)
   m$cells_per_karyotype <- (m$depth_t0 + m$depth_t1) / m$n_karyotypes
-  m
+  direction <- utils::read.csv(file.path(results, "sweeps", "direction", sprintf("direction_%s.csv", split)),
+                               stringsAsFactors = FALSE)
+  merge(m, direction[c("dataset_id", "method", "stratum", "direction")], by = c("dataset_id", "method", "stratum"),
+        all.x = TRUE)
 }
 mean_na <- function(v) if (all(is.na(v))) NA_real_ else mean(v, na.rm = TRUE)
 
@@ -55,13 +62,14 @@ mean_na <- function(v) if (all(is.na(v))) NA_real_ else mean(v, na.rm = TRUE)
 # the error ratio to the null predictor, and its range over landscapes.
 summarise_cells <- function(m) {
   key <- c("label", "method", "wavelength_class", "design", "stratum")
-  cells <- stats::aggregate(m[c("rmse", "rmse_zero", "spearman", "coverage95")], m[key], mean_na)
+  cells <- stats::aggregate(m[c("rmse", "rmse_zero", "spearman", "coverage95", "direction")], m[key], mean_na)
   cells$ratio <- cells$rmse / cells$rmse_zero
   m$landscape_ratio <- m$rmse / m$rmse_zero
-  low <- stats::aggregate(m[c("landscape_ratio", "spearman")], m[key], function(v) suppressWarnings(min(v, na.rm = TRUE)))
-  high <- stats::aggregate(m[c("landscape_ratio", "spearman")], m[key], function(v) suppressWarnings(max(v, na.rm = TRUE)))
-  names(low)[6:7] <- c("ratio_low", "spearman_low")
-  names(high)[6:7] <- c("ratio_high", "spearman_high")
+  spread <- c("landscape_ratio", "spearman", "direction")
+  low <- stats::aggregate(m[spread], m[key], function(v) suppressWarnings(min(v, na.rm = TRUE)))
+  high <- stats::aggregate(m[spread], m[key], function(v) suppressWarnings(max(v, na.rm = TRUE)))
+  names(low)[6:8] <- c("ratio_low", "spearman_low", "direction_low")
+  names(high)[6:8] <- c("ratio_high", "spearman_high", "direction_high")
   merge(merge(cells, low, by = key), high, by = key)
 }
 
@@ -125,6 +133,17 @@ rank_plot <- ggplot(plotted[is.finite(plotted$spearman), ], aes(design, spearman
   labs(x = NULL, y = "Spearman correlation with the reference values") + theme_doc
 ggsave(file.path(out_dir, "scenario_spearman.pdf"), rank_plot, width = 6.5, height = 8.2, device = grDevices::cairo_pdf)
 
+direction_plot <- ggplot(plotted[is.finite(plotted$direction), ], aes(design, direction, colour = label, shape = label)) +
+  separators +
+  geom_hline(yintercept = 0.5, colour = "#8a8984", linewidth = 0.4, linetype = "22") +
+  geom_linerange(aes(ymin = direction_low, ymax = direction_high), position = dodge, linewidth = 0.45) +
+  geom_point(position = dodge, size = 1.5) +
+  scale_y_continuous(limits = c(0, 1), breaks = seq(0, 1, 0.25)) +
+  scale_colour_manual(values = palette) + scale_shape_manual(values = shapes) +
+  facet_grid(lambda ~ distance, labeller = label_parsed) +
+  labs(x = NULL, y = "Direction accuracy (share of neighbour pairs with the correct sign)") + theme_doc
+ggsave(file.path(out_dir, "scenario_direction.pdf"), direction_plot, width = 6.5, height = 8.2, device = grDevices::cairo_pdf)
+
 ## Tables --------------------------------------------------------------------
 
 fmt <- function(v) ifelse(is.finite(v), sprintf("%.2f", v), "--")
@@ -163,6 +182,10 @@ main <- c("\\noindent\\textit{Cells per observed karyotype (median over landscap
           "\\noindent\\textit{Error of the sparse joint model (balance) relative to the null predictor.}",
           header, "\\begin{tabular}{l*{12}{r}}", "\\toprule", lambda_head("Design"),
           design_rows(held_cells, "Sparse joint, balance (default)", "ratio", fmt),
+          "\\bottomrule", "\\end{tabular}", "\\end{center}", "",
+          "\\noindent\\textit{Direction accuracy of the sparse joint model (balance).}",
+          header, "\\begin{tabular}{l*{12}{r}}", "\\toprule", lambda_head("Design"),
+          design_rows(held_cells, "Sparse joint, balance (default)", "direction", fmt),
           "\\bottomrule", "\\end{tabular}", "\\end{center}")
 writeLines(main, file.path(out_dir, "scenario_main.tex"))
 
@@ -210,6 +233,7 @@ for (split in c("heldout", "dev")) {
   set_name <- if (split == "heldout") "held-out" else "development"
   writeLines(c(
     supp_table(cells, "rmse", names(methods), sprintf("Root mean squared error, %s landscapes.", set_name)), "",
+    supp_table(cells, "direction", names(methods)[-1L], sprintf("Direction accuracy, %s landscapes.", set_name)), "",
     supp_table(cells, "spearman", names(methods)[-1L], sprintf("Spearman correlation, %s landscapes.", set_name)), "",
     supp_table(cells, "coverage95", names(methods)[-1L], sprintf("Coverage of nominal 95\\%% intervals, %s landscapes.", set_name))
   ), file.path(out_dir, sprintf("scenario_supp_%s.tex", split)))
@@ -229,6 +253,14 @@ cat("== held-out ratio, two-layer\n"); show(held_cells, "Two-layer pipeline", "r
 cat("== held-out Spearman, sparse joint balance\n"); show(held_cells, "Sparse joint, balance (default)", "spearman")
 cat("== held-out Spearman, two-layer\n"); show(held_cells, "Two-layer pipeline", "spearman")
 cat("== held-out coverage, sparse joint balance\n"); show(held_cells, "Sparse joint, balance (default)", "coverage95")
+for (label in names(methods)[-1L]) {
+  d <- held_cells$direction[held_cells$label == label]
+  cat("== held-out direction,", label, ": above 1/2 in", sum(d > 0.5), "of", length(d), "; range", round(range(d), 2), "\n")
+}
+cat("== held-out direction at d1, sparse joint balance\n")
+print(round(range(held_cells$direction[held_cells$label == "Sparse joint, balance (default)" & held_cells$stratum == "d1"]), 3))
+d <- dev_cells$direction[dev_cells$label == "Sparse joint, balance (default)"]
+cat("== development direction, balance: above 1/2 in", sum(d > 0.5), "of", length(d), "; range", round(range(d), 2), "\n")
 cat("== development ratio, sparse joint balance\n"); show(dev_cells, "Sparse joint, balance (default)", "ratio")
 cat("== held-out ratio, alfakR: cells below 1\n")
 a <- held_cells[held_cells$label == "alfakR (minobs = 20)", ]
