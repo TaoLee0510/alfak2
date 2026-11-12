@@ -12,7 +12,8 @@ as_alfakR(
   nb = 1e+07,
   correct_efflux = FALSE,
   xval = TRUE,
-  landscape_data_output = FALSE
+  landscape_data_output = FALSE,
+  first_time = 0
 )
 }
 \arguments{
@@ -37,6 +38,10 @@ no pairs and \code{R2R} is \code{NA}.}
 counterpart of alfakR's Kriging models: a list with elements \code{mean} and
 \code{median}, each an object whose \code{\link[=predict]{predict()}} method returns the fitness of
 any karyotypes on the same scale as \code{landscape}.}
+
+\item{first_time}{Time of the first sample on alfakR's time axis (the
+first passage time, or column name times \code{dt}); sets the time 0 of the
+reported frequencies.}
 }
 \value{
 An \code{alfak2_alfakR_output} list with \code{bootstrap_res}, \code{landscape},
@@ -67,6 +72,15 @@ the model's prediction and its \code{sd} the calibrated standard deviation,
 while each is also the summary of \code{landscape_posterior_samples}, as in
 alfakR. \code{initial_fitness} equals \code{final_fitness}: the model has no
 separate first estimate.
+
+The frequencies of the frequent karyotypes follow alfakR's convention:
+they are the frequencies at time 0 of alfakR's time axis, from which
+alfakR projects to time \code{t} as \code{x0 * exp(f * t)}. The model estimates them
+at the first sample, so each draw is moved back from \code{first_time}, the
+time of the first sample on that axis, with the draw's \code{final_fitness};
+projecting the reported frequencies to \code{first_time} in alfakR's way gives
+back the model's frequencies at the first sample. With \code{first_time = 0}
+the two coincide.
 
 The scale is alfakR's. Fitness is the net growth rate per unit of time,
 shifted so that the count-weighted mean of the major karyotypes is
