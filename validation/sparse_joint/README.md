@@ -202,10 +202,50 @@ it passed every criterion and the free model did not. It assumes that fitness
 before the first sample resembled fitness between the samples. On simulated
 landscapes that changed at the first sample it was still the more accurate
 of the two (stress scenarios, below), which matters for patients treated
-between the samples. Its history (by default the interval between the
-samples) is too short when the samples are close: at 30 days, about 27
-divisions, it predicts worse than the free model, at 60 days as well. It takes
-about 1.5 times as long. `initial_state = "free"` gives the earlier model; the
+between the samples. Up to 8327282 its history was the interval between the
+samples, which is too short when the samples are close: at 30 days, about 27
+divisions, it predicted worse than the free model, at 60 days as well. Since
+2026-11-13 the history is chosen by marginal likelihood (next section). It
+takes about 1.5 times as long as the free model with a fixed history.
+
+## History of the balance prior
+
+The balance prior centres a non-major karyotype's first-sample abundance on
+what its major neighbours fed it over `history`. With `history` equal to the
+interval, samples a few days or weeks apart put that centre far below the
+abundance the neighbours reached over the population's real history; the
+model then overestimated their fitness and the predictions spread far more
+than the truth (one-step RMSE 2.3–2.6 times that of predicting no
+differences at 6 days). `validation/sparse_joint/short_interval/` has the
+diagnosis; its README the numbers.
+
+- The history is now chosen among the interval and 30, 100, 300, 1000 and
+  3000 divisions at the assumed birth rate that are longer than it, by the
+  Laplace marginal likelihood of a fit at each. Chosen freely, the marginal
+  likelihood preferred 30–100 divisions even at intervals of 180–1080 days,
+  where that cost up to 11% RMSE; hence no candidate is shorter than the
+  interval.
+- Development landscapes: core scenarios within +2.6% RMSE of the earlier
+  default (largest `long_500_700_1080d`); `short_500_700_30d` 16–27% lower.
+  Held-out landscapes: core within +0.3% (pooled 0.6–1.1% lower), stress
+  scenarios 2–5% lower, `short_500_700_30d` 18–27% lower. On new short-interval
+  landscapes (6–42 days, seed base 94000) one-step RMSE fell by 71% and 60% at
+  6 days (first sample at day 120 and 1440), 4–10% at 18 days, and not at 42.
+- Estimating the history as an outer parameter with the scales was faster but
+  unreliable: the joint optimum has separate basins for a short history with
+  large scales and a long one with small scales, and a quarter of the
+  development fits ended in the worse one.
+- Shrinking the trend (a lower or exponential prior on its scales, or nested
+  trend terms) did not help at short intervals and lowered rank agreement.
+- The calibration constants were kept: refitted, they change little (floor
+  0.0067, deficit 0.53) and would bring short-interval coverage to 90%.
+- Cost: one fit per candidate, 2.9 times the earlier fit time on the
+  development benchmark and up to 13 times at intervals of days.
+- A cohort fit with `initial_state = "balance"` chooses each sample's history
+  in the same way, by a single-sample fit; on cohorts of eight 6-day samples
+  this lowered one-step RMSE by 58%, and at 360 days it is neutral (mean
+  RMSE ratio 0.99 on development, 1.01 on held-out cohorts). The cohort fit
+  takes 2.4–3.7 times as long. `initial_state = "free"` gives the earlier model; the
 benchmark entries without "balance" in their name use it.
 
 ## Development scoreboard
@@ -605,9 +645,9 @@ rest of the landscape. On `dev_L10_P01_unbalanced_3000_100_360d` it is 0.43
 
 ## Open
 
-- The default model misses the information in a deep first sample (the
-  failing safety cell); balance reads it but needs a history at least as long
-  as the cloud took to build, which the interval between close samples is not.
+- The free model misses the information in a deep first sample (the failing
+  safety cell); balance reads it, with a history now chosen by marginal
+  likelihood (above).
 - The unknown birth rate has no remedy beyond the range fit. Intervals are too
   narrow when the assumed rate is too low, because both calibration terms
   scale with it.
@@ -629,8 +669,10 @@ rest of the landscape. On `dev_L10_P01_unbalanced_3000_100_360d` it is 0.43
   with intervals excluding zero.
 - Balance within a cohort helps where it runs but fails on 2 of 12
   development cohorts; falling back to free initial abundances when it fails,
-  or a marginal likelihood from the expected information, is untried. A
-  longer default history for balance has not been tried either.
+  or a marginal likelihood from the expected information, is untried.
+- On rugged landscapes with few clones (wavelength 0.2) the predictions of
+  unobserved karyotypes stay poor (landscape r about 0.2) whatever the
+  history; a residual correlated over the lattice is the next candidate.
 
 ## Files
 

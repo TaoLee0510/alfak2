@@ -78,8 +78,14 @@ Unlike a single sample, a cohort starts free by default: with balance,
 the scale optimisation of some simulated cohorts failed and left no
 marginal likelihood to choose the trend by.}
 
-\item{history}{Time, in units of \code{dt}, over which the balance built up.
-Defaults to the interval between the samples.}
+\item{history}{With \code{initial_state = "balance"}, the time over which each
+sample's balance built up: one value, or one per sample. By default each
+sample's history is chosen as \code{\link[=fit_sparse_joint]{fit_sparse_joint()}} chooses it, by a
+single-sample fit with the cohort's settings
+(\code{diagnostics$history_profiles}); the cohort is then fitted once with
+those histories. A history describes the population a sample came from,
+and choosing all of them jointly would multiply the number of cohort fits
+by the candidates of every sample.}
 
 \item{balance_sd}{Spread, on the log scale, of initial abundances around
 the balance.}

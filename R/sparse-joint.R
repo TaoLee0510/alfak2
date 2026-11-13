@@ -270,6 +270,17 @@ sparse_joint_self_probability <- function(karyotypes, beta) {
   exp(rowSums(matrix(log(stay)[karyotypes + 1L], nrow = nrow(karyotypes))))
 }
 
+# Candidate histories of the balance prior: the interval, and 30, 100, 300,
+# 1000 and 3000 divisions at the baseline birth rate where longer than the
+# interval. Freely chosen by marginal likelihood, the history went to 30-100
+# divisions even where the interval was 180-1080 days and predicted better;
+# no candidate is therefore shorter than the interval
+# (validation/sparse_joint/short_interval).
+sparse_joint_history_candidates <- function(dt, birth_rate) {
+  divisions <- c(30, 100, 300, 1000, 3000) / birth_rate
+  c(dt, divisions[divisions > dt])
+}
+
 # Everything a fit needs that follows from the data and the settings alone:
 # the domain, the division kernel, the trend design and the TMB inputs. Used by
 # the fit and to rebuild a fit's posterior later from its stored settings.
@@ -412,11 +423,19 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 #'   starting point. Balance takes fitness before the first sample to have
 #'   resembled fitness between the samples. On simulated landscapes it was
 #'   still more accurate than `"free"` when the landscape changed at the first
-#'   sample, as under a new treatment, but less accurate when the samples were
-#'   only about 30 divisions apart: `history` then defaults to a time too
-#'   short for the balance to build up.
-#' @param history Time, in units of `dt`, over which the balance built up.
-#'   Defaults to the interval between the samples.
+#'   sample, as under a new treatment.
+#' @param history Time, in units of `dt`, over which the balance built up
+#'   before the first sample. By default it is chosen among the interval
+#'   between the samples and 30, 100, 300, 1000 and 3000 divisions at
+#'   `birth_rate` that are longer than the interval: the model is fitted at
+#'   each and the fit with the highest marginal likelihood is kept, so a fit
+#'   takes up to six times as long; `diagnostics$history_profile` lists the
+#'   candidates. A single value fixes the history; several values are the
+#'   candidates. Up to alfak2 8327282 the history was the interval itself
+#'   (`history = dt`). With samples a few weeks apart that is far shorter than
+#'   the population has been evolving: the balance prior then holds the
+#'   neighbours of the major karyotypes far below their observed abundance, and
+#'   their fitness is overestimated (validation/sparse_joint/short_interval).
 #' @param balance_sd Spread, on the log scale, of initial abundances around
 #'   the balance.
 #' @param calibration Constants `floor` and `deficit` that turn the model's
@@ -465,9 +484,33 @@ fit_sparse_joint <- function(counts,
   }
   initial_state <- match.arg(initial_state)
   calibration <- sparse_joint_validate_calibration(calibration)
-  if (is.null(history)) history <- data$dt
-  validate_scalar(history, "history", lower = .Machine$double.eps)
+  if (is.null(history)) {
+    history <- if (initial_state == "balance") sparse_joint_history_candidates(data$dt, birth_rate) else data$dt
+  }
+  if (!is.numeric(history) || !length(history)) stop("`history` must be one or more positive times.", call. = FALSE)
+  for (h in history) validate_scalar(h, "history", lower = .Machine$double.eps)
+  # Without the balance prior the history does not enter the model.
+  if (initial_state == "free") history <- history[[1L]]
   validate_scalar(balance_sd, "balance_sd", lower = .Machine$double.eps)
+  if (length(history) > 1L) {
+    # Candidate histories differ only in the means of the balance prior, so
+    # their marginal likelihoods compare directly: fit at each, keep the best.
+    started <- proc.time()[["elapsed"]]
+    arguments <- mget(names(formals(sys.function())), envir = environment())
+    arguments$counts <- data
+    fits <- lapply(history, function(h) {
+      arguments$history <- h
+      do.call(fit_sparse_joint, arguments)
+    })
+    objective <- vapply(fits, function(f) f$diagnostics$objective, numeric(1))
+    fit <- fits[[which.min(objective)]]
+    fit$diagnostics$history_profile <- data.frame(
+      history = history, objective = objective,
+      convergence = vapply(fits, function(f) f$diagnostics$convergence, numeric(1))
+    )
+    fit$diagnostics$seconds <- proc.time()[["elapsed"]] - started
+    return(fit)
+  }
   started <- proc.time()[["elapsed"]]
   counts <- data$counts
   observed_cn <- parse_karyotypes(rownames(counts))
