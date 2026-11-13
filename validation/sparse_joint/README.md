@@ -110,6 +110,27 @@ and 1.00, except after 1080 days (0.92 / 0.88 / 0.84). A free multiplier on
 the model's standard deviation fitted to zero once the other two terms were
 present, so it was fixed at one.
 
+**A deficit for unobserved karyotypes (2026-11-13).** On moderately rugged
+landscapes (wavelengths 0.4-0.8), in young populations or at intervals of
+days to weeks, the predicted drop of unobserved karyotypes is too shallow (at
+0.4 about 60% of the true drop), and their intervals covered as few as 0.79
+(`unobserved_bias/`). Pooled over the development landscapes, the diagnosis
+set of `short_interval/` and the paper-sized set of `lattice_residual/`, the
+factor the intervals needed varied with the regime, from about 0.4 on smooth
+landscapes to 1.8, and neither the predicted drop nor the interval told the
+regimes apart; refitting the constants by likelihood narrowed the
+overcovered cells and widened none. Karyotypes seen in neither sample now
+have a deficit of 1.1, the smallest that keeps every non-stress regime at 0.90
+or more; observed karyotypes keep 0.6 and the floor 0.009. Point predictions
+are unchanged; unobserved intervals are 1.1-1.9 times as wide (median 1.4),
+and on smooth or very rugged landscapes cover close to all karyotypes.
+`calibration = c(floor = 0.009, deficit = 0.6)` restores the earlier
+intervals. Confirmed once on 84 new paper-sized datasets (seed base 96000):
+unobserved karyotypes at distances one and two were covered 0.93 / 0.90 at
+wavelength 0.4 (0.84 / 0.78 before), 0.97 / 0.96 at 0.8 (0.94 / 0.93) and
+1.00 / 1.00 at 0.2 (0.97 / 0.99); the lowest cell, distance two at 18 days and
+wavelength 0.4, was 0.899 (0.771).
+
 ## The two rates the model is given
 
 Typical scenario, 12 datasets; the simulated populations divide 0.9 times per
@@ -680,8 +701,13 @@ rest of the landscape. On `dev_L10_P01_unbalanced_3000_100_360d` it is 0.43
   karyotypes, not an error in use.
 - In young populations (first sample at day 120, paper-sized passages) at
   wavelength 0.4, unobserved karyotypes are overestimated (bias +0.06 at
-  distance one, +0.11 at two) and their 95% intervals cover 82-87%
-  (`lattice_residual/`).
+  distance one, +0.11 at two). Their intervals now cover at least 90%
+  (deficit for unobserved karyotypes, above), but the bias remains. It is not
+  the history, the spread around balance, the residual scale or the balance
+  prior, nor the use of the posterior mode: the posterior mean lies much
+  deeper, closer to the truth there but too deep where the mode was right,
+  and worse on the development benchmark at wavelength 0.4
+  (`unobserved_bias/`).
 
 ## Files
 

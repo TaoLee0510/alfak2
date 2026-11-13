@@ -160,7 +160,9 @@ Two samples identify fitness differences, not absolute fitness. Use
 `relative_fitness`, which is measured from the count-weighted mean of the
 major karyotypes, and `relative_sd`. `relative_sd` adds two terms of model
 error, fitted to simulated landscapes, to the model's own posterior standard
-deviation (`relative_sd_model`), which is too small on its own.
+deviation (`relative_sd_model`), which is too small on its own. The error grows
+with the predicted difference, and more for karyotypes seen in neither
+sample: how far below the clones they lie is not identified by zero counts.
 
 The baseline birth rate has to be supplied; two samples do not identify it.
 Rankings hardly depend on it. Fitness differences between well-sampled clones

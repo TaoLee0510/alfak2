@@ -61,7 +61,11 @@ lr_config <- function(output_dir = NULL, set = c("rugged", "heldout")) {
   config$methods <- list(
     zero = list(type = "zero"),
     # The package as committed (af362af), at its defaults.
-    base = sparse("af362af")
+    base = sparse("af362af"),
+    # Build cal1: af362af with the domain-coverage diagnostics and a deficit
+    # of its own for unobserved karyotypes (../unobserved_bias), at its
+    # defaults. Point predictions are those of af362af.
+    cal1 = sparse("cal1")
   )
   config
 }
