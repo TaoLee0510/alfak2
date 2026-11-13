@@ -197,8 +197,13 @@ in the first sample inform their fitness as well. This takes fitness before
 the first sample to resemble fitness between the samples. On simulated
 landscapes it was more accurate than `initial_state = "free"`, which uses the
 first sample only as a starting point, even when the landscape changed at the
-first sample, but less accurate when the samples were only about 30 divisions
-apart.
+first sample. The time over which the balance built up (`history`) is chosen
+by marginal likelihood among the interval and longer spans. With samples only
+about 30 divisions apart, its errors were 4-10% larger than those of the free
+model, but it ranked karyotypes better; at about 60 divisions the two were
+equally accurate. Up to alfak2 8327282 the balance built up over the interval
+alone, and at about 30 divisions its errors were twice those of the free
+model.
 
 ### Outputs in the format of alfakR
 
