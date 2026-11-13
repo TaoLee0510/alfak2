@@ -672,7 +672,16 @@ rest of the landscape. On `dev_L10_P01_unbalanced_3000_100_360d` it is 0.43
   or a marginal likelihood from the expected information, is untried.
 - On rugged landscapes with few clones (wavelength 0.2) the predictions of
   unobserved karyotypes stay poor (landscape r about 0.2) whatever the
-  history; a residual correlated over the lattice is the next candidate.
+  history. A residual correlated over the lattice would not help: the counts
+  carry next to nothing about how unobserved karyotypes deviate from the
+  trend, and shifts drawn from the fitted residuals change their error by
+  less than 2% (`lattice_residual/`). Most of the cross-validation's
+  underestimate of held-out frequent karyotypes is the selection of those
+  karyotypes, not an error in use.
+- In young populations (first sample at day 120, paper-sized passages) at
+  wavelength 0.4, unobserved karyotypes are overestimated (bias +0.06 at
+  distance one, +0.11 at two) and their 95% intervals cover 82-87%
+  (`lattice_residual/`).
 
 ## Files
 
