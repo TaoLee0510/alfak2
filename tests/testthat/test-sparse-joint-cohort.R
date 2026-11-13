@@ -108,3 +108,23 @@ test_that("the trend is per sample, shared, or chosen by marginal likelihood", {
   expect_equal(chosen$diagnostics$trend, names(which.min(objective)))
   expect_equal(chosen$landscape, if (which.min(objective) == 1L) shared$landscape else sample$landscape)
 })
+
+test_that("with balance, each sample's history is chosen as for a single sample", {
+  sim <- simulate_cohort_counts()
+  cohort <- fit_sparse_joint_cohort(sim$samples, dt = sim$dt, beta = sim$beta, trend = "sample",
+                                    major_frequency = 0.05, max_cn = 4, initial_state = "balance")
+  single <- vapply(names(sim$samples), function(s) {
+    fit_sparse_joint(sim$samples[[s]], dt = sim$dt[match(s, names(sim$samples))], beta = sim$beta,
+                     major_frequency = 0.05, max_cn = 4)$settings$history
+  }, numeric(1))
+  expect_equal(cohort$diagnostics$history, single)
+  expect_equal(names(cohort$diagnostics$history_profiles), names(sim$samples))
+  given <- fit_sparse_joint_cohort(sim$samples, dt = sim$dt, beta = sim$beta, trend = "sample",
+                                   major_frequency = 0.05, max_cn = 4, initial_state = "balance",
+                                   history = unname(single))
+  expect_equal(given$diagnostics$objective, cohort$diagnostics$objective)
+  expect_null(given$diagnostics$history_profiles)
+  # Free by default: no history to choose.
+  expect_null(fit_sparse_joint_cohort(sim$samples, dt = sim$dt, beta = sim$beta, trend = "sample",
+                                      major_frequency = 0.05, max_cn = 4)$diagnostics$history_profiles)
+})

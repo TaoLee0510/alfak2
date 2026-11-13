@@ -41,6 +41,14 @@
 #'   Unlike a single sample, a cohort starts free by default: with balance,
 #'   the scale optimisation of some simulated cohorts failed and left no
 #'   marginal likelihood to choose the trend by.
+#' @param history With `initial_state = "balance"`, the time over which each
+#'   sample's balance built up: one value, or one per sample. By default each
+#'   sample's history is chosen as [fit_sparse_joint()] chooses it, by a
+#'   single-sample fit with the cohort's settings
+#'   (`diagnostics$history_profiles`); the cohort is then fitted once with
+#'   those histories. A history describes the population a sample came from,
+#'   and choosing all of them jointly would multiply the number of cohort fits
+#'   by the candidates of every sample.
 #' @inheritParams fit_sparse_joint
 #'
 #' @return An `alfak2_sparse_joint_cohort_fit` object. `landscape` has one row
@@ -72,6 +80,15 @@ fit_sparse_joint_cohort <- function(samples,
     stop("`samples` must be a list of count matrices or `alfak2_data` objects.", call. = FALSE)
   }
   trend_mode <- match.arg(trend)
+  # With the balance prior and no history given, each sample's history is
+  # chosen as fit_sparse_joint() chooses it, once, before the trend.
+  history_profiles <- NULL
+  if (is.null(history) && match.arg(initial_state) == "balance") {
+    arguments <- mget(names(formals(sys.function())), envir = environment())
+    chosen <- sparse_joint_cohort_histories(arguments)
+    history <- chosen$history
+    history_profiles <- chosen$profiles
+  }
   if (trend_mode == "select") {
     # Fit with each trend and keep the one the data support better. Both
     # models have the same hyperparameters, so their Laplace marginal
@@ -94,6 +111,7 @@ fit_sparse_joint_cohort <- function(samples,
     best <- fits[[which(usable)[which.min(objective[usable])]]]
     best$diagnostics$trend_objective <- objective
     best$diagnostics$seconds <- sum(vapply(fits[!failed], function(fit) fit$diagnostics$seconds, numeric(1)))
+    best$diagnostics$history_profiles <- history_profiles
     return(best)
   }
   sharing <- match.arg(sharing)
@@ -328,7 +346,8 @@ fit_sparse_joint_cohort <- function(samples,
       dropped_cells = sum(vapply(domains, `[[`, numeric(1), "dropped_cells")),
       sharing = sharing, trend = trend_mode, birth_rate = birth_rate,
       fitted_birth_rate = exp(mean(vapply(sample_trend, function(t) t$coefficients[[1L]], numeric(1)))),
-      initial_state = initial_state, beta = beta,
+      initial_state = initial_state, history = stats::setNames(history, names(samples)),
+      history_profiles = history_profiles, beta = beta,
       min_cn = as.integer(min_cn), max_cn = as.integer(max_cn),
       seconds = proc.time()[["elapsed"]] - started
     )
@@ -458,4 +477,30 @@ print.alfak2_sparse_joint_cohort_fit <- function(x, ...) {
       signif(x$trend$scales[["deviation"]], 3), "\n")
   cat("  baseline birth rate:", d$birth_rate, " convergence:", d$convergence, "\n")
   invisible(x)
+}
+
+# Each sample's history for the balance prior, chosen by a single-sample fit
+# with the cohort's settings and copy-number bounds. `arguments` are those of
+# fit_sparse_joint_cohort().
+sparse_joint_cohort_histories <- function(arguments) {
+  samples <- arguments$samples
+  n_sample <- length(samples)
+  is_data <- vapply(samples, inherits, logical(1), what = "alfak2_data")
+  dt <- arguments$dt
+  if (any(!is_data) && (is.null(dt) || !length(dt) %in% c(1L, n_sample))) {
+    stop("`dt` must give one interval, or one per sample.", call. = FALSE)
+  }
+  if (!is.null(dt)) dt <- rep_len(dt, n_sample)
+  data <- lapply(seq_len(n_sample), function(s) {
+    if (is_data[[s]]) samples[[s]] else prepare_alfak2_data(samples[[s]], dt = dt[[s]], beta = arguments$beta)
+  })
+  max_cn <- arguments$max_cn
+  if (is.null(max_cn)) max_cn <- max(vapply(data, function(d) max(parse_karyotypes(rownames(d$counts))), numeric(1))) + 1L
+  single <- arguments[intersect(names(arguments), names(formals(fit_sparse_joint)))]
+  single[c("counts", "dt", "beta", "history", "max_cn", "initial_state")] <- NULL
+  fits <- lapply(data, function(d) {
+    do.call(fit_sparse_joint, c(list(counts = d, max_cn = max_cn, initial_state = "balance"), single))
+  })
+  list(history = vapply(fits, function(f) f$settings$history, numeric(1)),
+       profiles = stats::setNames(lapply(fits, function(f) f$diagnostics$history_profile), names(samples)))
 }

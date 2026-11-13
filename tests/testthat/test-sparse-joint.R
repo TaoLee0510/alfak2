@@ -266,3 +266,29 @@ test_that("mutation-selection balance is the default initial state", {
   expect_equal(fit$diagnostics$initial_state, "balance")
   expect_equal(fit$settings$initial_state, "balance")
 })
+
+test_that("by default the history is chosen among the interval and longer division counts", {
+  expect_equal(sparse_joint_history_candidates(6, 1), c(6, 30, 100, 300, 1000, 3000))
+  expect_equal(sparse_joint_history_candidates(360, 1), c(360, 1000, 3000))
+  expect_equal(sparse_joint_history_candidates(360, 0.5), c(360, 600, 2000, 6000))
+  expect_equal(sparse_joint_history_candidates(7000, 1), 7000)
+  sim <- simulate_balanced_counts()
+  fit <- function(...) fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, major_frequency = 0.05,
+                                        max_cn = 4, balance_sd = 0.3, ...)
+  chosen <- fit()
+  profile <- chosen$diagnostics$history_profile
+  expect_equal(profile$history, sparse_joint_history_candidates(sim$dt, 1))
+  expect_equal(chosen$settings$history, profile$history[which.min(profile$objective)])
+  expect_equal(chosen$diagnostics$objective, min(profile$objective))
+  expect_equal(chosen$summary, fit(history = chosen$settings$history)$summary)
+  # The behaviour of alfak2 8327282 and earlier: the interval itself.
+  interval <- fit(history = sim$dt)
+  expect_null(interval$diagnostics$history_profile)
+  expect_equal(interval$settings$history, sim$dt)
+  expect_equal(fit(history = c(sim$dt, 500))$diagnostics$history_profile$history, c(sim$dt, 500))
+  expect_error(fit(history = c(sim$dt, 0)), "history")
+  # Without the balance prior there is nothing to choose.
+  expect_null(fit(initial_state = "free")$diagnostics$history_profile)
+  # The alfakR outputs are built from the chosen fit.
+  expect_true(is.finite(as_alfakR(chosen, minobs = 20, nboot = 4)$xval$R2R))
+})

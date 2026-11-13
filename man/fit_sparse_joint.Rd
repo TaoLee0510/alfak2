@@ -74,12 +74,20 @@ estimates one for every karyotype and so uses the first sample only as a
 starting point. Balance takes fitness before the first sample to have
 resembled fitness between the samples. On simulated landscapes it was
 still more accurate than \code{"free"} when the landscape changed at the first
-sample, as under a new treatment, but less accurate when the samples were
-only about 30 divisions apart: \code{history} then defaults to a time too
-short for the balance to build up.}
+sample, as under a new treatment.}
 
-\item{history}{Time, in units of \code{dt}, over which the balance built up.
-Defaults to the interval between the samples.}
+\item{history}{Time, in units of \code{dt}, over which the balance built up
+before the first sample. By default it is chosen among the interval
+between the samples and 30, 100, 300, 1000 and 3000 divisions at
+\code{birth_rate} that are longer than the interval: the model is fitted at
+each and the fit with the highest marginal likelihood is kept, so a fit
+takes up to six times as long; \code{diagnostics$history_profile} lists the
+candidates. A single value fixes the history; several values are the
+candidates. Up to alfak2 8327282 the history was the interval itself
+(\code{history = dt}). With samples a few weeks apart that is far shorter than
+the population has been evolving: the balance prior then holds the
+neighbours of the major karyotypes far below their observed abundance, and
+their fitness is overestimated (validation/sparse_joint/short_interval).}
 
 \item{balance_sd}{Spread, on the log scale, of initial abundances around
 the balance.}
