@@ -54,6 +54,11 @@
 #' @return An `alfak2_sparse_joint_cohort_fit` object. `landscape` has one row
 #'   per karyotype in any sample's domain, with the shared fitness; `samples`
 #'   has one summary per sample, as returned by [fit_sparse_joint()].
+#'   `diagnostics$domain_coverage` is the table of [fit_sparse_joint()] with a
+#'   `sample` column, one row per sample and timepoint. If a timepoint of any
+#'   sample has no cell inside that sample's domain, the function stops with
+#'   an error of class `alfak2_domain_coverage_error` that names the sample;
+#'   this is checked for every sample before any is fitted.
 #' @export
 fit_sparse_joint_cohort <- function(samples,
                                     dt = NULL,
@@ -99,7 +104,7 @@ fit_sparse_joint_cohort <- function(samples,
                error = function(e) e)
     })
     failed <- vapply(fits, inherits, logical(1), what = "error")
-    if (all(failed)) stop(conditionMessage(fits[[1L]]), call. = FALSE)
+    if (all(failed)) stop(fits[[1L]])
     objective <- vapply(fits, function(fit) if (inherits(fit, "error")) Inf else fit$diagnostics$objective, numeric(1))
     # A fit whose scale optimisation failed has no marginal likelihood to
     # compare; without one on either side there is nothing to choose by.
@@ -166,9 +171,7 @@ fit_sparse_joint_cohort <- function(samples,
   domains <- lapply(data, function(d) {
     sparse_joint_domain(d$counts, major_frequency, major_count, max_states, as.integer(min_cn), as.integer(max_cn))
   })
-  if (any(vapply(domains, function(d) any(c(sum(d$y0), sum(d$y1)) <= 0), logical(1)))) {
-    stop("A timepoint has no cell inside its sample's model domain.", call. = FALSE)
-  }
+  coverage <- sparse_joint_cohort_coverage(data, domains, names(samples), major_frequency, major_count)
 
   # States of all samples, concatenated; nodes are their distinct karyotypes.
   sizes <- vapply(domains, function(d) length(d$labels), integer(1))
@@ -344,6 +347,7 @@ fit_sparse_joint_cohort <- function(samples,
       shared_nodes = sum(in_domain_of > 1L),
       dropped_karyotypes = sum(lengths(lapply(domains, `[[`, "dropped"))),
       dropped_cells = sum(vapply(domains, `[[`, numeric(1), "dropped_cells")),
+      domain_coverage = coverage,
       sharing = sharing, trend = trend_mode, birth_rate = birth_rate,
       fitted_birth_rate = exp(mean(vapply(sample_trend, function(t) t$coefficients[[1L]], numeric(1)))),
       initial_state = initial_state, history = stats::setNames(history, names(samples)),
@@ -475,8 +479,28 @@ print.alfak2_sparse_joint_cohort_fit <- function(x, ...) {
   cat("  samples:", d$n_samples, " karyotypes:", d$n_nodes, "(", d$shared_nodes, "in more than one sample )\n")
   cat("  sharing:", d$sharing, " trend:", d$trend, " between-sample deviation:",
       signif(x$trend$scales[["deviation"]], 3), "\n")
+  if (!is.null(d$domain_coverage)) {
+    lowest <- d$domain_coverage[which.min(d$domain_coverage$fraction), ]
+    cat("  cells in the domain: lowest", sprintf("%.0f%%", 100 * lowest$fraction),
+        "(sample", lowest$sample, lowest$timepoint, ")\n")
+  }
   cat("  baseline birth rate:", d$birth_rate, " convergence:", d$convergence, "\n")
   invisible(x)
+}
+
+# Coverage of each sample's domain, by sample and timepoint; an error if a
+# timepoint of any sample has no cell in its domain.
+sparse_joint_cohort_coverage <- function(data, domains, sample_names, major_frequency, major_count) {
+  coverage <- do.call(rbind, lapply(seq_along(data), function(s) {
+    cbind(sample = sample_names[[s]],
+          sparse_joint_domain_coverage(data[[s]]$counts, domains[[s]], major_frequency, major_count),
+          stringsAsFactors = FALSE)
+  }))
+  rownames(coverage) <- NULL
+  if (any(coverage$cells_in_domain <= 0)) {
+    sparse_joint_coverage_error(coverage, "A timepoint has no cell inside its sample's model domain.", by_sample = TRUE)
+  }
+  coverage
 }
 
 # Each sample's history for the balance prior, chosen by a single-sample fit
@@ -496,6 +520,20 @@ sparse_joint_cohort_histories <- function(arguments) {
   })
   max_cn <- arguments$max_cn
   if (is.null(max_cn)) max_cn <- max(vapply(data, function(d) max(parse_karyotypes(rownames(d$counts))), numeric(1))) + 1L
+  # Every sample's domain must hold cells at both timepoints; checked for all
+  # samples before any is fitted, so that the error names the sample.
+  sample_names <- if (is.null(names(samples))) paste0("sample", seq_len(n_sample)) else names(samples)
+  in_bounds <- vapply(data, function(d) {
+    cn <- parse_karyotypes(rownames(d$counts))
+    all(cn >= arguments$min_cn & cn <= max_cn) && all(colSums(d$counts) > 0)
+  }, logical(1))
+  if (all(in_bounds)) {
+    domains <- lapply(data, function(d) {
+      sparse_joint_domain(d$counts, arguments$major_frequency, arguments$major_count, arguments$max_states,
+                          as.integer(arguments$min_cn), as.integer(max_cn))
+    })
+    sparse_joint_cohort_coverage(data, domains, sample_names, arguments$major_frequency, arguments$major_count)
+  }
   single <- arguments[intersect(names(arguments), names(formals(fit_sparse_joint)))]
   single[c("counts", "dt", "beta", "history", "max_cn", "initial_state")] <- NULL
   fits <- lapply(data, function(d) {

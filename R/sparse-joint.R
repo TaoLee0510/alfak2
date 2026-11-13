@@ -74,6 +74,75 @@ sparse_joint_domain <- function(counts, major_frequency, major_count, max_states
        dropped = observed[outside], dropped_cells = sum(counts[outside, ]))
 }
 
+# How much of each sample the domain holds: per timepoint, its cells and those
+# inside the domain, its karyotypes, those that meet the share and count of a
+# major in that sample (`major_candidates`) and the majors seen in it, the
+# karyotypes both samples share, and the median distance from its cells
+# outside the domain to the nearest major.
+sparse_joint_domain_coverage <- function(counts, domain, major_frequency, major_count) {
+  labels <- rownames(counts)
+  inside <- labels %in% domain$labels
+  majors <- labels %in% domain$labels[seq_len(domain$n_major)]
+  total <- rowSums(counts)
+  distance <- rep(NA_real_, length(labels))
+  if (any(!inside)) distance[!inside] <- sparse_joint_major_distance(parse_karyotypes(labels[!inside]), domain$major)
+  rows <- lapply(seq_len(ncol(counts)), function(t) {
+    cells <- counts[, t]
+    out <- !inside & cells > 0
+    data.frame(
+      timepoint = colnames(counts)[[t]], cells = sum(cells), cells_in_domain = sum(cells[inside]),
+      fraction = sum(cells[inside]) / sum(cells), karyotypes = sum(cells > 0),
+      major_candidates = sum(cells / sum(cells) >= major_frequency & total >= major_count),
+      majors = sum(majors & cells > 0), shared = sum(counts[, 1L] > 0 & counts[, 2L] > 0),
+      median_distance_outside = if (any(out)) stats::median(rep(distance[out], cells[out])) else NA_real_,
+      stringsAsFactors = FALSE
+    )
+  })
+  do.call(rbind, rows)
+}
+
+# Error for a sample with a timepoint that has no cell inside its domain. The
+# first sentence of the message is fixed, since callers match it; the rest
+# says why. `coverage` is attached to the condition; with `by_sample` it has
+# a `sample` column (cohort fits).
+sparse_joint_coverage_error <- function(coverage, first, by_sample = FALSE) {
+  plural <- function(n, word) sprintf("%d %s%s", as.integer(n), word, if (n == 1) "" else "s")
+  empty <- coverage[coverage$cells_in_domain <= 0, , drop = FALSE]
+  reasons <- vapply(seq_len(nrow(empty)), function(i) {
+    row <- empty[i, ]
+    same <- if (by_sample) coverage$sample == row$sample else rep(TRUE, nrow(coverage))
+    other <- coverage[same & coverage$timepoint != row$timepoint, , drop = FALSE]
+    where <- if (by_sample) sprintf("Sample %s, timepoint %s", row$sample, row$timepoint) else
+      sprintf("Timepoint %s", row$timepoint)
+    shared <- if (row$shared == 0) "the samples share no karyotype" else
+      sprintf("the samples share %s", plural(row$shared, "karyotype"))
+    majors <- other$majors[[1L]]
+    source <- if (majors == 1) sprintf("the only major comes from %s", other$timepoint[[1L]]) else
+      sprintf("all %d majors come from %s", as.integer(majors), other$timepoint[[1L]])
+    sprintf("%s: none of its %s lies within one step of a major karyotype; %s, %s, and the median distance to the nearest major is %s.",
+            where, plural(row$cells, "cell"), source, shared, format(row$median_distance_outside))
+  }, character(1))
+  message <- paste(c(first, reasons, "The samples may be too far apart, or one of them may be noisy."), collapse = " ")
+  stop(errorCondition(message, class = "alfak2_domain_coverage_error", coverage = coverage, call = NULL))
+}
+
+# Coverage of a sample's domain; an error if a timepoint has no cell in it.
+sparse_joint_check_coverage <- function(counts, major_frequency, major_count, max_states, min_cn, max_cn) {
+  domain <- sparse_joint_domain(counts, major_frequency, major_count, max_states, min_cn, max_cn)
+  coverage <- sparse_joint_domain_coverage(counts, domain, major_frequency, major_count)
+  if (any(coverage$cells_in_domain <= 0)) {
+    sparse_joint_coverage_error(coverage, "A timepoint has no cell inside the model domain.")
+  }
+  coverage
+}
+
+# "t0 812 of 1000 (81%), t1 640 of 1000 (64%)", optionally prefixed by sample.
+sparse_joint_format_coverage <- function(coverage) {
+  label <- if (is.null(coverage$sample)) coverage$timepoint else paste(coverage$sample, coverage$timepoint)
+  paste(sprintf("%s %d of %d (%.0f%%)", label, as.integer(coverage$cells_in_domain), as.integer(coverage$cells),
+                100 * coverage$fraction), collapse = ", ")
+}
+
 # Trend design: intercept, chromosome dosage and curvature around the
 # population's mean karyotype, and a shell term. The shell term is the
 # distance to the nearest major karyotype raised to `shell_power`. It is
@@ -373,6 +442,15 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 #' biases their fitness upwards. [predict()] places them at the level of the
 #' observed neighbours inside the domain.
 #'
+#' `diagnostics$domain_coverage` reports, for each timepoint, how many of its
+#' cells lie inside the domain. If a timepoint has none, typically because
+#' every major karyotype comes from the other sample and the two samples share
+#' no karyotype, there is nothing to fit and the function stops with an error
+#' of class `alfak2_domain_coverage_error`. Its message begins "A timepoint
+#' has no cell inside the model domain." and its `coverage` element holds the
+#' same table. [check_sparse_joint_counts()] summarises a count matrix before
+#' fitting.
+#'
 #' `relative_sd` is not the model's own posterior standard deviation, which
 #' is kept as `relative_sd_model`. That one takes the model to be exact, and
 #' on simulated populations its 95% intervals cover about three in four
@@ -449,6 +527,13 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 #'   `fitness_mean` is the net growth rate per unit of `dt`,
 #'   and `relative_fitness` is that rate minus the count-weighted mean over
 #'   the major karyotypes, with `relative_sd` its uncertainty.
+#'   `diagnostics$domain_coverage` has one row per timepoint: `cells`,
+#'   `cells_in_domain` and their ratio `fraction`, `karyotypes`,
+#'   `major_candidates` (karyotypes with at least `major_frequency` of that
+#'   sample and `major_count` cells over both), `majors` (major karyotypes seen
+#'   at that timepoint), `shared` (karyotypes seen at both timepoints) and
+#'   `median_distance_outside` (median distance from its cells outside the
+#'   domain to the nearest major karyotype).
 #' @export
 fit_sparse_joint <- function(counts,
                              dt = 1,
@@ -492,6 +577,18 @@ fit_sparse_joint <- function(counts,
   # Without the balance prior the history does not enter the model.
   if (initial_state == "free") history <- history[[1L]]
   validate_scalar(balance_sd, "balance_sd", lower = .Machine$double.eps)
+  counts <- data$counts
+  observed_cn <- parse_karyotypes(rownames(counts))
+  if (is.null(max_cn)) max_cn <- max(observed_cn) + 1L
+  validate_scalar(max_cn, "max_cn", lower = min_cn)
+  if (any(observed_cn < min_cn | observed_cn > max_cn)) {
+    stop("Observed karyotypes must lie within the copy-number bounds.", call. = FALSE)
+  }
+  if (any(colSums(counts) <= 0)) stop("Both timepoints need at least one cell.", call. = FALSE)
+  # Checked once, before any candidate history is fitted: a timepoint with no
+  # cell next to a major karyotype leaves nothing to fit.
+  coverage <- sparse_joint_check_coverage(counts, major_frequency, major_count, max_states,
+                                          as.integer(min_cn), as.integer(max_cn))
   if (length(history) > 1L) {
     # Candidate histories differ only in the means of the balance prior, so
     # their marginal likelihoods compare directly: fit at each, keep the best.
@@ -512,14 +609,6 @@ fit_sparse_joint <- function(counts,
     return(fit)
   }
   started <- proc.time()[["elapsed"]]
-  counts <- data$counts
-  observed_cn <- parse_karyotypes(rownames(counts))
-  if (is.null(max_cn)) max_cn <- max(observed_cn) + 1L
-  validate_scalar(max_cn, "max_cn", lower = min_cn)
-  if (any(observed_cn < min_cn | observed_cn > max_cn)) {
-    stop("Observed karyotypes must lie within the copy-number bounds.", call. = FALSE)
-  }
-  if (any(colSums(counts) <= 0)) stop("Both timepoints need at least one cell.", call. = FALSE)
 
   settings <- list(birth_rate = birth_rate, birth_rate_log_sd = birth_rate_log_sd,
                    major_frequency = major_frequency, major_count = major_count, max_states = max_states,
@@ -530,9 +619,6 @@ fit_sparse_joint <- function(counts,
   problem <- sparse_joint_problem(data, settings)
   domain <- problem$domain
   n <- length(domain$labels)
-  if (any(c(sum(domain$y0), sum(domain$y1)) <= 0)) {
-    stop("A timepoint has no cell inside the model domain.", call. = FALSE)
-  }
   kernel <- problem$kernel
   total <- problem$total
   centre <- problem$centre
@@ -591,6 +677,7 @@ fit_sparse_joint <- function(counts,
       finite_uncertainty = all(is.finite(g_hat[, 2L])) && all(is.finite(relative$sd)),
       n_states = n, n_major = domain$n_major, n_edges = length(kernel$from),
       dropped_karyotypes = length(domain$dropped), dropped_cells = domain$dropped_cells,
+      domain_coverage = coverage,
       birth_rate = birth_rate, fitted_birth_rate = exp(coef_hat[1L, 1L]),
       initial_state = initial_state, history = history,
       min_cn = as.integer(min_cn), max_cn = as.integer(max_cn),
@@ -664,6 +751,7 @@ print.alfak2_sparse_joint_fit <- function(x, ...) {
   cat("<alfak2_sparse_joint_fit>\n")
   cat("  states:", d$n_states, "(", d$n_major, "major )\n")
   cat("  observed karyotypes outside the domain:", d$dropped_karyotypes, "(", d$dropped_cells, "cells )\n")
+  if (!is.null(d$domain_coverage)) cat("  cells in the domain:", sparse_joint_format_coverage(d$domain_coverage), "\n")
   cat("  baseline birth rate:", d$birth_rate, " convergence:", d$convergence, "\n")
   invisible(x)
 }

@@ -292,3 +292,70 @@ test_that("by default the history is chosen among the interval and longer divisi
   # The alfakR outputs are built from the chosen fit.
   expect_true(is.finite(as_alfakR(chosen, minobs = 20, nboot = 4)$xval$R2R))
 })
+
+test_that("a timepoint with no cell next to a major karyotype stops with a typed error", {
+  # The second sample holds one clone; the first only single cells two or
+  # three steps from it, none of which can anchor the domain.
+  counts <- labelled_counts("2.2.2" = c(0, 20), "3.3.2" = c(1, 0), "1.1.2" = c(1, 0), "2.4.2" = c(1, 0),
+                            "4.2.3" = c(1, 0))
+  err <- tryCatch(fit_sparse_joint(counts, dt = 10, beta = 0.001), alfak2_domain_coverage_error = function(e) e)
+  expect_s3_class(err, "alfak2_domain_coverage_error")
+  expect_s3_class(err, "error")
+  expect_match(conditionMessage(err), "^A timepoint has no cell inside the model domain\\. ")
+  expect_match(conditionMessage(err), "Timepoint t0: none of its 4 cells lies within one step of a major karyotype; ",
+               fixed = TRUE)
+  expect_match(conditionMessage(err), "the only major comes from t1, the samples share no karyotype", fixed = TRUE)
+  expect_match(conditionMessage(err), "median distance to the nearest major is 2.", fixed = TRUE)
+  coverage <- err$coverage
+  expect_equal(coverage$timepoint, c("t0", "t1"))
+  expect_equal(coverage$cells, c(4, 20))
+  expect_equal(coverage$cells_in_domain, c(0, 20))
+  expect_equal(coverage$fraction, c(0, 1))
+  expect_equal(coverage$karyotypes, c(4, 1))
+  expect_equal(coverage$major_candidates, c(0, 1))
+  expect_equal(coverage$majors, c(0, 1))
+  expect_equal(coverage$shared, c(0, 0))
+  expect_equal(coverage$median_distance_outside, c(2, NA))
+  # The same with one history, and without the balance prior.
+  expect_error(fit_sparse_joint(counts, dt = 10, beta = 0.001, history = 10), class = "alfak2_domain_coverage_error")
+  expect_error(fit_sparse_joint(counts, dt = 10, beta = 0.001, initial_state = "free"),
+               class = "alfak2_domain_coverage_error")
+})
+
+test_that("a fit reports how many cells of each timepoint lie inside the domain", {
+  sim <- simulate_sparse_joint_counts()
+  # One distant karyotype is left out of the domain with its cells.
+  counts <- rbind(sim$counts, "4.4.4.4" = c(3, 0))
+  fit <- fit_sparse_joint(counts, dt = sim$dt, beta = sim$beta, major_frequency = 0.05, max_cn = 4,
+                          initial_state = "free")
+  coverage <- fit$diagnostics$domain_coverage
+  expect_equal(coverage$timepoint, c("t0", "t1"))
+  expect_equal(coverage$cells, unname(colSums(counts)))
+  expect_equal(coverage$cells_in_domain, c(sum(fit$summary$count_t0), sum(fit$summary$count_t1)))
+  expect_equal(coverage$fraction, coverage$cells_in_domain / coverage$cells)
+  expect_equal(sum(coverage$cells - coverage$cells_in_domain), fit$diagnostics$dropped_cells)
+  expect_equal(coverage$cells - coverage$cells_in_domain, c(3, 0))
+  expect_equal(coverage$majors, c(3, 3))
+  expect_equal(coverage$median_distance_outside[[1L]],
+               min(rowSums(abs(sweep(fit$trend$major, 2L, c(4, 4, 4, 4), "-")))))
+  expect_true(is.na(coverage$median_distance_outside[[2L]]))
+  expect_output(print(fit), "cells in the domain: t0 ")
+})
+
+test_that("counts are checked per sample before fitting", {
+  counts <- cbind(a = c(3, 1, 1, 0), b = c(0, 0, 2, 5), c = c(1, 1, 1, 0))
+  rownames(counts) <- c("2.2.2", "2.3.2", "4.4.2", "0.2.2")
+  check <- check_sparse_joint_counts(counts)
+  expect_equal(check$sample, c("a", "b", "c"))
+  expect_equal(check$cells, c(5, 7, 3))
+  expect_equal(check$karyotypes, c(3, 2, 3))
+  expect_equal(check$repeated_fraction, c(3 / 5, 5 / 7, 0))
+  # a: cells at distances 0, 0, 0, 1, 3; c: single cells at 1, 1, 3
+  expect_equal(check$nearest_distance, c(0, 0, 1))
+  expect_equal(check$nullisomy_fraction, c(0, 5 / 7, 0))
+  expect_equal(check$shared, c(3, 1, 3))
+  one <- check_sparse_joint_counts(counts[, "c", drop = FALSE])
+  expect_true(is.na(one$shared))
+  expect_equal(check_sparse_joint_counts(prepare_alfak2_data(counts[, c("a", "b")]))$cells, c(5, 7))
+  expect_error(check_sparse_joint_counts(counts - 2), "non-negative")
+})

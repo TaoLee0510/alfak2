@@ -128,3 +128,33 @@ test_that("with balance, each sample's history is chosen as for a single sample"
   expect_null(fit_sparse_joint_cohort(sim$samples, dt = sim$dt, beta = sim$beta, trend = "sample",
                                       major_frequency = 0.05, max_cn = 4)$diagnostics$history_profiles)
 })
+
+test_that("a cohort sample with a timepoint outside its domain stops with an error naming it", {
+  sim <- simulate_cohort_counts()
+  far <- labelled_counts("2.2.2.2" = c(0, 20), "3.3.2.2" = c(1, 0), "1.1.2.2" = c(1, 0), "2.4.2.2" = c(1, 0))
+  samples <- c(sim$samples, list(C = far))
+  fit <- function(...) fit_sparse_joint_cohort(samples, dt = c(sim$dt, 10), beta = sim$beta, major_frequency = 0.05,
+                                               max_cn = 4, ...)
+  err <- tryCatch(fit(initial_state = "free", trend = "shared"), alfak2_domain_coverage_error = function(e) e)
+  expect_s3_class(err, "alfak2_domain_coverage_error")
+  expect_match(conditionMessage(err), "^A timepoint has no cell inside its sample's model domain\\. Sample C, timepoint t0: ")
+  expect_equal(err$coverage$sample, rep(c("A", "B", "C"), each = 2L))
+  expect_equal(err$coverage$cells_in_domain[5:6], c(0, 20))
+  # Chosen trend, and the balance prior, whose histories are chosen first.
+  expect_error(fit(initial_state = "free"), class = "alfak2_domain_coverage_error")
+  expect_error(fit(initial_state = "balance"), "Sample C, timepoint t0", class = "alfak2_domain_coverage_error")
+})
+
+test_that("a cohort fit reports the domain coverage of each sample", {
+  sim <- simulate_cohort_counts()
+  fit <- fit_sparse_joint_cohort(sim$samples, dt = sim$dt, beta = sim$beta, major_frequency = 0.05, max_cn = 4,
+                                 initial_state = "free", trend = "shared")
+  coverage <- fit$diagnostics$domain_coverage
+  expect_equal(coverage$sample, rep(c("A", "B"), each = 2L))
+  expect_equal(coverage$timepoint, rep(c("t0", "t1"), 2L))
+  expect_equal(coverage$cells, unname(c(colSums(sim$samples$A), colSums(sim$samples$B))))
+  expect_equal(coverage$cells_in_domain,
+               c(sum(fit$samples$A$count_t0), sum(fit$samples$A$count_t1),
+                 sum(fit$samples$B$count_t0), sum(fit$samples$B$count_t1)))
+  expect_output(print(fit), "cells in the domain: lowest")
+})
