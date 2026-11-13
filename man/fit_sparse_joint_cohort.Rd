@@ -90,9 +90,12 @@ by the candidates of every sample.}
 \item{balance_sd}{Spread, on the log scale, of initial abundances around
 the balance.}
 
-\item{calibration}{Constants \code{floor} and \code{deficit} that turn the model's
-posterior standard deviation of relative fitness into the reported
-\code{relative_sd}; see Details. \code{NULL} reports the model's own.}
+\item{calibration}{Constants \code{floor}, \code{deficit} and \code{deficit_unobserved}
+that turn the model's posterior standard deviation of relative fitness
+into the reported \code{relative_sd}; see Details. Without
+\code{deficit_unobserved}, unobserved karyotypes take \code{deficit}, as up to
+alfak2 33a045c (\code{c(floor = 0.009, deficit = 0.6)}). \code{NULL} reports the
+model's own.}
 
 \item{control}{List passed to \code{\link[stats:nlminb]{stats::nlminb()}} for the scale parameters.}
 

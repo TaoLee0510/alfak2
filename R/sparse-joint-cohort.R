@@ -302,7 +302,7 @@ fit_sparse_joint_cohort <- function(samples,
   relative$reference$sample_coef_covariance <- lapply(coef_index, function(index) relative$covariance[index])
   landscape$relative_fitness <- relative$mean
   landscape$relative_sd <- sparse_joint_calibrate(relative$sd, relative$mean, landscape$shell, birth_rate,
-                                                  calibration)
+                                                  calibration, observed = landscape$n_observed > 0)
   landscape$relative_sd_model <- relative$sd
   references <- vector("list", n_sample)
   summaries <- lapply(seq_len(n_sample), function(s) {
@@ -320,7 +320,8 @@ fit_sparse_joint_cohort <- function(samples,
     own <- sparse_joint_relative(solver, state_latent[rows], summary$fitness_mean, summary$log_birth_sd,
                                  major_share[rows])
     summary$relative_fitness <- own$mean
-    summary$relative_sd <- sparse_joint_calibrate(own$sd, own$mean, summary$shell, birth_rate, calibration)
+    summary$relative_sd <- sparse_joint_calibrate(own$sd, own$mean, summary$shell, birth_rate, calibration,
+                                                  observed = summary$count_t0 + summary$count_t1 > 0)
     summary$relative_sd_model <- own$sd
     # Covariance of every node's shared value, and of the sample's trend
     # coefficients, with this sample's reference.
@@ -456,8 +457,11 @@ predict.alfak2_sparse_joint_cohort_fit <- function(object, karyotypes, sample = 
       source = source, stringsAsFactors = FALSE
     )
   )
+  # Seen in some sample: a karyotype of the landscape observed there, or one
+  # placed at a sample's observed level.
+  seen <- (known & object$landscape$n_observed[ifelse(known, node, 1L)] > 0) | source == "observed_level"
   out$relative_sd <- sparse_joint_calibrate(out$relative_sd_model, out$relative_fitness, out$shell,
-                                            trend$birth_rate, trend$calibration)
+                                            trend$birth_rate, trend$calibration, observed = seen)
   columns <- c("fitness_mean", "fitness_sd", "conf_low", "conf_high", "relative_fitness", "relative_sd",
                "relative_sd_model")
   if (shared) {

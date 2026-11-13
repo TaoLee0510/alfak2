@@ -261,22 +261,42 @@ sparse_joint_coef_covariance <- function(solver, coef_index = which(solver$names
 # The first says that a karyotype predicted far from the reference is known
 # in proportion to that distance. The second is an error per division that no
 # amount of data removes, growing with `shell`, the distance to the nearest
-# major karyotype. Both constants were fitted to the development landscapes
+# major karyotype. Floor and deficit were fitted to the development landscapes
 # of `benchmark/sparse_two_timepoint` (validation/sparse_joint/calibration_fit.R).
-sparse_joint_default_calibration <- c(floor = 0.009, deficit = 0.6)
+#
+# Karyotypes seen in neither sample have a deficit of their own. How far below
+# the majors they lie is not identified by zero counts, and the predicted
+# drop is too shallow on moderately rugged landscapes, by up to 40% in young
+# populations or at intervals of days to weeks; with the deficit of observed
+# karyotypes their 95% intervals covered as few as 79%. No observable told
+# those regimes apart from smoother or more rugged ones, so the deficit is the
+# smallest that keeps every simulated regime at 90% or more
+# (validation/sparse_joint/unobserved_bias/calibration_forms.R).
+sparse_joint_default_calibration <- c(floor = 0.009, deficit = 0.6, deficit_unobserved = 1.1)
 
+# Calibration constants in full. Without `deficit_unobserved`, unobserved
+# karyotypes take the deficit of observed ones, as up to alfak2 33a045c.
 sparse_joint_validate_calibration <- function(calibration) {
-  if (is.null(calibration)) return(c(floor = 0, deficit = 0))
-  if (!is.numeric(calibration) || !setequal(names(calibration), c("floor", "deficit")) ||
+  if (is.null(calibration)) return(c(floor = 0, deficit = 0, deficit_unobserved = 0))
+  two <- c("floor", "deficit")
+  if (!is.numeric(calibration) || is.null(names(calibration)) ||
+      !(setequal(names(calibration), two) || setequal(names(calibration), c(two, "deficit_unobserved"))) ||
       any(!is.finite(calibration)) || any(calibration < 0)) {
-    stop("`calibration` must be NULL or non-negative numbers named floor and deficit.", call. = FALSE)
+    stop("`calibration` must be NULL or non-negative numbers named floor, deficit and optionally ",
+         "deficit_unobserved.", call. = FALSE)
   }
-  calibration
+  unobserved <- if ("deficit_unobserved" %in% names(calibration)) calibration[["deficit_unobserved"]] else
+    calibration[["deficit"]]
+  c(floor = calibration[["floor"]], deficit = calibration[["deficit"]], deficit_unobserved = unobserved)
 }
 
-sparse_joint_calibrate <- function(model_sd, relative, shell, birth_rate, calibration) {
-  sqrt(model_sd^2 + (calibration[["deficit"]] * relative)^2 +
-         (calibration[["floor"]] * birth_rate * (1 + shell))^2)
+# `observed`: whether each karyotype was seen in a sample. Fits made before
+# `deficit_unobserved` existed carry two constants and use `deficit` for all.
+sparse_joint_calibrate <- function(model_sd, relative, shell, birth_rate, calibration, observed) {
+  unobserved <- if ("deficit_unobserved" %in% names(calibration)) calibration[["deficit_unobserved"]] else
+    calibration[["deficit"]]
+  deficit <- ifelse(observed, calibration[["deficit"]], unobserved)
+  sqrt(model_sd^2 + (deficit * relative)^2 + (calibration[["floor"]] * birth_rate * (1 + shell))^2)
 }
 
 # Fitness relative to a reference: the count-weighted mean fitness of the
@@ -457,9 +477,15 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 #' observed karyotypes and half of the unobserved ones. The reported value is
 #' `sqrt(model sd^2 + (deficit * relative fitness)^2 +
 #' (floor * birth_rate * (1 + shell))^2)`, where `shell` is the distance to
-#' the nearest major karyotype. The two constants were fitted to simulated
-#' landscapes, on which the resulting 95% intervals cover 91-97%. They carry
-#' over to real samples only as far as those landscapes resemble them.
+#' the nearest major karyotype. The deficit is 0.6 for karyotypes seen in a
+#' sample and 1.1 for those seen in neither: zero counts do not tell how far
+#' below the major karyotypes an unobserved karyotype lies, and on moderately
+#' rugged simulated landscapes the predicted drop was up to 40% too shallow.
+#' On simulated landscapes the resulting 95% intervals covered at least 90%
+#' of the karyotypes in every regime tested, and close to all of them on
+#' smooth or very rugged landscapes, where they are wider than needed. The
+#' constants carry over to real samples only as far as those landscapes
+#' resemble them.
 #'
 #' The baseline birth rate is supplied rather than estimated. Two samples
 #' identify it only weakly, and a free baseline drifts upwards and inflates
@@ -516,9 +542,12 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 #'   their fitness is overestimated (validation/sparse_joint/short_interval).
 #' @param balance_sd Spread, on the log scale, of initial abundances around
 #'   the balance.
-#' @param calibration Constants `floor` and `deficit` that turn the model's
-#'   posterior standard deviation of relative fitness into the reported
-#'   `relative_sd`; see Details. `NULL` reports the model's own.
+#' @param calibration Constants `floor`, `deficit` and `deficit_unobserved`
+#'   that turn the model's posterior standard deviation of relative fitness
+#'   into the reported `relative_sd`; see Details. Without
+#'   `deficit_unobserved`, unobserved karyotypes take `deficit`, as up to
+#'   alfak2 33a045c (`c(floor = 0.009, deficit = 0.6)`). `NULL` reports the
+#'   model's own.
 #' @param control List passed to [stats::nlminb()] for the scale parameters.
 #' @param inner_control TMB inner Newton controls.
 #'
@@ -656,7 +685,8 @@ fit_sparse_joint <- function(counts,
   relative <- sparse_joint_relative(solver, g_index, summary$fitness_mean,
                                     summary$log_birth_sd, ifelse(summary$major, total, 0))
   summary$relative_fitness <- relative$mean
-  summary$relative_sd <- sparse_joint_calibrate(relative$sd, relative$mean, summary$shell, birth_rate, calibration)
+  summary$relative_sd <- sparse_joint_calibrate(relative$sd, relative$mean, summary$shell, birth_rate, calibration,
+                                                observed = summary$count_t0 + summary$count_t1 > 0)
   summary$relative_sd_model <- relative$sd
   observed_level <- sparse_joint_observed_level(summary)
   structure(list(
@@ -739,8 +769,11 @@ predict.alfak2_sparse_joint_fit <- function(object, karyotypes, ...) {
     out$relative_fitness[outside] <- relative$mean
     out$relative_sd_model[outside] <- ifelse(left_out, level$sd, relative$sd)
     out$shell[outside] <- sparse_joint_major_distance(cn, trend$major)
+    # Observed karyotypes left out of the domain count as observed; the rest
+    # are predicted from the trend and were seen in neither sample.
     out$relative_sd[outside] <- sparse_joint_calibrate(out$relative_sd_model[outside], relative$mean,
-                                                       out$shell[outside], trend$birth_rate, trend$calibration)
+                                                       out$shell[outside], trend$birth_rate, trend$calibration,
+                                                       observed = left_out)
   }
   out
 }

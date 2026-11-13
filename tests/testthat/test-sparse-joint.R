@@ -212,21 +212,41 @@ test_that("reported uncertainty of relative fitness adds model error to the mode
   # without the uncertainty of the baseline, which all karyotypes share
   expect_true(all(summary$relative_sd_model[summary$major] < summary$fitness_sd[summary$major]))
   calibration <- sparse_joint_default_calibration
+  # Karyotypes seen in neither sample have a deficit of their own.
+  observed <- summary$count_t0 + summary$count_t1 > 0
+  expect_true(any(observed & !summary$major) && any(!observed))
+  deficit <- ifelse(observed, calibration[["deficit"]], calibration[["deficit_unobserved"]])
   expect_equal(summary$relative_sd,
-               sqrt(summary$relative_sd_model^2 + (calibration[["deficit"]] * summary$relative_fitness)^2 +
+               sqrt(summary$relative_sd_model^2 + (deficit * summary$relative_fitness)^2 +
                       (calibration[["floor"]] * 2 * (1 + summary$shell))^2))
   prediction <- predict(fit, c(summary$karyotype[5L], "2.2.3.3", "3.3.3.2"))
   expect_equal(prediction$relative_sd[1L], summary$relative_sd[5L])
   expect_true(all(prediction$relative_sd > prediction$relative_sd_model))
   expect_equal(prediction$relative_sd[2:3],
-               sqrt(prediction$relative_sd_model[2:3]^2 + (calibration[["deficit"]] * prediction$relative_fitness[2:3])^2 +
+               sqrt(prediction$relative_sd_model[2:3]^2 +
+                      (calibration[["deficit_unobserved"]] * prediction$relative_fitness[2:3])^2 +
                       (calibration[["floor"]] * 2 * 3)^2))
+  # Two constants, as up to alfak2 33a045c: one deficit for every karyotype;
+  # the fit itself is unchanged.
+  two <- fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, birth_rate = 2, major_frequency = 0.05, max_cn = 4,
+                          calibration = c(floor = 0.009, deficit = 0.6))
+  expect_equal(two$summary$relative_sd,
+               sqrt(summary$relative_sd_model^2 + (0.6 * summary$relative_fitness)^2 +
+                      (0.009 * 2 * (1 + summary$shell))^2))
+  expect_identical(two$summary$relative_fitness, summary$relative_fitness)
+  expect_identical(two$summary$relative_sd_model, summary$relative_sd_model)
+  expect_identical(two$summary$relative_sd[observed], summary$relative_sd[observed])
+  expect_true(all(two$summary$relative_sd[!observed] <= summary$relative_sd[!observed]))
+  expect_equal(predict(two, "2.2.3.3")$relative_sd,
+               sqrt(prediction$relative_sd_model[2L]^2 + (0.6 * prediction$relative_fitness[2L])^2 + (0.009 * 2 * 3)^2))
   raw <- fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, birth_rate = 2, major_frequency = 0.05, max_cn = 4,
                           calibration = NULL)
   expect_equal(raw$summary$relative_sd, raw$summary$relative_sd_model)
   expect_equal(raw$summary$relative_sd_model, summary$relative_sd_model)
   expect_equal(predict(raw, "2.2.3.3")$relative_sd, prediction$relative_sd_model[2L])
   expect_error(fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, calibration = c(floor = 1)), "calibration")
+  expect_error(fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta,
+                                calibration = c(floor = 1, deficit = 1, other = 1)), "calibration")
 })
 
 test_that("uncertainty is finite and no wider than the prior where the counts fit poorly", {

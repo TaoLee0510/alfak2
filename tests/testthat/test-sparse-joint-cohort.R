@@ -157,4 +157,14 @@ test_that("a cohort fit reports the domain coverage of each sample", {
                c(sum(fit$samples$A$count_t0), sum(fit$samples$A$count_t1),
                  sum(fit$samples$B$count_t0), sum(fit$samples$B$count_t1)))
   expect_output(print(fit), "cells in the domain: lowest")
+  # Calibration: karyotypes seen in no sample have a deficit of their own.
+  calibration <- sparse_joint_default_calibration
+  land <- fit$landscape
+  deficit <- ifelse(land$n_observed > 0, calibration[["deficit"]], calibration[["deficit_unobserved"]])
+  expect_true(any(land$n_observed == 0))
+  expect_equal(land$relative_sd, sqrt(land$relative_sd_model^2 + (deficit * land$relative_fitness)^2 +
+                                        (calibration[["floor"]] * (1 + land$shell))^2))
+  far <- predict(fit, "4.4.3.3")
+  expect_equal(far$relative_sd, sqrt(far$relative_sd_model^2 + (calibration[["deficit_unobserved"]] * far$relative_fitness)^2 +
+                                       (calibration[["floor"]] * (1 + far$shell))^2))
 })

@@ -92,9 +92,12 @@ their fitness is overestimated (validation/sparse_joint/short_interval).}
 \item{balance_sd}{Spread, on the log scale, of initial abundances around
 the balance.}
 
-\item{calibration}{Constants \code{floor} and \code{deficit} that turn the model's
-posterior standard deviation of relative fitness into the reported
-\code{relative_sd}; see Details. \code{NULL} reports the model's own.}
+\item{calibration}{Constants \code{floor}, \code{deficit} and \code{deficit_unobserved}
+that turn the model's posterior standard deviation of relative fitness
+into the reported \code{relative_sd}; see Details. Without
+\code{deficit_unobserved}, unobserved karyotypes take \code{deficit}, as up to
+alfak2 33a045c (\code{c(floor = 0.009, deficit = 0.6)}). \code{NULL} reports the
+model's own.}
 
 \item{control}{List passed to \code{\link[stats:nlminb]{stats::nlminb()}} for the scale parameters.}
 
@@ -145,9 +148,15 @@ is kept as \code{relative_sd_model}. That one takes the model to be exact, and
 on simulated populations its 95\% intervals cover about three in four
 observed karyotypes and half of the unobserved ones. The reported value is
 \verb{sqrt(model sd^2 + (deficit * relative fitness)^2 + (floor * birth_rate * (1 + shell))^2)}, where \code{shell} is the distance to
-the nearest major karyotype. The two constants were fitted to simulated
-landscapes, on which the resulting 95\% intervals cover 91-97\%. They carry
-over to real samples only as far as those landscapes resemble them.
+the nearest major karyotype. The deficit is 0.6 for karyotypes seen in a
+sample and 1.1 for those seen in neither: zero counts do not tell how far
+below the major karyotypes an unobserved karyotype lies, and on moderately
+rugged simulated landscapes the predicted drop was up to 40\% too shallow.
+On simulated landscapes the resulting 95\% intervals covered at least 90\%
+of the karyotypes in every regime tested, and close to all of them on
+smooth or very rugged landscapes, where they are wider than needed. The
+constants carry over to real samples only as far as those landscapes
+resemble them.
 
 The baseline birth rate is supplied rather than estimated. Two samples
 identify it only weakly, and a free baseline drifts upwards and inflates
