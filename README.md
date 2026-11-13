@@ -205,6 +205,21 @@ equally accurate. Up to alfak2 8327282 the balance built up over the interval
 alone, and at about 30 divisions its errors were twice those of the free
 model.
 
+A fit needs cells of both samples within one step of a well-sampled
+karyotype. `fit$diagnostics$domain_coverage` gives, for each sample, how many
+of its cells lie inside the fitted domain. When one sample has none, typically
+because the two samples share no karyotype and all well-sampled ones come from
+the other, the fit stops with an error of class
+`alfak2_domain_coverage_error`, which carries the same table.
+`check_sparse_joint_counts()` summarises a count matrix before fitting: the
+share of cells on repeated karyotypes and how far each cell lies from the
+nearest other cell of its sample.
+
+```r
+check_sparse_joint_counts(counts)
+fit$diagnostics$domain_coverage
+```
+
 ### Outputs in the format of alfakR
 
 `alfak_compat()` takes the arguments of `alfakR::alfak()` (branch `dev`), fits

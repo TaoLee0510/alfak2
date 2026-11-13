@@ -102,6 +102,11 @@ posterior standard deviation of relative fitness into the reported
 An \code{alfak2_sparse_joint_cohort_fit} object. \code{landscape} has one row
 per karyotype in any sample's domain, with the shared fitness; \code{samples}
 has one summary per sample, as returned by \code{\link[=fit_sparse_joint]{fit_sparse_joint()}}.
+\code{diagnostics$domain_coverage} is the table of \code{\link[=fit_sparse_joint]{fit_sparse_joint()}} with a
+\code{sample} column, one row per sample and timepoint. If a timepoint of any
+sample has no cell inside that sample's domain, the function stops with
+an error of class \code{alfak2_domain_coverage_error} that names the sample;
+this is checked for every sample before any is fitted.
 }
 \description{
 Fits several two-timepoint samples at once. Each sample keeps its own

@@ -106,6 +106,13 @@ domain karyotype, with its counts and the counts the fit expects;
 \code{fitness_mean} is the net growth rate per unit of \code{dt},
 and \code{relative_fitness} is that rate minus the count-weighted mean over
 the major karyotypes, with \code{relative_sd} its uncertainty.
+\code{diagnostics$domain_coverage} has one row per timepoint: \code{cells},
+\code{cells_in_domain} and their ratio \code{fraction}, \code{karyotypes},
+\code{major_candidates} (karyotypes with at least \code{major_frequency} of that
+sample and \code{major_count} cells over both), \code{majors} (major karyotypes seen
+at that timepoint), \code{shared} (karyotypes seen at both timepoints) and
+\code{median_distance_outside} (median distance from its cells outside the
+domain to the nearest major karyotype).
 }
 \description{
 Fits fitness to two sparse karyotype samples with a single count likelihood
@@ -123,6 +130,15 @@ the likelihood, together with their cells. They would enter only because
 they were observed, while their unobserved siblings would not, which
 biases their fitness upwards. \code{\link[=predict]{predict()}} places them at the level of the
 observed neighbours inside the domain.
+
+\code{diagnostics$domain_coverage} reports, for each timepoint, how many of its
+cells lie inside the domain. If a timepoint has none, typically because
+every major karyotype comes from the other sample and the two samples share
+no karyotype, there is nothing to fit and the function stops with an error
+of class \code{alfak2_domain_coverage_error}. Its message begins "A timepoint
+has no cell inside the model domain." and its \code{coverage} element holds the
+same table. \code{\link[=check_sparse_joint_counts]{check_sparse_joint_counts()}} summarises a count matrix before
+fitting.
 
 \code{relative_sd} is not the model's own posterior standard deviation, which
 is kept as \code{relative_sd_model}. That one takes the model to be exact, and
