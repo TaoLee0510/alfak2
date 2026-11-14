@@ -70,7 +70,8 @@ sparse_joint_relative_draws <- function(fit, solver, labels, prediction, k) {
   }
   fitness <- prediction$fitness_mean * log_birth
   major <- seq_len(fit$diagnostics$n_major)
-  weight <- (fit$summary$count_t0 + fit$summary$count_t1)[major]
+  # The majors' cells over every sample, as the point estimate's reference.
+  weight <- rowSums(as.matrix(fit$summary[grep("^count_t[0-9]+$", names(fit$summary))]))[major]
   weight <- weight / sum(weight)
   reference <- colSums(weight * fit$summary$fitness_mean[major] * latent[g_index[major], , drop = FALSE])
   relative <- sweep(fitness, 2L, reference, "-")
@@ -275,7 +276,9 @@ as_alfakR <- function(fit, minobs = 20, nboot = 45, n0 = 1e5, nb = 1e7, correct_
       stop(sprintf("`%s` must be TRUE or FALSE.", flag), call. = FALSE)
     }
   }
-  counts <- fit$data$counts
+  # The input as given: a fit that left samples out keeps it in `fit$input`.
+  input <- if (is.null(fit$input)) fit$data else fit$input
+  counts <- input$counts
   fq <- rownames(counts)[rowSums(counts) >= minobs]
   if (!length(fq)) {
     stop(sprintf("no frequent karyotypes detected for minobs = %s; frequent karyotypes require rowSums(x) >= minobs",
@@ -285,8 +288,8 @@ as_alfakR <- function(fit, minobs = 20, nboot = 45, n0 = 1e5, nb = 1e7, correct_
   k <- unique(c(fq, nn, alfakR_neighbours(nn)))
   prediction <- stats::predict(fit, k)
   # alfakR's population growth per unit of time: log(nb / n0) over the first
-  # interval between samples (the whole interval for two samples).
-  level <- if (is.null(n0)) fit$trend$reference$fitness else log(nb / n0) / diff(alfak2_data_times(fit$data))[[1L]]
+  # interval between samples of the input (the whole interval for two).
+  level <- if (is.null(n0)) fit$trend$reference$fitness else log(nb / n0) / diff(alfak2_data_times(input))[[1L]]
   divisor <- if (correct_efflux) 2 * sparse_joint_self_probability(parse_karyotypes(k), fit$data$beta) - 1 else
     rep(1, length(k))
   names(divisor) <- k

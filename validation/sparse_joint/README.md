@@ -714,6 +714,13 @@ landscape, medians over landscapes:
 - The default is safe but gains nothing on these simulations; median
   coverage per setting is 0.96-1.00 (0.92-1.00 for `all`). A model of the clones' chance and of passaging
   drift (the plan's stage 3) is not built.
+- A sample in between with no cell on the states it counts for is left out
+  (from cv7). Its depth offset is free, so it carries no information. The
+  Salehi trajectories of the ALFA-K paper benchmark have such samples. In 53
+  of 205 trajectories with more than two passages, a passage in the middle
+  had no cell on the ends' majors after a clonal sweep. In 43 of them that
+  passage had no cell in the domain at all. The simulated cultures here have
+  none.
 
 ## Patient regrowth
 

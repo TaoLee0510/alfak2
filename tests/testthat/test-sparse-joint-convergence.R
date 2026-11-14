@@ -54,6 +54,11 @@ test_that("inverse iteration also gives the flat direction", {
   expect_equal(abs(sum(flat$vector * v)), 1, tolerance = 1e-6)
   expect_identical(sparse_joint_inner_min_eigen(fake_hessian_env(as_sparse(Q %*% diag(values) %*% t(Q)))),
                    sparse_joint_inner_flattest(fake_hessian_env(as_sparse(Q %*% diag(values) %*% t(Q))))$value)
+  # Not computable: NA, no direction, and the check reads it as near-singular.
+  broken <- as_sparse(Q %*% diag(values) %*% t(Q))
+  broken@x[[1L]] <- NaN
+  expect_identical(sparse_joint_inner_flattest(fake_hessian_env(broken)), list(value = NA_real_, vector = NULL))
+  expect_false(isTRUE(sparse_joint_inner_min_eigen(fake_hessian_env(broken)) >= 2e-3))
 })
 
 test_that("the flat direction is named by karyotype, cells and share", {

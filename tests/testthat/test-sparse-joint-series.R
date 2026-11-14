@@ -210,3 +210,75 @@ test_that("intermediate samples can count for the majors only", {
   expect_equal(fit_sparse_joint(pair, dt = 60, beta = sim$beta, max_cn = 4, history = 60, intermediate = "majors")$summary,
                fit_sparse_joint(pair, dt = 60, beta = sim$beta, max_cn = 4, history = 60)$summary)
 })
+
+test_that("a sample in between with no counted cell is left out", {
+  sim <- simulate_series_counts()
+  far <- "4.2.2.4"
+  counts <- rbind(sim$counts, matrix(0, 1L, 4L, dimnames = list(far, colnames(sim$counts))))
+  counts[, 2L] <- 0
+  counts[far, 2L] <- 2
+  for (mode in c("majors", "all")) {
+    expect_warning(
+      fit <- fit_sparse_joint(counts, times = sim$times, beta = sim$beta, max_cn = 4, history = 60,
+                              intermediate = mode, intermediate_weight = if (mode == "majors") 1),
+      class = "alfak2_samples_left_out_warning")
+    # The same as the fit to the other samples.
+    rest <- fit_sparse_joint(counts[, -2L], times = sim$times[-2L], beta = sim$beta, max_cn = 4, history = 60,
+                             intermediate = mode, intermediate_weight = if (mode == "majors") 1)
+    expect_equal(fit$summary, rest$summary)
+    expect_equal(fit$diagnostics$objective, rest$diagnostics$objective)
+    expect_equal(fit$diagnostics$times, c(0, 40, 60))
+    dropped <- fit$diagnostics$dropped_samples
+    expect_equal(dropped$sample, 2L)
+    expect_equal(dropped$time, 20)
+    expect_equal(dropped$cells, 2)
+    expect_equal(dropped$cells_in_domain, 0)
+    expect_equal(fit$input$counts, counts[rowSums(counts) > 0, ], ignore_attr = TRUE)
+    expect_s3_class(rest$diagnostics$dropped_samples, "data.frame")
+    expect_equal(nrow(rest$diagnostics$dropped_samples), 0L)
+  }
+  # Every sample in between left out: the fit to the first and the last.
+  ends <- counts
+  ends[, 3L] <- 0
+  ends[far, 3L] <- 2
+  expect_warning(
+    pair <- fit_sparse_joint(ends, times = sim$times, beta = sim$beta, max_cn = 4, history = 60),
+    "Left out 2 of 4 samples (t1, t2)", fixed = TRUE)
+  two <- fit_sparse_joint(sim$counts[, c(1L, 4L)], dt = 60, beta = sim$beta, max_cn = 4, history = 60)
+  expect_equal(pair$summary, two$summary)
+  expect_null(two$diagnostics$dropped_samples)
+  expect_equal(pair$diagnostics$dropped_samples$sample, 2:3)
+  # as_alfakR() takes its karyotypes and level from the input as given.
+  out <- as_alfakR(pair, minobs = 2, nboot = 3, xval = FALSE)
+  expect_true(far %in% out$landscape$k)
+  plain <- pair
+  plain$input <- NULL
+  expect_false(far %in% as_alfakR(plain, minobs = 2, nboot = 3, xval = FALSE)$landscape$k)
+  # A first or a last sample with no cell in the domain still stops the fit.
+  last <- counts
+  last[, 4L] <- 0
+  last[far, 4L] <- 2
+  expect_error(fit_sparse_joint(last, times = sim$times, beta = sim$beta, max_cn = 4, history = 60),
+               class = "alfak2_domain_coverage_error")
+})
+
+test_that("with majors only, a sample in between with cells on their neighbours only is left out", {
+  sim <- simulate_series_counts()
+  fit0 <- fit_sparse_joint(sim$counts, times = sim$times, beta = sim$beta, max_cn = 4, history = 60,
+                           intermediate_weight = 1)
+  neighbour <- fit0$summary$karyotype[!fit0$summary$major][[1L]]
+  counts <- sim$counts
+  counts[, 2L] <- 0
+  counts[neighbour, 2L] <- 40
+  expect_warning(
+    fit <- fit_sparse_joint(counts, times = sim$times, beta = sim$beta, max_cn = 4, history = 60,
+                            intermediate_weight = 1),
+    "no cell on the major karyotypes", class = "alfak2_samples_left_out_warning")
+  expect_equal(fit$diagnostics$dropped_samples$sample, 2L)
+  expect_gt(fit$diagnostics$dropped_samples$cells_in_domain, 0)
+  # Counted for every karyotype, the sample says something and stays.
+  expect_no_warning(all <- fit_sparse_joint(counts, times = sim$times, beta = sim$beta, max_cn = 4, history = 60,
+                                            intermediate = "all"),
+                    class = "alfak2_samples_left_out_warning")
+  expect_equal(nrow(all$diagnostics$dropped_samples), 0L)
+})
