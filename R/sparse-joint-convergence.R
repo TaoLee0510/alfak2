@@ -86,7 +86,11 @@ sparse_joint_inner_min_eigen <- function(env, mode = env$last.par, iterations = 
 # until it has one.
 sparse_joint_inner_flattest <- function(env, mode = env$last.par, iterations = 200L, tol = 1e-6) {
   H <- tryCatch(env$spHess(mode, random = TRUE), error = function(e) NULL)
+  # Not computable (for instance a depth offset run off to minus infinity):
+  # NA, which the check reads as near-singular.
   if (is.null(H)) return(list(value = NA_real_, vector = NULL))
+  entries <- if (methods::is(H, "CsparseMatrix")) H@x else as.numeric(as.matrix(H))
+  if (any(!is.finite(entries))) return(list(value = NA_real_, vector = NULL))
   # CHOLMOD only warns when the matrix is not positive definite.
   cholesky <- function(M) tryCatch(Matrix::Cholesky(M, LDL = FALSE), warning = function(w) NULL,
                                    error = function(e) NULL)
@@ -99,6 +103,7 @@ sparse_joint_inner_flattest <- function(env, mode = env$last.par, iterations = 2
       if (any(!is.finite(y))) return(list(value = 0, vector = NULL))
       x <- y / sqrt(sum(y^2))
       rayleigh <- sum(x * as.numeric(H %*% x))
+      if (!is.finite(rayleigh)) return(list(value = NA_real_, vector = NULL))
       if (abs(rayleigh - lambda) <= tol * abs(rayleigh)) return(list(value = rayleigh, vector = x))
       lambda <- rayleigh
     }

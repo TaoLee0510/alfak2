@@ -636,6 +636,18 @@ last sample alone (median RMSE ratios 0.97--1.01; within 3\% in 21 of 24
 settings); using every sample for every karyotype gained 4--6\% at the
 largest bottleneck and lost up to a factor of 2.4 at the smallest.
 
+The offsets $\theta_k$ have a flat prior. An intermediate sample $k$ with no
+count on the states it is used for (the majors by default; the domain when
+every sample is used for every karyotype) contributes
+$-\mathrm{e}^{\theta_k}\sum_i n_i(t_k)\,\mathrm{e}^{-d_rt_k}$ to the
+log-likelihood. This is largest as $\theta_k\to-\infty$, where the term
+vanishes, and its integral over $\theta_k$ diverges. Such a sample carries no
+information about the landscape. It is left out, which is that limit, and
+the fit is the fit to the other samples. A clonal sweep produces such a
+sample when the population in the middle lies two or more steps from the
+majors of both ends. The first and the last sample must each have a count in
+the domain.
+
 \subsection{Export in the \texttt{alfakR} Output Format}
 \label{sec:sj-alfakR}
 

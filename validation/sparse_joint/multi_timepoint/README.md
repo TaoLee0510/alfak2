@@ -114,6 +114,50 @@ most 1.03):
   criteria, are already met and the remaining gaps are not where drift is
   largest.
 
+## Samples in between that carry no information (cv7, cv8)
+
+Found by the ALFA-K paper benchmark on the Salehi trajectories, in round
+21aedca. Of 205 trajectories with more than two passages, 61 could not be fitted
+on all samples:
+- 43 stopped only because a passage in between had no cell in the domain:
+  clonal sweeps, with the population in the middle two or more steps from both
+  ends' majors.
+- 18 also stopped at an end.
+
+Ten more had a passage in between with cells on non-major neighbours only.
+With the default, that sample's depth offset was degenerate.
+
+The depth offset of a later sample has a flat prior. A sample with no cell on
+the states it counts for (the majors, or the domain with `"all"`) therefore
+has its likelihood largest as the offset goes to minus infinity, where the
+sample adds nothing. The Laplace integral over the offset is improper. From
+cv7 such a sample is left out with a warning (`diagnostics$dropped_samples`),
+which is that limit. The ends are still required. `as_alfakR()` keeps
+alfakR's karyotypes from every sample (`fit$input`).
+
+The convergence check also reads an inner Hessian with non-finite entries as
+near-singular instead of stopping. Under 21aedca it stopped on
+SA609_X10_l_10_d1_0_d2_0 with all 10 passages. With cv8 that trajectory
+leaves out passages 2 and 3, with 243 and 171 cells, 4 and 5 of them in the
+domain, none on a major. The fit is accepted, and `as_alfakR()`'s frequent
+karyotypes are alfakR's.
+
+Checks:
+- tests 141/141 (cv8);
+- HPC, cv7 and cv8 each against ff13cf4 and cv6: 140/140 reference fits
+  identical (development, entry, free, rates, compat; cohort fits do not use
+  the changed code), and cv8's convergence verdicts equal cv6's;
+- none of the 288 stage-2 datasets leaves a sample out;
+- six stage-2 datasets refitted on the Mac with cv6 and cv7 (default): identical
+  predictions, objectives and histories.
+
+  Against the HPC fits of the same arm (cv5), objectives agree to 1e-8 or
+  better, except in mt_L06_b00200_s06_n0200_k8. There two candidate histories
+  the check did not accept (300, 1000) differ by up to 2.7 between the
+  platforms, so the chosen history differs (HPC 300, Mac 1000) and so does the
+  prediction (up to 0.047). This is the path dependence of degenerate
+  candidates described in stage C, already in cv6, and not changed here.
+
 A task list has one line per fit, `study<TAB>method<TAB>dataset_id`, with
 study `series` (this study) or `patient` (the patient regrowth study, which
 takes the build from the submission). `hpc/sync.sh` copies the code and the

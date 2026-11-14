@@ -273,6 +273,18 @@ default takes 2-4 times as long as two samples, `"all"` up to 20 times
 ([stage 2](validation/sparse_joint/multi_timepoint/README.md)). Cohort fits
 and the two older pipelines take two samples.
 
+The first and the last sample must each have a cell in the domain. Some
+samples in between have no cell on the states they count for: no cell on a
+major by default, or none in the domain with `"all"`. A clonal sweep can do
+this, when a passage in the middle lies two or more steps from both ends'
+majors.
+- Such a sample is left out with a warning, and the fit is the fit to the
+  other samples. Its depth is free, so under the model it carries no
+  information.
+- `fit$diagnostics$dropped_samples` lists the samples left out.
+- `as_alfakR()` still picks its karyotypes from every sample, as alfakR
+  does.
+
 ### Outputs in the format of alfakR
 
 `alfak_compat()` takes the arguments of `alfakR::alfak()` (branch `dev`), fits

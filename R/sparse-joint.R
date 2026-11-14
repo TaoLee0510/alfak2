@@ -138,12 +138,14 @@ sparse_joint_coverage_error <- function(coverage, first, by_sample = FALSE) {
   stop(errorCondition(message, class = "alfak2_domain_coverage_error", coverage = coverage, call = NULL))
 }
 
-# Coverage of a sample's domain; an error if a timepoint has no cell in it.
+# Coverage of a sample's domain; an error if a timepoint in `required` (all by
+# default) has no cell in it.
 sparse_joint_check_coverage <- function(counts, major_frequency, major_count, max_states, min_cn, max_cn,
-                                        major_columns = NULL) {
+                                        major_columns = NULL, required = NULL) {
   domain <- sparse_joint_domain(counts, major_frequency, major_count, max_states, min_cn, max_cn, major_columns)
   coverage <- sparse_joint_domain_coverage(counts, domain, major_frequency, major_count)
-  if (any(coverage$cells_in_domain <= 0)) {
+  if (is.null(required)) required <- seq_len(nrow(coverage))
+  if (any(coverage$cells_in_domain[required] <= 0)) {
     sparse_joint_coverage_error(coverage, "A timepoint has no cell inside the model domain.")
   }
   coverage
@@ -408,6 +410,33 @@ sparse_joint_major_columns <- function(data, settings) {
   if (n_time > 2L && identical(settings$intermediate, "majors")) c(1L, n_time) else NULL
 }
 
+# Samples between the first and the last with no cell on the states they
+# count for: the majors with `intermediate` "majors", the domain with "all".
+# Such a sample says nothing under the model. Its depth offset has a flat
+# prior, so its likelihood is largest as the offset goes to minus infinity,
+# where the sample contributes nothing, and the Laplace approximation over
+# that offset is improper. Leaving it out is that limit. Leaving it out
+# changes neither the majors nor the domain: it has no cell on them.
+sparse_joint_uncounted_samples <- function(coverage, intermediate) {
+  n_time <- nrow(coverage)
+  if (n_time <= 2L) return(integer(0))
+  middle <- seq(2L, n_time - 1L)
+  counted <- if (identical(intermediate, "majors")) coverage$majors[middle] else coverage$cells_in_domain[middle]
+  middle[counted <= 0]
+}
+
+# The data with only the samples in `kept` (in order, the first among them),
+# as prepare_alfak2_data() would give them: karyotypes with no cell left are
+# dropped.
+sparse_joint_keep_samples <- function(data, kept) {
+  times <- alfak2_data_times(data)[kept]
+  times <- times - times[[1L]]
+  counts <- data$counts[, kept, drop = FALSE]
+  counts <- counts[rowSums(counts) > 0, , drop = FALSE]
+  new_alfak2_data(counts = counts, dt = times[[length(times)]], beta = data$beta,
+                  metadata = data$metadata, times = if (length(kept) > 2L) times else NULL)
+}
+
 # Dispersion of the majors' counts in the samples between the first and the
 # last, against the fit's expectations scaled to each sample's total over the
 # majors: about 1 for sampling noise alone, more when the population drifts
@@ -564,6 +593,14 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 #' cells) and up to 2.4 times less accurate with small ones (200)
 #' (validation/sparse_joint/multi_timepoint).
 #'
+#' The first and the last sample must each have a cell in the domain. A
+#' sample in between with no cell on the states it counts for (the majors by
+#' default, the domain with `"all"`) is left out with a warning
+#' (`diagnostics$dropped_samples`). Its depth is free, so such a sample says
+#' nothing under the model, and the fit is the fit to the other samples.
+#' Leaving it out is the limit of its own likelihood. The input as given is
+#' kept in `input`, for [as_alfakR()].
+#'
 #' Observed karyotypes that are not next to a major karyotype are left out of
 #' the likelihood, together with their cells. They would enter only because
 #' they were observed, while their unobserved siblings would not, which
@@ -719,7 +756,11 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 #'   sample and `major_count` cells over both), `majors` (major karyotypes seen
 #'   at that timepoint), `shared` (karyotypes seen at both timepoints) and
 #'   `median_distance_outside` (median distance from its cells outside the
-#'   domain to the nearest major karyotype).
+#'   domain to the nearest major karyotype). With more than two timepoints,
+#'   `diagnostics$times` are the sample times fitted and
+#'   `diagnostics$dropped_samples` the samples left out. It has one row per
+#'   sample left out (`sample`, its column in the input; `time`; and the
+#'   coverage columns), and no rows when none was.
 #' @export
 fit_sparse_joint <- function(counts,
                              dt = 1,
@@ -784,11 +825,36 @@ fit_sparse_joint <- function(counts,
     stop(if (ncol(counts) == 2L) "Both timepoints need at least one cell." else "Every timepoint needs at least one cell.",
          call. = FALSE)
   }
-  # Checked once, before any candidate history is fitted: a timepoint with no
-  # cell next to a major karyotype leaves nothing to fit.
+  # Checked once, before any candidate history is fitted: a first or last
+  # sample with no cell next to a major karyotype leaves nothing to fit.
+  n_input <- ncol(counts)
   coverage <- sparse_joint_check_coverage(counts, major_frequency, major_count, max_states,
                                           as.integer(min_cn), as.integer(max_cn),
-                                          sparse_joint_major_columns(data, list(intermediate = intermediate)))
+                                          sparse_joint_major_columns(data, list(intermediate = intermediate)),
+                                          required = c(1L, n_input))
+  # A sample in between with no cell on the states it counts for is left out
+  # (see sparse_joint_uncounted_samples()), and the rest fitted.
+  left_out <- sparse_joint_uncounted_samples(coverage, intermediate)
+  if (length(left_out)) {
+    input_times <- alfak2_data_times(data)
+    dropped_samples <- cbind(data.frame(sample = left_out, time = input_times[left_out]),
+                             coverage[left_out, , drop = FALSE])
+    rownames(dropped_samples) <- NULL
+    warning(warningCondition(
+      sprintf(paste0("Left out %d of %d samples (%s): no cell on the %s. Such a sample carries no information ",
+                     "under the model; see diagnostics$dropped_samples."),
+              length(left_out), n_input, paste(colnames(counts)[left_out], collapse = ", "),
+              if (intermediate == "majors") "major karyotypes" else "model domain"),
+      class = "alfak2_samples_left_out_warning", call = NULL))
+    arguments <- mget(names(formals(sys.function())), envir = environment())
+    arguments$counts <- sparse_joint_keep_samples(data, setdiff(seq_len(n_input), left_out))
+    fit <- do.call(fit_sparse_joint, arguments)
+    fit$diagnostics$dropped_samples <- dropped_samples
+    # The input as given, for as_alfakR(): alfakR picks its karyotypes from
+    # every sample.
+    fit$input <- data
+    return(fit)
+  }
   # With intermediate samples for the majors only, their weight: the inverse of
   # the majors' dispersion in a first fit (at the shortest history), at most 1.
   dispersion <- NA_real_
@@ -919,7 +985,11 @@ fit_sparse_joint <- function(counts,
       seconds = proc.time()[["elapsed"]] - started
     )
   ), class = "alfak2_sparse_joint_fit")
-  if (n_time > 2L) fit$diagnostics$times <- alfak2_data_times(data)
+  if (n_time > 2L) {
+    fit$diagnostics$times <- alfak2_data_times(data)
+    # None left out here; a caller that left samples out replaces it.
+    fit$diagnostics$dropped_samples <- cbind(data.frame(sample = integer(0), time = numeric(0)), coverage[0L, ])
+  }
   if (!is.null(settings$intermediate_weight)) fit$diagnostics$intermediate_weight <- settings$intermediate_weight
   if (is.finite(dispersion)) fit$diagnostics$intermediate_dispersion <- dispersion
   sparse_joint_convergence_warning(fit$diagnostics$optimisation)

@@ -139,7 +139,11 @@ the major karyotypes, with \code{relative_sd} its uncertainty.
 sample and \code{major_count} cells over both), \code{majors} (major karyotypes seen
 at that timepoint), \code{shared} (karyotypes seen at both timepoints) and
 \code{median_distance_outside} (median distance from its cells outside the
-domain to the nearest major karyotype).
+domain to the nearest major karyotype). With more than two timepoints,
+\code{diagnostics$times} are the sample times fitted and
+\code{diagnostics$dropped_samples} the samples left out. It has one row per
+sample left out (\code{sample}, its column in the input; \code{time}; and the
+coverage columns), and no rows when none was.
 }
 \description{
 Fits fitness to sparse karyotype samples of one population, two or more
@@ -168,6 +172,14 @@ as accurate as the first and the last sample alone; every sample for every
 karyotype (\code{"all"}) was 4-6\% more accurate with large bottlenecks (20000
 cells) and up to 2.4 times less accurate with small ones (200)
 (validation/sparse_joint/multi_timepoint).
+
+The first and the last sample must each have a cell in the domain. A
+sample in between with no cell on the states it counts for (the majors by
+default, the domain with \code{"all"}) is left out with a warning
+(\code{diagnostics$dropped_samples}). Its depth is free, so such a sample says
+nothing under the model, and the fit is the fit to the other samples.
+Leaving it out is the limit of its own likelihood. The input as given is
+kept in \code{input}, for \code{\link[=as_alfakR]{as_alfakR()}}.
 
 Observed karyotypes that are not next to a major karyotype are left out of
 the likelihood, together with their cells. They would enter only because
