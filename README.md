@@ -2,7 +2,7 @@
 
 `alfak2` implements **ALFA-K2: Adaptive Local-to-Global Fitness Landscapes for
 Aneuploid Karyotypes**. It provides methods to infer fitness landscapes for
-aneuploid karyotypes from sparse two-timepoint count data and to support
+aneuploid karyotypes from sparse count data of two or more timepoints and to support
 analyses of karyotype evolution. It combines bounded karyotype graph
 construction, local hierarchical Bayesian inference, and a graph
 Gaussian-process posterior with ordered copy-number epistasis penalties.
@@ -222,6 +222,57 @@ check_sparse_joint_counts(counts)
 fit$diagnostics$domain_coverage
 ```
 
+Patient samples, such as a primary and its recurrence, are not passages: the
+recurrence may grow from a few surviving cells, and only for part of the time
+between the samples. A few survivors cost little. Growth that started late
+costs a great deal if the model is not told: the fitness differences are
+spread over the whole interval and come out too large per unit of time. Give
+the time the population actually grew, or `birth_rate` times the share of the
+interval during which it grew; when that is not known, `fit_sparse_joint_rates()`
+over a range of rates is the safer choice, at a cost when there was no delay
+([patient regrowth study](validation/sparse_joint/patient_regrowth/README.md)).
+
+The scale parameters are fitted by Laplace marginal likelihood, and where a
+karyotype has very few cells the Laplace approximation can be nearly flat or
+jump between explanations of its counts. Every fit checks the optimum it
+reports (`diagnostics$optimisation`: whether it was accepted, and if not why)
+and warns when it is not accepted, naming the latent variables along which
+the approximation is flat (for instance the initial abundance of a karyotype
+seen once). The fit itself is not changed by the check; on simulated data,
+refitting such fits until they were accepted did not change their accuracy
+([convergence study](validation/sparse_joint/README.md)).
+
+### More than two samples
+
+`fit_sparse_joint()` also fits one population sampled more than twice: a count
+matrix with one column per sample and `times` (or `dt`, one interval per pair
+of consecutive samples). Every later sample is compared with the same
+dynamics started at the first sample, each with its own depth, and fitness is
+taken to be constant over the series. By default (`intermediate = "majors"`)
+the majors and the domain come from the first and the last sample, as for two
+samples, and the samples in between inform the majors only, with a weight
+that falls with the dispersion of their counts (`intermediate_weight`), so a
+population that drifts between samples, for instance through small passaging
+bottlenecks, leans on the first and the last.
+
+```r
+fit <- fit_sparse_joint(counts, times = c(0, 6, 12, 18), beta = 0.00005, birth_rate = 0.9)
+fit$diagnostics$intermediate_weight
+```
+
+On simulated passaged cultures (12 landscapes; 4 or 8 samples 6 or 60 days
+apart; bottlenecks of 200, 2000 and 20000 cells; 200 or 1000 cells per sample)
+the default was as accurate as fitting the first and the last sample alone:
+median RMSE ratios of 0.97-1.01, within 3% in 21 of 24 settings, with the
+same coverage. Under this model the samples in between add little. Using them for
+every karyotype (`intermediate = "all"`) was 4-6% more accurate with little
+drift (bottleneck 20000) but up to 2.4 times less accurate with strong drift
+(bottleneck 200), where clones that rise and vanish between samples read as
+fit; it suits large populations passaged through large bottlenecks only. The
+default takes 2-4 times as long as two samples, `"all"` up to 20 times
+([stage 2](validation/sparse_joint/multi_timepoint/README.md)). Cohort fits
+and the two older pipelines take two samples.
+
 ### Outputs in the format of alfakR
 
 `alfak_compat()` takes the arguments of `alfakR::alfak()` (branch `dev`), fits
@@ -244,8 +295,12 @@ readRDS(file.path(outdir, "landscape.Rds"))   # k, mean, median, sd, fq, nn
 | `landscape_data.Rds` | With `landscape_data_output = TRUE`: `mean` and `median` models whose `predict()` gives the fitness of any karyotype |
 | `alfak2_fit.Rds` | The alfak2 fit itself |
 
+`yi$x` may have more than two columns, as in alfakR; they are fitted as
+described [above](#more-than-two-samples).
+
 The scale is alfakR's: net growth rate per unit of time, with the
-count-weighted mean of the major karyotypes set to `log(nb / n0) / dt`.
+count-weighted mean of the major karyotypes set to `log(nb / n0) / dt`, `dt`
+the first interval between samples as in alfakR.
 `correct_efflux = TRUE` reports birth rates. `minobs` only chooses which
 karyotypes are listed as frequent; the fit uses every cell. The
 cross-validation holds out each frequent karyotype with its neighbours, as in

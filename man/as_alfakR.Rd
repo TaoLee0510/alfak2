@@ -20,7 +20,7 @@ as_alfakR(
 \item{fit}{An \code{alfak2_sparse_joint_fit}, or an
 \code{alfak2_sparse_joint_rate_fit}, whose point fit is then used.}
 
-\item{minobs}{Minimum number of cells, over both samples, of a frequent
+\item{minobs}{Minimum number of cells, over all samples, of a frequent
 karyotype.}
 
 \item{nboot}{Number of posterior draws, alfakR's bootstrap replicates.}
@@ -57,8 +57,9 @@ layout, so that code written for alfakR results can read them.
 \code{\link[=alfak_compat]{alfak_compat()}} does both in one call with alfakR's arguments.
 }
 \details{
-The karyotypes are chosen as alfakR chooses them. The frequent karyotypes
-(\code{fq}) have at least \code{minobs} cells over both samples; \code{nn} are their
+Fits of two or more samples are converted alike. The karyotypes are
+chosen as alfakR chooses them. The frequent karyotypes
+(\code{fq}) have at least \code{minobs} cells over all samples; \code{nn} are their
 one-step neighbours without nullisomy; the landscape covers both and the
 one-step neighbours of \code{nn}. \code{minobs} affects only this choice. The fit
 itself uses every cell, with its own major karyotypes.
@@ -84,7 +85,8 @@ the two coincide.
 
 The scale is alfakR's. Fitness is the net growth rate per unit of time,
 shifted so that the count-weighted mean of the major karyotypes is
-\code{log(nb / n0) / dt}, the growth rate alfakR assigns to the population.
+\code{log(nb / n0) / dt}, the growth rate alfakR assigns to the population,
+with \code{dt} the first interval between samples, as in alfakR.
 alfakR weights by the estimated initial frequencies of the frequent
 karyotypes instead. With \code{n0 = NULL} and \code{nb = NULL} the model's own level
 at its assumed birth rate is kept. \code{correct_efflux = TRUE} divides by

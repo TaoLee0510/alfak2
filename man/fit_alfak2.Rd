@@ -55,9 +55,13 @@ fit_alfak2(
 )
 }
 \arguments{
-\item{counts}{Two-column count matrix or an \code{alfak2_data} object.}
+\item{counts}{Count matrix with one column per timepoint or an
+\code{alfak2_data} object. The sparse joint pipeline takes two or more
+timepoints, the other two pipelines exactly two.}
 
-\item{dt}{Time interval if \code{counts} is not already prepared.}
+\item{dt}{Time interval if \code{counts} is not already prepared; with more than
+two timepoints, one per pair of consecutive timepoints (or give \code{times}
+in \code{sparse_joint_control}).}
 
 \item{beta}{Missegregation rate.}
 
@@ -188,8 +192,9 @@ An \code{alfak2_sparse_joint_fit} object for \code{pipeline = "sparse_joint"},
 otherwise an \code{alfak2_fit} object.
 }
 \description{
-By default fits the sparse joint count model, built for two sparse
-samples: see \code{\link[=fit_sparse_joint]{fit_sparse_joint()}}, whose result is returned. Its outputs
+By default fits the sparse joint count model, built for sparse samples at
+two or more timepoints: see \code{\link[=fit_sparse_joint]{fit_sparse_joint()}}, whose result is
+returned. Its outputs
 can be converted to those of alfakR with \code{\link[=as_alfakR]{as_alfakR()}}, or produced
 directly with alfakR's arguments by \code{\link[=alfak_compat]{alfak_compat()}}.
 }

@@ -25,7 +25,8 @@ column per sample, and \code{dt}, the time per unit of the column names.}
 
 \item{outdir}{Directory for the output files.}
 
-\item{passage_times}{Optional times of the two samples.}
+\item{passage_times}{Optional times of the samples, one per column of
+\code{yi$x}.}
 
 \item{minobs, nboot, n0, nb, correct_efflux, landscape_data_output}{See
 \code{\link[=as_alfakR]{as_alfakR()}}.}
@@ -50,9 +51,9 @@ pipeline built on alfakR can switch by calling this function. The fit
 itself is also saved, as \code{alfak2_fit.Rds}.
 }
 \details{
-alfak2 fits two samples. \code{yi$x} must have two columns; their times are
+\code{yi$x} has one column per sample, two or more; their times are
 \code{passage_times} or, without \code{passage_times},
-\code{as.numeric(colnames(yi$x)) * yi$dt}, as in alfakR. The fit uses the time
+\code{as.numeric(colnames(yi$x)) * yi$dt}, as in alfakR. The fit uses the times
 between them; the time of the first sets the time 0 of the reported
 frequencies (\code{first_time} of \code{\link[=as_alfakR]{as_alfakR()}}). \code{pm} is the
 missegregation rate, \code{beta} of \code{\link[=fit_sparse_joint]{fit_sparse_joint()}}. alfakR's arguments

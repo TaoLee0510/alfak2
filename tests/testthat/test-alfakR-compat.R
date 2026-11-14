@@ -147,7 +147,47 @@ test_that("alfak_compat() takes alfakR's input and writes its files", {
   projected <- boot10$final_frequencies * exp(boot10$final_fitness * 10)
   expect_equal(projected / rowSums(projected), boot0$final_frequencies, tolerance = 1e-10)
 
-  expect_error(alfak_compat(list(x = cbind(x, x[, 1L]), dt = 1), dir), "two samples")
+  expect_error(alfak_compat(list(x = x[, 1L, drop = FALSE], dt = 1), dir), "two or more samples")
+  expect_error(alfak_compat(list(x = bare), dir, passage_times = c(0, 10, 20)), "one finite time per sample")
   expect_error(alfak_compat(list(x = x, dt = sim$dt), dir, nn_prior = "none"), "nn_prior")
   expect_error(alfak_compat(list(x = x + 0.5, dt = sim$dt), dir), "non-integer")
+})
+
+test_that("as_alfakR() and alfak_compat() take fits of more than two samples", {
+  sim <- simulate_series_counts()
+  fit <- fit_sparse_joint(sim$counts, times = sim$times, beta = sim$beta, max_cn = 4)
+  set.seed(8)
+  out <- as_alfakR(fit, minobs = 20, nboot = 5)
+  fq <- rownames(fit$data$counts)[rowSums(fit$data$counts) >= 20]
+  nn <- alfakR_neighbours(fq)
+  expect_equal(colnames(out$bootstrap_res$final_fitness), fq)
+  expect_equal(out$landscape$k, unique(c(fq, nn, alfakR_neighbours(nn))))
+  expect_equal(unname(rowSums(out$bootstrap_res$final_frequencies)), rep(1, 5))
+  # alfakR's level: population growth over the first interval between samples.
+  prediction <- predict(fit, out$landscape$k)
+  expect_equal(out$landscape$mean, prediction$relative_fitness + log(1e7 / 1e5) / diff(sim$times)[[1L]],
+               tolerance = 1e-12)
+  expect_gt(nrow(out$xval$tmp), 1L)
+  expect_true(is.finite(out$xval$R2R))
+
+  # alfak_compat(): times from the column names, or passage times.
+  x <- sim$counts
+  colnames(x) <- as.character(sim$times / 20)
+  dir <- tempfile("alfak2_alfak_")
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  set.seed(8)
+  alfak_compat(list(x = x, dt = 20), dir, minobs = 20, nboot = 5, pm = sim$beta, max_cn = 4)
+  expect_setequal(list.files(dir), c("bootstrap_res.Rds", "landscape.Rds", "landscape_posterior_samples.Rds",
+                                     "xval.Rds", "alfak2_fit.Rds"))
+  expect_equal(readRDS(file.path(dir, "landscape.Rds")), out$landscape)
+  expect_equal(readRDS(file.path(dir, "bootstrap_res.Rds")), out$bootstrap_res)
+  again <- tempfile("alfak2_alfak_")
+  on.exit(unlink(again, recursive = TRUE), add = TRUE)
+  set.seed(8)
+  bare <- sim$counts
+  colnames(bare) <- NULL
+  alfak_compat(list(x = bare), again, passage_times = sim$times + 5, minobs = 20, nboot = 5, pm = sim$beta,
+               max_cn = 4)
+  expect_equal(readRDS(file.path(again, "landscape.Rds")), out$landscape)
+  expect_error(alfak_compat(list(x = x[, c(2, 1, 3, 4)], dt = 20), dir), "after the one before")
 })

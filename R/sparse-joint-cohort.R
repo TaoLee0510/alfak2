@@ -30,6 +30,10 @@
 #' higher marginal likelihood; on simulated cohorts it chose the shared trend
 #' for samples of one landscape and separate trends otherwise. It takes twice
 #' as long. The marginal likelihoods are in `diagnostics$trend_objective`.
+#' The scale optimisation is checked as in [fit_sparse_joint()]:
+#' `diagnostics$trend_convergence` tells whether each trend's was accepted,
+#' and `diagnostics$optimisation` how the kept one was checked; its
+#' `flat_direction` also names the sample of each karyotype.
 #'
 #' @param samples List of two-column count matrices with karyotype row names,
 #'   or of `alfak2_data` objects. Names identify the samples.
@@ -84,6 +88,7 @@ fit_sparse_joint_cohort <- function(samples,
   if (!is.list(samples) || inherits(samples, "alfak2_data") || !length(samples)) {
     stop("`samples` must be a list of count matrices or `alfak2_data` objects.", call. = FALSE)
   }
+  sparse_joint_cohort_check_pairs(samples)
   trend_mode <- match.arg(trend)
   # With the balance prior and no history given, each sample's history is
   # chosen as fit_sparse_joint() chooses it, once, before the trend.
@@ -99,24 +104,31 @@ fit_sparse_joint_cohort <- function(samples,
     # models have the same hyperparameters, so their Laplace marginal
     # likelihoods are comparable.
     arguments <- mget(names(formals(sys.function())), envir = environment())
+    # Only the chosen trend's convergence is warned about.
     fits <- lapply(c(shared = "shared", sample = "sample"), function(mode) {
-      tryCatch(do.call(fit_sparse_joint_cohort, utils::modifyList(arguments, list(trend = mode))),
+      tryCatch(withCallingHandlers(do.call(fit_sparse_joint_cohort, utils::modifyList(arguments, list(trend = mode))),
+                                   alfak2_convergence_warning = function(w) invokeRestart("muffleWarning")),
                error = function(e) e)
     })
     failed <- vapply(fits, inherits, logical(1), what = "error")
     if (all(failed)) stop(fits[[1L]])
     objective <- vapply(fits, function(fit) if (inherits(fit, "error")) Inf else fit$diagnostics$objective, numeric(1))
+    convergence <- vapply(fits, function(fit) if (inherits(fit, "error")) NA_real_ else fit$diagnostics$convergence,
+                          numeric(1))
     # A fit whose scale optimisation failed has no marginal likelihood to
-    # compare; without one on either side there is nothing to choose by.
-    usable <- is.finite(objective)
-    if (!any(usable)) {
+    # compare; without one on either side there is nothing to choose by. One
+    # that was not accepted is chosen only if neither was.
+    chosen <- sparse_joint_choose_candidate(objective, convergence)
+    if (is.na(chosen)) {
       stop("Neither trend has a finite marginal likelihood (the scale optimisation failed for both); ",
            "choose one with `trend = \"shared\"` or `trend = \"sample\"`.", call. = FALSE)
     }
-    best <- fits[[which(usable)[which.min(objective[usable])]]]
+    best <- fits[[chosen]]
     best$diagnostics$trend_objective <- objective
+    best$diagnostics$trend_convergence <- convergence
     best$diagnostics$seconds <- sum(vapply(fits[!failed], function(fit) fit$diagnostics$seconds, numeric(1)))
     best$diagnostics$history_profiles <- history_profiles
+    sparse_joint_convergence_warning(best$diagnostics$optimisation)
     return(best)
   }
   sharing <- match.arg(sharing)
@@ -254,7 +266,13 @@ fit_sparse_joint_cohort <- function(samples,
   random <- c("zeta", "m", if (deviations) "g", "coef", "theta1")
   objective <- TMB::MakeADFun(tmb_data, parameters, map = map, random = random, DLL = "alfak2",
                               silent = TRUE, inner.control = inner_control)
-  optimum <- sparse_joint_optimise_scales(objective, control)
+  labels <- sparse_joint_latent_labels(
+    names(objective$env$par)[objective$env$random],
+    states = data.frame(karyotype = state_label, sample = names(samples)[state_sample],
+                        cells = paste(y0, y1, sep = " -> "), major = state_major, stringsAsFactors = FALSE),
+    nodes = data.frame(karyotype = node_labels, major = node_labels %in% major_labels, stringsAsFactors = FALSE)
+  )
+  optimum <- sparse_joint_optimise_scales(objective, control, labels = labels)
   solver <- sparse_joint_posterior(objective, tmb_data, parameters, map, random, optimum$par, inner_control)
   node_latent <- which(solver$names == "m")
   state_latent <- if (deviations) which(solver$names == "g") else node_latent[state_node]
@@ -330,7 +348,7 @@ fit_sparse_joint_cohort <- function(samples,
     summary
   })
   names(summaries) <- names(samples)
-  structure(list(
+  fit <- structure(list(
     data = stats::setNames(data, names(samples)),
     landscape = landscape,
     samples = summaries,
@@ -342,6 +360,7 @@ fit_sparse_joint_cohort <- function(samples,
                  calibration = calibration, birth_rate = birth_rate),
     diagnostics = list(
       convergence = optimum$convergence, message = optimum$message, objective = optimum$objective,
+      optimisation = optimum$check,
       finite_uncertainty = all(is.finite(state_hat[, 2L])) && all(is.finite(m_hat[, 2L])) &&
         all(is.finite(landscape$relative_sd)),
       n_samples = n_sample, n_nodes = n_node, n_states = n_state, n_major = length(major_labels),
@@ -357,6 +376,8 @@ fit_sparse_joint_cohort <- function(samples,
       seconds = proc.time()[["elapsed"]] - started
     )
   ), class = "alfak2_sparse_joint_cohort_fit")
+  sparse_joint_convergence_warning(fit$diagnostics$optimisation)
+  fit
 }
 
 #' Predict fitness from a cohort fit
@@ -510,6 +531,21 @@ sparse_joint_cohort_coverage <- function(data, domains, sample_names, major_freq
 # Each sample's history for the balance prior, chosen by a single-sample fit
 # with the cohort's settings and copy-number bounds. `arguments` are those of
 # fit_sparse_joint_cohort().
+# Cohort fits take two timepoints per sample.
+sparse_joint_cohort_check_pairs <- function(samples) {
+  n_time <- vapply(samples, function(s) {
+    counts <- if (inherits(s, "alfak2_data")) s$counts else s
+    if (is.null(dim(counts))) NA_integer_ else ncol(counts)
+  }, integer(1))
+  bad <- which(!is.na(n_time) & n_time != 2L)
+  if (length(bad)) {
+    label <- if (is.null(names(samples)) || !nzchar(names(samples)[bad[1L]])) sprintf("sample %d", bad[1L]) else
+      names(samples)[bad[1L]]
+    stop(sprintf("Cohort fits take two timepoints per sample; %s has %d.", label, n_time[bad[1L]]), call. = FALSE)
+  }
+  invisible(TRUE)
+}
+
 sparse_joint_cohort_histories <- function(arguments) {
   samples <- arguments$samples
   n_sample <- length(samples)
@@ -540,8 +576,13 @@ sparse_joint_cohort_histories <- function(arguments) {
   }
   single <- arguments[intersect(names(arguments), names(formals(fit_sparse_joint)))]
   single[c("counts", "dt", "beta", "history", "max_cn", "initial_state")] <- NULL
+  # Fitted only to choose each sample's history: their convergence is in the
+  # profiles, not warned about.
   fits <- lapply(data, function(d) {
-    do.call(fit_sparse_joint, c(list(counts = d, max_cn = max_cn, initial_state = "balance"), single))
+    withCallingHandlers(
+      do.call(fit_sparse_joint, c(list(counts = d, max_cn = max_cn, initial_state = "balance"), single)),
+      alfak2_convergence_warning = function(w) invokeRestart("muffleWarning")
+    )
   })
   list(history = vapply(fits, function(f) f$settings$history, numeric(1)),
        profiles = stats::setNames(lapply(fits, function(f) f$diagnostics$history_profile), names(samples)))
