@@ -2,23 +2,36 @@
 % Please edit documentation in R/prepare-data.R
 \name{prepare_alfak2_data}
 \alias{prepare_alfak2_data}
-\title{Prepare two-timepoint karyotype count data}
+\title{Prepare karyotype count data}
 \usage{
-prepare_alfak2_data(counts, dt = 1, beta = 5e-05, metadata = list())
+prepare_alfak2_data(
+  counts,
+  dt = 1,
+  beta = 5e-05,
+  metadata = list(),
+  times = NULL
+)
 }
 \arguments{
-\item{counts}{Matrix or data frame with two columns and dot-separated
-karyotype labels as row names.}
+\item{counts}{Matrix or data frame with one column per timepoint, at least
+two, in time order, and dot-separated karyotype labels as row names.}
 
-\item{dt}{Positive time interval between the two samples.}
+\item{dt}{With two timepoints, the positive time between them. With more,
+either \code{times} or the positive time between each pair of consecutive
+timepoints (one value fewer than there are timepoints).}
 
 \item{beta}{Missegregation rate used by graph transition kernels.}
 
 \item{metadata}{Optional list stored on the returned object.}
+
+\item{times}{Optional sampling times, one per column, strictly increasing,
+instead of \code{dt}. Only differences matter.}
 }
 \value{
-An \code{alfak2_data} object.
+An \code{alfak2_data} object. \code{dt} is the time from the first to the last
+timepoint. With more than two timepoints, \code{times} holds the time of each
+since the first; \code{\link[=alfak2_data_times]{alfak2_data_times()}} returns it for any number.
 }
 \description{
-Prepare two-timepoint karyotype count data
+Prepare karyotype count data
 }

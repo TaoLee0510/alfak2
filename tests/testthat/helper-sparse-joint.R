@@ -74,3 +74,26 @@ simulate_cohort_counts <- function(seed = 41, depth = c(A = 300, B = 4000), dt =
                       B = sample_counts(c(0, 0.55, 0, 0.45), depth[["B"]], dt[["B"]])),
        labels = labels, net = (2 * exp(kernel$log_self) - 1) * birth, dt = unname(dt), beta = beta)
 }
+
+# One population sampled at several times, drawn from the model's mean
+# dynamics as in `simulate_sparse_joint_counts()`: three clones with known
+# birth rates and their neighbours, which start absent.
+simulate_series_counts <- function(seed = 21, depth = 1500, times = c(0, 20, 40, 60), beta = 5e-4) {
+  set.seed(seed)
+  major <- rbind(c(2L, 2L, 2L, 2L), c(2L, 3L, 2L, 2L), c(2L, 2L, 1L, 2L))
+  labels <- union(format_karyotypes(major), format_karyotypes(one_step_neighbours(major, 1L, 4L)))
+  karyotypes <- parse_karyotypes(labels)
+  n <- length(labels)
+  birth <- c(1.00, 1.03, 0.97, stats::runif(n - 3L, 0.80, 0.94))
+  log_n0 <- log(c(0.60, 0.10, 0.30, rep(0, n - 3L)))
+  kernel <- sparse_division_kernel(karyotypes, beta)
+  depth <- rep_len(depth, length(times))
+  counts <- vapply(seq_along(times), function(k) {
+    log_n <- if (times[[k]] == times[[1L]]) log_n0 else
+      exact_forward_reference(log_n0, log(birth), kernel, times[[k]] - times[[1L]])
+    stats::rmultinom(1L, depth[[k]], exp(log_n - max(log_n)))[, 1L]
+  }, numeric(n))
+  dimnames(counts) <- list(labels, paste0("t", seq_along(times) - 1L))
+  list(counts = counts[rowSums(counts) > 0, , drop = FALSE], labels = labels, birth = birth,
+       net = (2 * exp(kernel$log_self) - 1) * birth, times = times, beta = beta)
+}

@@ -1,7 +1,7 @@
 validate_count_matrix <- function(counts) {
   if (is.data.frame(counts)) counts <- as.matrix(counts)
-  if (!is.matrix(counts) || ncol(counts) != 2L) {
-    stop("`counts` must be a matrix or data frame with exactly two columns.", call. = FALSE)
+  if (!is.matrix(counts) || ncol(counts) < 2L) {
+    stop("`counts` must be a matrix or data frame with one column per timepoint, at least two.", call. = FALSE)
   }
   if (is.null(rownames(counts)) || any(!nzchar(rownames(counts)))) {
     stop("`counts` must have non-empty karyotype row names.", call. = FALSE)

@@ -664,6 +664,67 @@ whose own and neighbours' counts are removed is barely predictable from the
 rest of the landscape. On `dev_L10_P01_unbalanced_3000_100_360d` it is 0.43
 (alfakR: -0.04). The cross-validation took 75 s for 27 folds.
 
+## Convergence of the scale optimisation
+
+`convergence/` (diagnosis and evaluation), `model_m/` (a model change tried
+and stopped). On the development benchmark at ff13cf4, 112 of 420 candidate
+fits (history candidates) ended with nlminb's "false convergence"; 91 of them
+had a degenerate Laplace approximation: the inner Hessian's smallest
+eigenvalue was 1e-8 to 1e-6, against at least 4.4e-3 where nlminb converged,
+along the initial abundance of a karyotype with very few cells (mostly none
+in the first sample and one or two in the second). There the objective drops
+by half a log determinant for no reason in the data, depends on the path of
+the inner optimisation, and TMB's gradient is out by orders of magnitude.
+
+- Every fit now checks the point it reports (reproducible objective from its
+  own mode, healthy inner Hessian, no better inner mode from the initial
+  values, small finite-difference gradient) and reports and warns when it is
+  not accepted, with the latent variables along the flattest direction
+  (`diagnostics$optimisation$flat_direction`, `flat_composition`). The fit is
+  unchanged: on the stage-0 reference set every record equals ff13cf4's
+  (144 items, GBM 20/20), at 1.02 times the time.
+- Searching the scales again with degenerate points excluded (build cv1)
+  raised accepted candidates from 73% to 77% at 2.2 times the time, without
+  changing accuracy (median RMSE ratio 1.000 at distances 0-2 on the 63 fits
+  it changed); it is kept as an internal option, off.
+- Integrating the initial abundance of non-major karyotypes out by quadrature
+  (stage M) moved the flat direction to the next sparse quantity (zeta of
+  majors with no first-sample cell, g of non-majors that die out); stopped,
+  prototype kept as `model_m/m1_quadrature.patch`.
+
+## More than two samples
+
+`multi_timepoint/` (stage 2). One population passaged and sampled 4 or 8
+times, 6 or 60 days apart, bottlenecks of 200, 2000 and 20000 cells, 200 or
+1000 cells per sample, 12 landscapes (288 datasets); the multi-sample fits
+against fits of the first and the last sample (`ends`), RMSE ratio per
+landscape, medians over landscapes:
+
+| arm | bottleneck 200 | 2000 | 20000 | cells within 3% |
+| --- | --- | --- | --- | --- |
+| `all` (every sample for every karyotype) | 1.31-1.44 | 1.01-1.09 | 0.94-0.96 | 7 / 24 |
+| `majors`, default (majors from the ends, intermediate samples for them, weight 1/dispersion) | 0.97-1.01 | 0.99-1.00 | 1.00-1.01 | 21 / 24 |
+
+- With all samples for every karyotype, the loss sits on karyotypes seen only
+  in intermediate samples (fitness overestimated) and, with strong drift, on
+  everything. It is not passaging drift alone: at a bottleneck of 2e5 the same
+  landscape still lost 13% on those karyotypes. Clones that arise, grow by
+  chance and are lost between samples count once per sample, and choosing the
+  majors from every sample makes some of them majors.
+- The default is safe but gains nothing on these simulations; median
+  coverage per setting is 0.96-1.00 (0.92-1.00 for `all`). A model of the clones' chance and of passaging
+  drift (the plan's stage 3) is not built.
+
+## Patient regrowth
+
+`patient_regrowth/` (two samples). A recurrence grown from 2000, 200 or 20
+survivors costs little (skill of observed karyotypes -0.03 to -0.12, neighbours
+unchanged). Growth that started late, not told to the model, costs a great deal
+(skill below zero when the population grew for a quarter of the interval or
+less); telling it the growing share recovers most of it, and a range of rates
+protects at a cost when there was no delay. Fitting 8 patients together does
+not help.
+
 ## Open
 
 - The free model misses the information in a deep first sample (the failing
@@ -684,6 +745,8 @@ rest of the landscape. On `dev_L10_P01_unbalanced_3000_100_360d` it is 0.43
   on rugged ones). Far intervals are too narrow at wavelength 0.8 (coverage
   0.84 at distance 4).
 - The calibration constants come from one family of simulated landscapes.
+- With more than two samples the samples in between add little (above); a
+  model of clone chance and passaging drift is untried.
 - ALFA-K with minobs 5 has 75 of 96 development fits (the HPC run continues)
   and none on the held-out landscapes. On those 75 its RMSE is 0.169 / 0.225
   at distances 0 / 1, above no information, and both variants rank better

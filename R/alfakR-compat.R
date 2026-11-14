@@ -128,10 +128,11 @@ sparse_joint_alfakR_xval <- function(fit, fq, observation, level, divisor) {
   }))
   fold <- fold[!duplicated(names(fold))]
   problem <- sparse_joint_problem(fit$data, fit$settings)
-  never_seen <- log(sum(problem$tmb_data$y0)) + fit$settings$initial_frequency[[1L]]
+  depth_first <- if (is.null(problem$tmb_data$y)) sum(problem$tmb_data$y0) else sum(problem$tmb_data$y[, 1L])
+  never_seen <- log(depth_first) + fit$settings$initial_frequency[[1L]]
   karyotypes <- problem$domain$karyotypes
   self <- 2 * exp(problem$kernel$log_self) - 1
-  weight_major <- (summary$count_t0 + summary$count_t1)[seq_len(n_major)]
+  weight_major <- rowSums(as.matrix(summary[grep("^count_t[0-9]+$", names(summary))]))[seq_len(n_major)]
   reference <- fit$trend$reference$fitness
   pairs <- lapply(unique(fold), function(i) {
     members <- names(fold)[fold == i]
@@ -182,8 +183,9 @@ sparse_joint_alfakR_xval <- function(fit, fq, observation, level, divisor) {
 #' [write_alfakR_outputs()] saves them under alfakR's file names, and
 #' [alfak_compat()] does both in one call with alfakR's arguments.
 #'
-#' The karyotypes are chosen as alfakR chooses them. The frequent karyotypes
-#' (`fq`) have at least `minobs` cells over both samples; `nn` are their
+#' Fits of two or more samples are converted alike. The karyotypes are
+#' chosen as alfakR chooses them. The frequent karyotypes
+#' (`fq`) have at least `minobs` cells over all samples; `nn` are their
 #' one-step neighbours without nullisomy; the landscape covers both and the
 #' one-step neighbours of `nn`. `minobs` affects only this choice. The fit
 #' itself uses every cell, with its own major karyotypes.
@@ -209,7 +211,8 @@ sparse_joint_alfakR_xval <- function(fit, fq, observation, level, divisor) {
 #'
 #' The scale is alfakR's. Fitness is the net growth rate per unit of time,
 #' shifted so that the count-weighted mean of the major karyotypes is
-#' `log(nb / n0) / dt`, the growth rate alfakR assigns to the population.
+#' `log(nb / n0) / dt`, the growth rate alfakR assigns to the population,
+#' with `dt` the first interval between samples, as in alfakR.
 #' alfakR weights by the estimated initial frequencies of the frequent
 #' karyotypes instead. With `n0 = NULL` and `nb = NULL` the model's own level
 #' at its assumed birth rate is kept. `correct_efflux = TRUE` divides by
@@ -228,7 +231,7 @@ sparse_joint_alfakR_xval <- function(fit, fq, observation, level, divisor) {
 #'
 #' @param fit An `alfak2_sparse_joint_fit`, or an
 #'   `alfak2_sparse_joint_rate_fit`, whose point fit is then used.
-#' @param minobs Minimum number of cells, over both samples, of a frequent
+#' @param minobs Minimum number of cells, over all samples, of a frequent
 #'   karyotype.
 #' @param nboot Number of posterior draws, alfakR's bootstrap replicates.
 #' @param n0,nb Population sizes that set the scale as in alfakR, or both
@@ -281,7 +284,9 @@ as_alfakR <- function(fit, minobs = 20, nboot = 45, n0 = 1e5, nb = 1e7, correct_
   nn <- alfakR_neighbours(fq)
   k <- unique(c(fq, nn, alfakR_neighbours(nn)))
   prediction <- stats::predict(fit, k)
-  level <- if (is.null(n0)) fit$trend$reference$fitness else log(nb / n0) / fit$data$dt
+  # alfakR's population growth per unit of time: log(nb / n0) over the first
+  # interval between samples (the whole interval for two samples).
+  level <- if (is.null(n0)) fit$trend$reference$fitness else log(nb / n0) / diff(alfak2_data_times(fit$data))[[1L]]
   divisor <- if (correct_efflux) 2 * sparse_joint_self_probability(parse_karyotypes(k), fit$data$beta) - 1 else
     rep(1, length(k))
   names(divisor) <- k
@@ -390,9 +395,9 @@ write_alfakR_outputs <- function(x, outdir) {
 #' pipeline built on alfakR can switch by calling this function. The fit
 #' itself is also saved, as `alfak2_fit.Rds`.
 #'
-#' alfak2 fits two samples. `yi$x` must have two columns; their times are
+#' `yi$x` has one column per sample, two or more; their times are
 #' `passage_times` or, without `passage_times`,
-#' `as.numeric(colnames(yi$x)) * yi$dt`, as in alfakR. The fit uses the time
+#' `as.numeric(colnames(yi$x)) * yi$dt`, as in alfakR. The fit uses the times
 #' between them; the time of the first sets the time 0 of the reported
 #' frequencies (`first_time` of [as_alfakR()]). `pm` is the
 #' missegregation rate, `beta` of [fit_sparse_joint()]. alfakR's arguments
@@ -408,7 +413,8 @@ write_alfakR_outputs <- function(x, outdir) {
 #' @param yi List with `x`, a count matrix with karyotype row names and one
 #'   column per sample, and `dt`, the time per unit of the column names.
 #' @param outdir Directory for the output files.
-#' @param passage_times Optional times of the two samples.
+#' @param passage_times Optional times of the samples, one per column of
+#'   `yi$x`.
 #' @param minobs,nboot,n0,nb,correct_efflux,landscape_data_output See
 #'   [as_alfakR()].
 #' @param pm Missegregation rate per chromosome copy and division.
@@ -432,8 +438,8 @@ alfak_compat <- function(yi, outdir, passage_times = NULL, minobs = 20, nboot = 
   x <- yi$x
   if (is.data.frame(x)) x <- as.matrix(x)
   if (!is.matrix(x) || !is.numeric(x)) stop("`yi$x` must be a numeric matrix.", call. = FALSE)
-  if (ncol(x) != 2L) {
-    stop(sprintf("alfak2 fits two samples; `yi$x` has %d columns.", ncol(x)), call. = FALSE)
+  if (ncol(x) < 2L) {
+    stop(sprintf("alfak2 fits two or more samples; `yi$x` has %d column.", ncol(x)), call. = FALSE)
   }
   if (any(abs(x - round(x)) > sqrt(.Machine$double.eps), na.rm = TRUE)) {
     if (!isTRUE(allow_noninteger_counts)) {
@@ -447,19 +453,21 @@ alfak_compat <- function(yi, outdir, passage_times = NULL, minobs = 20, nboot = 
       stop("`yi$dt` must be a single finite number when `passage_times` is NULL.", call. = FALSE)
     }
     axis <- suppressWarnings(as.numeric(colnames(x)))
-    if (length(axis) != 2L || any(!is.finite(axis))) {
+    if (length(axis) != ncol(x) || any(!is.finite(axis))) {
       stop("Without `passage_times`, `colnames(yi$x)` must be numeric.", call. = FALSE)
     }
     axis * yi$dt
   } else {
-    if (!is.numeric(passage_times) || length(passage_times) != 2L || any(!is.finite(passage_times))) {
-      stop("`passage_times` must give two finite times.", call. = FALSE)
+    if (!is.numeric(passage_times) || length(passage_times) != ncol(x) || any(!is.finite(passage_times))) {
+      stop("`passage_times` must give one finite time per sample.", call. = FALSE)
     }
     passage_times
   }
   interval <- diff(as.numeric(times))
-  if (interval <= 0) stop("The second sample must come after the first.", call. = FALSE)
-  fit <- fit_sparse_joint(x, dt = interval, beta = pm, ...)
+  if (any(interval <= 0)) stop("Each sample must come after the one before.", call. = FALSE)
+  # Two samples as before; more with their times.
+  fit <- if (ncol(x) == 2L) fit_sparse_joint(x, dt = interval, beta = pm, ...) else
+    fit_sparse_joint(x, times = as.numeric(times), beta = pm, ...)
   out <- as_alfakR(fit, minobs = minobs, nboot = nboot, n0 = n0, nb = nb, correct_efflux = correct_efflux,
                    landscape_data_output = landscape_data_output, first_time = as.numeric(times)[1L])
   write_alfakR_outputs(out, outdir)

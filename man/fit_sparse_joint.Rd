@@ -23,14 +23,19 @@ fit_sparse_joint(
   balance_sd = 1,
   calibration = sparse_joint_default_calibration,
   control = list(eval.max = 200, iter.max = 100),
-  inner_control = list(maxit = 200, tol = 1e-10)
+  inner_control = list(maxit = 200, tol = 1e-10),
+  times = NULL,
+  intermediate = c("majors", "all"),
+  intermediate_weight = NULL
 )
 }
 \arguments{
-\item{counts}{Two-column count matrix with karyotype row names, or an
-\code{alfak2_data} object.}
+\item{counts}{Count matrix with karyotype row names and one column per
+timepoint, at least two, in time order; or an \code{alfak2_data} object.}
 
-\item{dt}{Time between the samples, if \code{counts} is a matrix.}
+\item{dt}{Time between the samples, if \code{counts} is a matrix: one interval
+for two timepoints, or one per pair of consecutive timepoints. See also
+\code{times}.}
 
 \item{beta}{Missegregation rate per chromosome copy and division, if
 \code{counts} is a matrix.}
@@ -40,10 +45,10 @@ fit_sparse_joint(
 \item{birth_rate_log_sd}{Prior standard deviation of the log baseline birth
 rate around \code{log(birth_rate)}.}
 
-\item{major_frequency}{Minimum share of either sample for a karyotype to
+\item{major_frequency}{Minimum share of any sample for a karyotype to
 anchor the domain as a major karyotype.}
 
-\item{major_count}{Minimum number of cells, over both samples, for a major
+\item{major_count}{Minimum number of cells, over all samples, for a major
 karyotype. A single cell must not be enough.}
 
 \item{max_states}{Largest domain to fit. If the domain would be larger,
@@ -59,12 +64,12 @@ distance.}
 \item{shell_sd}{Prior standard deviation of the shell coefficient.}
 
 \item{initial_frequency}{Prior mean and standard deviation of the log
-frequency at the first timepoint of a karyotype seen at neither
-timepoint. It is a frequency, not a count: a domain has thousands of
-unseen karyotypes, and a prior in counts would give them a large share of
-a small sample. A karyotype seen only at the second timepoint is centred
-on its frequency there, with the same standard deviation: absent other
-evidence its frequency is taken not to have changed.}
+frequency at the first timepoint of a karyotype seen at no timepoint. It
+is a frequency, not a count: a domain has thousands of unseen
+karyotypes, and a prior in counts would give them a large share of a
+small sample. A karyotype seen only later is centred on its frequency at
+the earliest timepoint it was seen, with the same standard deviation:
+absent other evidence its frequency is taken not to have changed.}
 
 \item{initial_state}{How abundances at the first timepoint are treated.
 \code{"balance"}, the default, starts every karyotype that is not major at
@@ -78,8 +83,8 @@ sample, as under a new treatment.}
 
 \item{history}{Time, in units of \code{dt}, over which the balance built up
 before the first sample. By default it is chosen among the interval
-between the samples and 30, 100, 300, 1000 and 3000 divisions at
-\code{birth_rate} that are longer than the interval: the model is fitted at
+between the first and the last sample and 30, 100, 300, 1000 and 3000
+divisions at \code{birth_rate} that are longer than that interval: the model is fitted at
 each and the fit with the highest marginal likelihood is kept, so a fit
 takes up to six times as long; \code{diagnostics$history_profile} lists the
 candidates. A single value fixes the history; several values are the
@@ -99,13 +104,32 @@ into the reported \code{relative_sd}; see Details. Without
 alfak2 33a045c (\code{c(floor = 0.009, deficit = 0.6)}). \code{NULL} reports the
 model's own.}
 
-\item{control}{List passed to \code{\link[stats:nlminb]{stats::nlminb()}} for the scale parameters.}
+\item{control}{List passed to \code{\link[stats:nlminb]{stats::nlminb()}} for the first search of
+the scale parameters; see Details for what follows it.}
 
 \item{inner_control}{TMB inner Newton controls.}
+
+\item{times}{Sampling times, one per column of \code{counts}, instead of \code{dt};
+only their differences matter. When given, \code{dt} is not used.}
+
+\item{intermediate}{With more than two samples, how the samples between
+the first and the last are used. \code{"majors"}, the default: the majors and
+the domain are chosen from the first and the last sample, as for two
+samples, and the samples in between count for the majors only, with
+weight \code{intermediate_weight}; the other karyotypes are fitted to the first
+and the last sample. \code{"all"}: like the first and the last, for every
+state, with the majors chosen from every sample. See Details.}
+
+\item{intermediate_weight}{With \code{intermediate = "majors"}, the weight of the
+samples in between, in (0, 1]. \code{NULL} estimates it: the inverse of the
+dispersion of the majors' counts in those samples in a first fit (at the
+shortest history), at most 1, so that a population that drifts between
+samples (small passaging bottlenecks) leans on the first and the last.}
 }
 \value{
 An \code{alfak2_sparse_joint_fit} object. \code{summary} has one row per
-domain karyotype, with its counts and the counts the fit expects;
+domain karyotype, with its counts (\code{count_t0}, \code{count_t1}, ..., one
+column per timepoint) and the counts the fit expects (\code{expected_t0}, ...);
 \code{fitness_mean} is the net growth rate per unit of \code{dt},
 and \code{relative_fitness} is that rate minus the count-weighted mean over
 the major karyotypes, with \code{relative_sd} its uncertainty.
@@ -118,9 +142,9 @@ at that timepoint), \code{shared} (karyotypes seen at both timepoints) and
 domain to the nearest major karyotype).
 }
 \description{
-Fits fitness to two sparse karyotype samples with a single count likelihood
-on a sparse domain: the well-sampled ("major") karyotypes and all their
-one-step neighbours. Division dynamics use a closed form in which each
+Fits fitness to sparse karyotype samples of one population, two or more
+timepoints, with a single count likelihood on a sparse domain: the
+well-sampled ("major") karyotypes and all their one-step neighbours. Division dynamics use a closed form in which each
 karyotype grows on its own and receives mutational influx from its
 neighbours; an unobserved neighbour of an abundant karyotype is thereby
 evidence that the neighbour is less fit. Fitness away from the domain is
@@ -128,6 +152,23 @@ predicted with \code{\link[=predict]{predict()}} from a fitted trend in chromoso
 curvature and distance to the nearest major karyotype.
 }
 \details{
+With more than two timepoints every later sample is compared with the
+same closed-form dynamics started at the first sample, each with its own
+depth; the dynamics are not restarted at intermediate samples. Fitness is
+taken to be constant over the whole series, and the history of the balance
+prior is at least the time from the first to the last sample. Two-timepoint
+fits are unchanged. By default (\code{intermediate = "majors"}) the majors and
+the domain come from the first and the last sample, and the samples in
+between count for the majors only, weighted by the inverse of their
+dispersion in a first fit (\code{diagnostics$intermediate_weight},
+\code{intermediate_dispersion}). Clones that arise, grow by chance and are lost
+between samples, or are thinned by passaging, would otherwise count once
+per sample and read as fit. On simulated passaged cultures the default was
+as accurate as the first and the last sample alone; every sample for every
+karyotype (\code{"all"}) was 4-6\% more accurate with large bottlenecks (20000
+cells) and up to 2.4 times less accurate with small ones (200)
+(validation/sparse_joint/multi_timepoint).
+
 Observed karyotypes that are not next to a major karyotype are left out of
 the likelihood, together with their cells. They would enter only because
 they were observed, while their unobserved siblings would not, which
@@ -142,6 +183,37 @@ of class \code{alfak2_domain_coverage_error}. Its message begins "A timepoint
 has no cell inside the model domain." and its \code{coverage} element holds the
 same table. \code{\link[=check_sparse_joint_counts]{check_sparse_joint_counts()}} summarises a count matrix before
 fitting.
+
+The scales of the trend and the residual are fitted by Laplace marginal
+likelihood. \code{nlminb}'s own verdict on convergence is not taken as it is:
+where the inner Hessian is nearly singular the Laplace approximation drops
+for no reason in the data, and \code{nlminb} stops there with "false
+convergence", or reports that at a true optimum. The fit checks the point
+itself (healthy inner Hessian, the same objective from its own mode, no
+better inner mode from the initial values, a small finite-difference
+gradient). \code{diagnostics$convergence} is 0 when the point was accepted and 1
+when not, with a warning of class \code{alfak2_convergence_warning};
+\code{diagnostics$optimisation} tells how (\code{status}, \code{stage}, \code{reasons},
+\code{restarts}, \code{evaluations}, \code{nlminb_convergence}, \code{nlminb_message},
+\code{min_eigen}, \code{projected_gradient}, \code{objective_difference},
+\code{joint_difference}, \code{flat_direction}, \code{flat_composition}). The fit itself
+is the same as before this check (alfak2 ff13cf4); so is the choice of
+history, by the lowest objective.
+
+Most fits that are not accepted have a karyotype with very few cells, whose
+initial abundance or birth rate the data hardly constrain. A count in the
+second sample, for one, has two explanations of nearly equal weight: the
+karyotype was there and not sampled, or its neighbours made it during the
+interval. The Laplace approximation is then nearly flat along that
+quantity, or jumps from one explanation to the other as the scales change.
+For a fit that is not accepted, \code{flat_direction} lists the latent variables
+with the largest shares of the flattest direction of the inner Hessian
+(\code{variable}, \code{karyotype}, its \code{cells} in each sample, \code{major}, \code{share}),
+\code{flat_composition} its make-up by kind of latent variable (\code{variable},
+\code{major}, \code{share}), and the warning names both when that Hessian is nearly
+singular. On simulated data, fits that searching again turned into
+accepted ones predicted fitness as well as before
+(validation/sparse_joint/convergence).
 
 \code{relative_sd} is not the model's own posterior standard deviation, which
 is kept as \code{relative_sd_model}. That one takes the model to be exact, and

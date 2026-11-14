@@ -298,8 +298,9 @@ test_that("by default the history is chosen among the interval and longer divisi
   chosen <- fit()
   profile <- chosen$diagnostics$history_profile
   expect_equal(profile$history, sparse_joint_history_candidates(sim$dt, 1))
-  expect_equal(chosen$settings$history, profile$history[which.min(profile$objective)])
-  expect_equal(chosen$diagnostics$objective, min(profile$objective))
+  best <- sparse_joint_choose_candidate(profile$objective, profile$convergence)
+  expect_equal(chosen$settings$history, profile$history[[best]])
+  expect_equal(chosen$diagnostics$objective, profile$objective[[best]])
   expect_equal(chosen$summary, fit(history = chosen$settings$history)$summary)
   # The behaviour of alfak2 8327282 and earlier: the interval itself.
   interval <- fit(history = sim$dt)

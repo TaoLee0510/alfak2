@@ -47,10 +47,10 @@ rate around \code{log(birth_rate)}.}
 
 \item{trend}{\code{"select"}, \code{"sample"} or \code{"shared"}; see above.}
 
-\item{major_frequency}{Minimum share of either sample for a karyotype to
+\item{major_frequency}{Minimum share of any sample for a karyotype to
 anchor the domain as a major karyotype.}
 
-\item{major_count}{Minimum number of cells, over both samples, for a major
+\item{major_count}{Minimum number of cells, over all samples, for a major
 karyotype. A single cell must not be enough.}
 
 \item{max_states}{Largest domain to fit. If the domain would be larger,
@@ -66,12 +66,12 @@ distance.}
 \item{shell_sd}{Prior standard deviation of the shell coefficient.}
 
 \item{initial_frequency}{Prior mean and standard deviation of the log
-frequency at the first timepoint of a karyotype seen at neither
-timepoint. It is a frequency, not a count: a domain has thousands of
-unseen karyotypes, and a prior in counts would give them a large share of
-a small sample. A karyotype seen only at the second timepoint is centred
-on its frequency there, with the same standard deviation: absent other
-evidence its frequency is taken not to have changed.}
+frequency at the first timepoint of a karyotype seen at no timepoint. It
+is a frequency, not a count: a domain has thousands of unseen
+karyotypes, and a prior in counts would give them a large share of a
+small sample. A karyotype seen only later is centred on its frequency at
+the earliest timepoint it was seen, with the same standard deviation:
+absent other evidence its frequency is taken not to have changed.}
 
 \item{initial_state}{\code{"free"} or \code{"balance"}; see \code{\link[=fit_sparse_joint]{fit_sparse_joint()}}.
 Unlike a single sample, a cohort starts free by default: with balance,
@@ -97,7 +97,8 @@ into the reported \code{relative_sd}; see Details. Without
 alfak2 33a045c (\code{c(floor = 0.009, deficit = 0.6)}). \code{NULL} reports the
 model's own.}
 
-\item{control}{List passed to \code{\link[stats:nlminb]{stats::nlminb()}} for the scale parameters.}
+\item{control}{List passed to \code{\link[stats:nlminb]{stats::nlminb()}} for the first search of
+the scale parameters; see Details for what follows it.}
 
 \item{inner_control}{TMB inner Newton controls.}
 }
@@ -135,4 +136,8 @@ landscapes predicted much worse than fitting each sample alone.
 higher marginal likelihood; on simulated cohorts it chose the shared trend
 for samples of one landscape and separate trends otherwise. It takes twice
 as long. The marginal likelihoods are in \code{diagnostics$trend_objective}.
+The scale optimisation is checked as in \code{\link[=fit_sparse_joint]{fit_sparse_joint()}}:
+\code{diagnostics$trend_convergence} tells whether each trend's was accepted,
+and \code{diagnostics$optimisation} how the kept one was checked; its
+\code{flat_direction} also names the sample of each karyotype.
 }

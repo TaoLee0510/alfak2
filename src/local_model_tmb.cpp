@@ -2,6 +2,7 @@
 #include "division_forward.h"
 #include "sparse_joint_model.h"
 #include "sparse_joint_cohort_model.h"
+#include "sparse_joint_series_model.h"
 
 template<class Type>
 Type softplus_floor(Type x, Type floor) {
@@ -363,6 +364,7 @@ Type objective_function<Type>::operator() () {
     std::string model = CHAR(STRING_ELT(model_name, 0));
     if (model == "sparse_joint") return sparse_joint_model(this);
     if (model == "sparse_joint_cohort") return sparse_joint_cohort_model(this);
+    if (model == "sparse_joint_series") return sparse_joint_series_model(this);
   }
   return local_model(this);
 }

@@ -1,7 +1,8 @@
 #' Fit the complete alfak2 pipeline
 #'
-#' By default fits the sparse joint count model, built for two sparse
-#' samples: see [fit_sparse_joint()], whose result is returned. Its outputs
+#' By default fits the sparse joint count model, built for sparse samples at
+#' two or more timepoints: see [fit_sparse_joint()], whose result is
+#' returned. Its outputs
 #' can be converted to those of alfakR with [as_alfakR()], or produced
 #' directly with alfakR's arguments by [alfak_compat()].
 #'
@@ -12,8 +13,12 @@
 #' arguments from `transition_kernel` to `forward_max_refinements`, and `...`,
 #' belong to these two.
 #'
-#' @param counts Two-column count matrix or an `alfak2_data` object.
-#' @param dt Time interval if `counts` is not already prepared.
+#' @param counts Count matrix with one column per timepoint or an
+#'   `alfak2_data` object. The sparse joint pipeline takes two or more
+#'   timepoints, the other two pipelines exactly two.
+#' @param dt Time interval if `counts` is not already prepared; with more than
+#'   two timepoints, one per pair of consecutive timepoints (or give `times`
+#'   in `sparse_joint_control`).
 #' @param beta Missegregation rate.
 #' @param transition_kernel Transition weighting used by graph edges and local
 #'   transport. `"exact"` uses chromosome-level missegregation probabilities;
@@ -182,6 +187,11 @@ fit_alfak2 <- function(counts,
     }
     # A model of its own, with its own domain, result and prediction method.
     return(do.call(fit_sparse_joint, c(list(counts, dt = dt, beta = beta), sparse_joint_control)))
+  }
+  n_time <- ncol(if (inherits(counts, "alfak2_data")) counts$counts else as.matrix(counts))
+  if (n_time != 2L) {
+    stop(sprintf("The %s pipeline fits two timepoints; `counts` has %d. The sparse joint pipeline, the default, fits more.",
+                 pipeline, n_time), call. = FALSE)
   }
   if (!is.list(joint_control) || (length(joint_control) &&
       (is.null(names(joint_control)) || any(!nzchar(names(joint_control))))))

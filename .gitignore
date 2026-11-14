@@ -45,6 +45,7 @@ benchmark/scr/run_real_samples_alfak2.html
 !/validation/**/*.cpp
 !/validation/**/*.h
 !/validation/**/*.md
+!/validation/**/*.patch
 /validation/**/results/
 
 # Local handoff notes, not part of the package

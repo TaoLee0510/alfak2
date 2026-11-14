@@ -188,6 +188,16 @@ Every row has `relative_fitness`, `relative_sd` and `relative_sd_model`.
   and initial abundances; a karyotype shares its fitness across samples with
   an estimated deviation; the trend is shared or per sample, whichever has
   the higher marginal likelihood. Its default is `initial_state = "free"`.
+- More than two samples of one population: `fit_sparse_joint(counts, times = ...)`
+  with one column per sample. The later samples are compared with the same
+  dynamics started at the first sample, each with its own depth. By default
+  the majors and the domain come from the first and the last sample, and the
+  samples in between inform the majors only, with a weight
+  `1 / max(1, dispersion)` from a first fit (`diagnostics$intermediate_weight`).
+  `as_alfakR()` and `alfak_compat()` take such fits.
+- Every fit checks its scale optimisation (`diagnostics$optimisation`) and
+  warns when the optimum is not accepted, naming the karyotype along which the
+  Laplace approximation is flat. The check does not change the fit.
 
 ## Running times
 
@@ -196,6 +206,7 @@ Every row has `relative_fitness`, `relative_sd` and `relative_sd_model`.
 | One simulated sample | Seconds to about 4 minutes |
 | One GBM sample at three birth rates | Median 149 s |
 | `alfak_compat()` with cross-validation, GBM P6 (226 karyotypes) | About 8 minutes |
+| Simulated culture, 4-8 samples of 200-1000 cells (default) | Median 2.5-5 minutes, 2-4 times two samples |
 
 ## Relation to the earlier pipelines
 

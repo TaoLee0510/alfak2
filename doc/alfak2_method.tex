@@ -420,6 +420,33 @@ quasi-Newton method. The bounds are imposed because the inner problem may
 become degenerate outside them. If the outer optimisation fails, the
 prior-centred values of $\psi$ are used and the failure is recorded.
 
+The outer optimisation does not by itself establish an optimum. Where a
+karyotype has very few cells, the inner problem can be nearly flat: a count in
+the second sample may be explained almost equally well by the karyotype having
+been present and unsampled or by its neighbours having produced it during the
+interval. $H(\psi)$ is then nearly singular, $\tfrac12\log\det H$ becomes
+large and negative without any support in the data, the inner mode depends on
+the optimisation path, and the quasi-Newton method may stop away from an
+optimum or report non-convergence at one. Each fit is therefore checked at
+the reported $\hat\psi$: the objective must be reproduced from the fit's own
+inner mode; the smallest eigenvalue of $H(\hat\psi)$, obtained by inverse
+iteration on its sparse Cholesky factor, must be at least $2\times10^{-3}$;
+an inner optimisation started from the initial values must not find a mode of
+higher joint density; and the central finite-difference gradient of the
+objective that follows the fit's mode (step $10^{-3}$), projected on the
+bounds, must not exceed $0.05$. The thresholds lie in the gaps observed
+between optimisation runs that converged and those that degenerated on the
+development benchmark. The check labels the fit and does not change it. For
+a fit that is not accepted, the eigenvector of the smallest eigenvalue is
+reported by latent variable, with the karyotype, its counts and its share of
+the direction; on the development benchmark it was at least 90\% the initial
+abundance of karyotypes with very few cells. Searching the hyperparameters
+again, with near-singular points excluded, raised the share of accepted
+candidate fits from 73\% to 77\% without changing accuracy (median RMSE ratio
+1.00), and integrating the initial abundance of non-major karyotypes out by
+quadrature moved the flat direction to the next sparse quantity; neither is
+used.
+
 Conditional on $\hat\psi$, the posterior of $u$ is approximated by a Gaussian
 distribution centred at $\hat u$ with covariance $\bigl(H_E\bigr)^{-1}$,
 where $H_E$ is the \emph{expected} information: the Hessian of $\ell$ with the
@@ -569,6 +596,46 @@ leaving no marginal likelihood by which to select the trend; for the
 remaining 10, it reduced the error at distances 1 and 2 relative to
 independent initial abundances.
 
+\subsection{More Than Two Samples}
+\label{sec:sj-series}
+
+One population sampled at times $0=t_0<t_1<\dots<t_K$ is fitted with the same
+latent variables and (\ref{eq:forward}) evaluated at every $t_k$, started at
+the first sample:
+\begin{equation}
+  y_{ki}\sim\operatorname{Poisson}\bigl(\lambda_{ki}\bigr),
+  \qquad
+  \lambda_{ki}=\exp\bigl\{\theta_k-d_rt_k\bigr\}\,n_i(t_k),
+  \qquad k=1,\dots,K,
+  \label{eq:series}
+\end{equation}
+with one depth offset $\theta_k$ per later sample. Fitness is constant over
+the series, the dynamics are not restarted at intermediate samples, and the
+history of the balance prior is at least $t_K$. The initial-abundance prior of
+a karyotype not seen in the first sample is centred on its frequency at the
+earliest sample in which it is seen. With two samples the model is
+(\ref{eq:poisson}).
+
+The samples between the first and the last are used, by default, for the
+major karyotypes only, and the majors and the domain are chosen from the first
+and the last sample. Their terms in (\ref{eq:series}) carry the weight
+$\omega=1/\max(1,\hat\phi)$, where $\hat\phi$ is the mean Pearson statistic
+of the majors' intermediate counts about a first fit at $\omega=1$ (shortest
+history), with expectations scaled to each sample's total over the majors. Two
+effects motivate this. A clone that arises between samples, grows by chance
+and is lost again, or is thinned by a passage, is seen in several
+intermediate samples; the deterministic model reads each of these counts as
+independent evidence of high fitness. Choosing majors from every sample also
+makes such transient clones majors and widens the domain around them. The
+weight $\omega$ is the quasi-likelihood weight of an overdispersed count: with
+little drift $\hat\phi\approx1$, with strong drift the intermediate samples
+contribute little. On simulated passaged cultures (12 landscapes, bottlenecks
+$2\times10^2$, $2\times10^3$ and $2\times10^4$ cells, 4 or 8 samples 6 or 60
+days apart, 200 or 1000 cells each) this was as accurate as the first and the
+last sample alone (median RMSE ratios 0.97--1.01; within 3\% in 21 of 24
+settings); using every sample for every karyotype gained 4--6\% at the
+largest bottleneck and lost up to a factor of 2.4 at the smallest.
+
 \subsection{Export in the \texttt{alfakR} Output Format}
 \label{sec:sj-alfakR}
 
@@ -596,7 +663,8 @@ numbers at least one, in the order used by \texttt{alfakR}. The value of
 \end{equation}
 where $N_0^{\mathrm{pop}}$ and $N_b$ are the population sizes \texttt{n0} and
 \texttt{nb} of \texttt{alfakR}; the mean fitness of the major karyotypes is
-thereby set to the population growth rate assumed by \texttt{alfakR}.
+thereby set to the population growth rate assumed by \texttt{alfakR}. With
+more than two samples $T$ is the first interval $t_1$, as in \texttt{alfakR}.
 
 \paragraph{Posterior draws.}
 In place of bootstrap replicates, $B$ draws are generated for every

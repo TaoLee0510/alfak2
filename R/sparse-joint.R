@@ -22,8 +22,8 @@ one_step_neighbours <- function(karyotypes, min_cn, max_cn) {
   out[!duplicated(format_karyotypes(out)), , drop = FALSE]
 }
 
-# Major karyotypes anchor the domain: at least `major_frequency` of either
-# sample and at least `major_count` cells. The share adapts the rule to depth:
+# Major karyotypes anchor the domain: at least `major_frequency` of any
+# sample and at least `major_count` cells over all samples. The share adapts the rule to depth:
 # one cell in 3000 may be a member of the mutational cloud around a clone.
 # The count is needed as well. A major's neighbours enter the likelihood
 # whether observed or not, and an unobserved neighbour is evidence only if a
@@ -34,7 +34,7 @@ one_step_neighbours <- function(karyotypes, min_cn, max_cn) {
 # would exceed `max_states`, the share is raised to the lowest value that fits.
 sparse_joint_major <- function(counts, major_frequency, major_count = 3, max_states = Inf,
                                min_cn = 1L, max_cn = 8L) {
-  share <- pmax(counts[, 1L] / sum(counts[, 1L]), counts[, 2L] / sum(counts[, 2L]))
+  share <- do.call(pmax, lapply(seq_len(ncol(counts)), function(k) counts[, k] / sum(counts[, k])))
   total <- rowSums(counts)
   labels <- rownames(counts)
   eligible <- share >= major_frequency & total >= major_count
@@ -59,26 +59,31 @@ sparse_joint_major_distance <- function(karyotypes, major) {
 }
 
 # Domain: the major karyotypes, listed first, and every one-step neighbour of
-# one. Observed karyotypes outside it are left out with their cells.
-sparse_joint_domain <- function(counts, major_frequency, major_count, max_states, min_cn, max_cn) {
+# one. Observed karyotypes outside it are left out with their cells. `y` has
+# one column per timepoint; `y0` and `y1` are its first two.
+sparse_joint_domain <- function(counts, major_frequency, major_count, max_states, min_cn, max_cn,
+                                major_columns = NULL) {
   observed <- rownames(counts)
-  major_labels <- sparse_joint_major(counts, major_frequency, major_count, max_states, min_cn, max_cn)
+  # `major_columns`: the samples the majors are chosen from (all by default).
+  from <- if (is.null(major_columns)) counts else counts[, major_columns, drop = FALSE]
+  major_labels <- sparse_joint_major(from, major_frequency, major_count, max_states, min_cn, max_cn)
   major <- parse_karyotypes(major_labels)
   labels <- union(major_labels, format_karyotypes(one_step_neighbours(major, min_cn, max_cn)))
   in_data <- match(labels, observed)
-  y <- matrix(0, length(labels), 2L)
+  y <- matrix(0, length(labels), ncol(counts))
   y[!is.na(in_data), ] <- counts[in_data[!is.na(in_data)], , drop = FALSE]
   outside <- !observed %in% labels
   list(labels = labels, karyotypes = parse_karyotypes(labels), major = major,
-       n_major = length(major_labels), y0 = y[, 1L], y1 = y[, 2L],
+       n_major = length(major_labels), y = y, y0 = y[, 1L], y1 = y[, 2L],
        dropped = observed[outside], dropped_cells = sum(counts[outside, ]))
 }
 
 # How much of each sample the domain holds: per timepoint, its cells and those
 # inside the domain, its karyotypes, those that meet the share and count of a
 # major in that sample (`major_candidates`) and the majors seen in it, the
-# karyotypes both samples share, and the median distance from its cells
-# outside the domain to the nearest major.
+# karyotypes it shares with another timepoint (with two timepoints, those both
+# share), and the median distance from its cells outside the domain to the
+# nearest major.
 sparse_joint_domain_coverage <- function(counts, domain, major_frequency, major_count) {
   labels <- rownames(counts)
   inside <- labels %in% domain$labels
@@ -86,6 +91,7 @@ sparse_joint_domain_coverage <- function(counts, domain, major_frequency, major_
   total <- rowSums(counts)
   distance <- rep(NA_real_, length(labels))
   if (any(!inside)) distance[!inside] <- sparse_joint_major_distance(parse_karyotypes(labels[!inside]), domain$major)
+  seen <- counts > 0
   rows <- lapply(seq_len(ncol(counts)), function(t) {
     cells <- counts[, t]
     out <- !inside & cells > 0
@@ -93,7 +99,7 @@ sparse_joint_domain_coverage <- function(counts, domain, major_frequency, major_
       timepoint = colnames(counts)[[t]], cells = sum(cells), cells_in_domain = sum(cells[inside]),
       fraction = sum(cells[inside]) / sum(cells), karyotypes = sum(cells > 0),
       major_candidates = sum(cells / sum(cells) >= major_frequency & total >= major_count),
-      majors = sum(majors & cells > 0), shared = sum(counts[, 1L] > 0 & counts[, 2L] > 0),
+      majors = sum(majors & cells > 0), shared = sum(seen[, t] & rowSums(seen[, -t, drop = FALSE]) > 0),
       median_distance_outside = if (any(out)) stats::median(rep(distance[out], cells[out])) else NA_real_,
       stringsAsFactors = FALSE
     )
@@ -114,11 +120,17 @@ sparse_joint_coverage_error <- function(coverage, first, by_sample = FALSE) {
     other <- coverage[same & coverage$timepoint != row$timepoint, , drop = FALSE]
     where <- if (by_sample) sprintf("Sample %s, timepoint %s", row$sample, row$timepoint) else
       sprintf("Timepoint %s", row$timepoint)
-    shared <- if (row$shared == 0) "the samples share no karyotype" else
-      sprintf("the samples share %s", plural(row$shared, "karyotype"))
-    majors <- other$majors[[1L]]
-    source <- if (majors == 1) sprintf("the only major comes from %s", other$timepoint[[1L]]) else
-      sprintf("all %d majors come from %s", as.integer(majors), other$timepoint[[1L]])
+    if (nrow(other) == 1L) {
+      shared <- if (row$shared == 0) "the samples share no karyotype" else
+        sprintf("the samples share %s", plural(row$shared, "karyotype"))
+      majors <- other$majors[[1L]]
+      source <- if (majors == 1) sprintf("the only major comes from %s", other$timepoint[[1L]]) else
+        sprintf("all %d majors come from %s", as.integer(majors), other$timepoint[[1L]])
+    } else {
+      shared <- if (row$shared == 0) "it shares no karyotype with another timepoint" else
+        sprintf("it shares %s with other timepoints", plural(row$shared, "karyotype"))
+      source <- sprintf("the majors come from %s", paste(other$timepoint[other$majors > 0], collapse = ", "))
+    }
     sprintf("%s: none of its %s lies within one step of a major karyotype; %s, %s, and the median distance to the nearest major is %s.",
             where, plural(row$cells, "cell"), source, shared, format(row$median_distance_outside))
   }, character(1))
@@ -127,8 +139,9 @@ sparse_joint_coverage_error <- function(coverage, first, by_sample = FALSE) {
 }
 
 # Coverage of a sample's domain; an error if a timepoint has no cell in it.
-sparse_joint_check_coverage <- function(counts, major_frequency, major_count, max_states, min_cn, max_cn) {
-  domain <- sparse_joint_domain(counts, major_frequency, major_count, max_states, min_cn, max_cn)
+sparse_joint_check_coverage <- function(counts, major_frequency, major_count, max_states, min_cn, max_cn,
+                                        major_columns = NULL) {
+  domain <- sparse_joint_domain(counts, major_frequency, major_count, max_states, min_cn, max_cn, major_columns)
   coverage <- sparse_joint_domain_coverage(counts, domain, major_frequency, major_count)
   if (any(coverage$cells_in_domain <= 0)) {
     sparse_joint_coverage_error(coverage, "A timepoint has no cell inside the model domain.")
@@ -156,35 +169,29 @@ sparse_joint_design <- function(karyotypes, centre, major, shell_power) {
 }
 
 # Prior on the log expected count at the first timepoint. Seen then: the
-# count itself, essentially free. Seen only later: the later frequency. Never
+# count itself, essentially free. Seen only later: its frequency at the
+# earliest timepoint it was seen, scaled to the first sample's depth. Never
 # seen: rare, on the frequency scale given by `initial_frequency`.
 sparse_joint_initial_prior <- function(y0, y1, initial_frequency) {
+  sparse_joint_initial_prior_matrix(cbind(y0, y1), initial_frequency)
+}
+
+sparse_joint_initial_prior_matrix <- function(y, initial_frequency, depth = colSums(y)) {
+  y0 <- y[, 1L]
   seen_first <- y0 > 0
+  mean <- rep(log(depth[[1L]]) + initial_frequency[[1L]], length(y0))
+  # Latest timepoint first, so that the earliest one seen is written last.
+  for (k in rev(seq_len(ncol(y))[-1L])) {
+    yk <- y[, k]
+    mean <- ifelse(yk > 0, log(pmax(yk, 1) * depth[[1L]] / depth[[k]]), mean)
+  }
   list(
-    mean = ifelse(seen_first, log(pmax(y0, 1)),
-                  ifelse(y1 > 0, log(pmax(y1, 1) * sum(y0) / sum(y1)),
-                         log(sum(y0)) + initial_frequency[[1L]])),
+    mean = ifelse(seen_first, log(pmax(y0, 1)), mean),
     sd = ifelse(seen_first, 10, initial_frequency[[2L]])
   )
 }
 
-# Scale parameters by Laplace marginal likelihood, kept inside a finite box:
-# outside it the inner problem can become degenerate and return non-finite
-# gradients. If the optimiser still steps somewhere without a finite
-# gradient, the fit is usable at the starting, prior-centred scales.
-sparse_joint_optimise_scales <- function(objective, control, lower = log(1e-4), upper = log(0.5)) {
-  optimum <- tryCatch(
-    suppressWarnings(stats::nlminb(objective$par, objective$fn, objective$gr,
-                                   lower = lower, upper = upper, control = control)),
-    error = function(e) NULL
-  )
-  if (is.null(optimum)) {
-    warning("Scale optimisation failed; the prior-centred scales are used.", call. = FALSE)
-    optimum <- list(par = objective$par, objective = as.numeric(objective$fn(objective$par)), convergence = 99L,
-                    message = "scale optimisation failed; prior-centred scales used")
-  }
-  optimum
-}
+# Scale parameters: sparse_joint_optimise_scales() in sparse-joint-convergence.R.
 
 # Posterior covariance of the latent variables given the scales, as a solver.
 #
@@ -205,8 +212,12 @@ sparse_joint_posterior <- function(objective, tmb_data, parameters, map, random,
   latent <- objective$env$random
   report <- objective$report(mode)
   expected <- tmb_data
-  expected$y0 <- exp(unname(mode[names(mode) == "zeta"]))
-  expected$y1 <- exp(as.numeric(report$log_intensity1))
+  if (identical(tmb_data$model, "sparse_joint_series")) {
+    expected$y <- cbind(exp(unname(mode[names(mode) == "zeta"])), exp(report$log_intensity))
+  } else {
+    expected$y0 <- exp(unname(mode[names(mode) == "zeta"]))
+    expected$y1 <- exp(as.numeric(report$log_intensity1))
+  }
   # The balance prior on initial abundances is not log-linear either: its
   # curvature is taken at zero residual in the same way.
   expected$balance_offset <- as.numeric(report$balance_residual)
@@ -215,10 +226,12 @@ sparse_joint_posterior <- function(objective, tmb_data, parameters, map, random,
   factor <- Matrix::Cholesky(information, LDL = FALSE)
   n <- nrow(information)
   solve <- function(rhs) as.matrix(Matrix::solve(factor, rhs))
+  expected_counts <- if (is.null(expected$y)) cbind(expected$y0, expected$y1) else expected$y
   list(
     mode = unname(mode[latent]), names = names(mode)[latent], solve = solve,
-    # Fitted expected counts, for comparison with the observed ones.
-    expected_t0 = expected$y0, expected_t1 = expected$y1,
+    # Fitted expected counts, for comparison with the observed ones: one
+    # column per timepoint, and the first two separately.
+    expected = expected_counts, expected_t0 = expected_counts[, 1L], expected_t1 = expected_counts[, 2L],
     # `k` draws of the latent variables from the Gaussian posterior, centred on
     # zero, as columns. With P A P' = L L', P' L^-T z has covariance A^-1.
     draw = function(k) {
@@ -334,11 +347,19 @@ sparse_joint_relative_outside <- function(reference, fitness, log_birth_sd, desi
 # observed karyotypes left out of the domain. An observed karyotype is much
 # closer in fitness to the majors than an unobserved one at the same distance.
 sparse_joint_observed_level <- function(summary) {
-  observed_minor <- !summary$major & (summary$count_t0 + summary$count_t1) > 0
+  observed_minor <- !summary$major & sparse_joint_summary_total(summary) > 0
   if (!any(observed_minor)) return(NULL)
   c(log_birth = mean(summary$log_birth_mean[observed_minor]),
     sd = sqrt(mean(summary$log_birth_sd[observed_minor]^2) +
                 if (sum(observed_minor) > 1L) stats::var(summary$log_birth_mean[observed_minor]) else 0))
+}
+
+# Cells of each karyotype of a fit's summary over all timepoints (columns
+# count_t0, count_t1, ...).
+sparse_joint_summary_total <- function(summary) {
+  columns <- grep("^count_t[0-9]+$", names(summary), value = TRUE)
+  if (length(columns) == 2L) summary[[columns[[1L]]]] + summary[[columns[[2L]]]] else
+    rowSums(as.matrix(summary[columns]))
 }
 
 # Fitness columns from a log birth rate and its standard deviation. `self` is
@@ -370,21 +391,88 @@ sparse_joint_history_candidates <- function(dt, birth_rate) {
   c(dt, divisions[divisions > dt])
 }
 
+# Template of a fit: "pair" (src/sparse_joint_model.h) for two timepoints,
+# "series" (src/sparse_joint_series_model.h) for more. The series template
+# gives the same objective for two timepoints; `settings$template = "series"`
+# forces it, to check exactly that.
+sparse_joint_template <- function(data, settings) {
+  if (ncol(data$counts) > 2L || identical(settings$template, "series")) "series" else "pair"
+}
+
+# The samples the majors are chosen from: all of them, or with more than two
+# samples and `settings$intermediate` "majors" the first and the last. A clone
+# that rises and falls between them, or appears in between only, would
+# otherwise become a major, and the domain grow around it.
+sparse_joint_major_columns <- function(data, settings) {
+  n_time <- ncol(data$counts)
+  if (n_time > 2L && identical(settings$intermediate, "majors")) c(1L, n_time) else NULL
+}
+
+# Dispersion of the majors' counts in the samples between the first and the
+# last, against the fit's expectations scaled to each sample's total over the
+# majors: about 1 for sampling noise alone, more when the population drifts
+# between samples (Pearson statistic per count).
+sparse_joint_intermediate_dispersion <- function(fit) {
+  summary <- fit$summary
+  counts <- as.matrix(summary[grep("^count_t[0-9]+$", names(summary))])
+  expected <- as.matrix(summary[grep("^expected_t[0-9]+$", names(summary))])
+  n_time <- ncol(counts)
+  if (n_time < 3L || !any(summary$major)) return(NA_real_)
+  middle <- seq(2L, n_time - 1L)
+  y <- counts[summary$major, middle, drop = FALSE]
+  e <- expected[summary$major, middle, drop = FALSE]
+  e <- sweep(e, 2L, colSums(y) / colSums(e), "*")
+  mean((y - e)^2 / pmax(e, 1e-8))
+}
+
+# The domain's counts as the likelihood uses them, with `sample_weight` (one
+# row per state, one column per sample after the first: 1 counts, 0 left out)
+# as an attribute. With more than two samples and `settings$intermediate`
+# "majors", the counts of the other states in the samples between the first
+# and the last are left out (and taken as zero for the priors): a rare clone
+# seen in one of them owes its count largely to the chance with which such a
+# clone arises, drifts and is lost, which the model does not describe, and the
+# same chance event would otherwise count once per sample.
+sparse_joint_used_counts <- function(domain, settings) {
+  used <- domain$y
+  n_time <- ncol(used)
+  sample_weight <- matrix(1, nrow(used), n_time - 1L)
+  if (n_time > 2L && identical(settings$intermediate, "majors")) {
+    minor <- seq_len(nrow(used)) > domain$n_major
+    middle <- seq(2L, n_time - 1L)
+    used[minor, middle] <- 0
+    sample_weight[minor, middle - 1L] <- 0
+    weight <- if (is.null(settings$intermediate_weight)) 1 else settings$intermediate_weight
+    sample_weight[!minor, middle - 1L] <- weight
+  }
+  attr(used, "sample_weight") <- sample_weight
+  used
+}
+
 # Everything a fit needs that follows from the data and the settings alone:
 # the domain, the division kernel, the trend design and the TMB inputs. Used by
 # the fit and to rebuild a fit's posterior later from its stored settings.
 sparse_joint_problem <- function(data, settings) {
   domain <- sparse_joint_domain(data$counts, settings$major_frequency, settings$major_count, settings$max_states,
-                                as.integer(settings$min_cn), as.integer(settings$max_cn))
+                                as.integer(settings$min_cn), as.integer(settings$max_cn),
+                                sparse_joint_major_columns(data, settings))
   n <- length(domain$labels)
   kernel <- sparse_division_kernel(domain$karyotypes, data$beta)
-  total <- domain$y0 + domain$y1
+  template <- sparse_joint_template(data, settings)
+  # The counts the likelihood uses: with `intermediate = "majors"`, the
+  # samples between the first and the last count for the majors only.
+  used <- sparse_joint_used_counts(domain, settings)
+  total <- if (ncol(domain$y) == 2L) domain$y0 + domain$y1 else rowSums(used)
   centre <- colSums(domain$karyotypes * total) / sum(total)
   design <- sparse_joint_design(domain$karyotypes, centre, domain$major, settings$shell_power)
-  initial <- sparse_joint_initial_prior(domain$y0, domain$y1, settings$initial_frequency)
-  tmb_data <- list(
-    model = "sparse_joint",
-    y0 = domain$y0, y1 = domain$y1, dt = data$dt,
+  initial <- sparse_joint_initial_prior_matrix(used, settings$initial_frequency, depth = colSums(domain$y))
+  counts_data <- if (template == "pair") {
+    list(model = "sparse_joint", y0 = domain$y0, y1 = domain$y1, dt = data$dt)
+  } else {
+    list(model = "sparse_joint_series", y = domain$y, tau = alfak2_data_times(data)[-1L],
+         sample_weight = attr(used, "sample_weight"))
+  }
+  tmb_data <- c(counts_data, list(
     edge_from = kernel$from - 1L, edge_to = kernel$to - 1L,
     edge_log_prob = kernel$log_prob, log_self = kernel$log_self,
     design = design$design, coef_group = design$group,
@@ -398,20 +486,23 @@ sparse_joint_problem <- function(data, settings) {
     n_major = domain$n_major, balance = as.integer(settings$initial_state == "balance"),
     history = settings$history, balance_sd = settings$balance_sd, balance_offset = rep(0, n),
     weight = rep(1, n)
-  )
-  parameters <- list(
+  ))
+  # Log depth ratio of each later sample to the first.
+  depth <- if (template == "pair") list(theta1 = log(sum(domain$y1) / sum(domain$y0))) else
+    list(theta = log(colSums(domain$y[, -1L, drop = FALSE]) / sum(domain$y[, 1L])))
+  parameters <- c(list(
     zeta = tmb_data$zeta_prior_mean,
     g = rep(log(settings$birth_rate), n),
-    coef = c(log(settings$birth_rate), rep(0, ncol(design$design) - 1L)),
-    theta1 = log(sum(domain$y1) / sum(domain$y0)),
-    log_scale = tmb_data$log_scale_prior_mean
+    coef = c(log(settings$birth_rate), rep(0, ncol(design$design) - 1L))),
+    depth,
+    list(log_scale = tmb_data$log_scale_prior_mean)
   )
   # There are no interaction terms in the design, so their scale is not free.
   free_scale <- c(TRUE, TRUE, FALSE, TRUE)
-  list(domain = domain, kernel = kernel, total = total, centre = centre, design = design,
-       tmb_data = tmb_data, parameters = parameters, free_scale = free_scale,
+  list(domain = domain, kernel = kernel, total = total, centre = centre, design = design, used = used,
+       tmb_data = tmb_data, parameters = parameters, free_scale = free_scale, template = template,
        map = list(log_scale = factor(ifelse(free_scale, cumsum(free_scale), NA))),
-       random = c("zeta", "g", "coef", "theta1"))
+       random = c("zeta", "g", "coef", names(depth)))
 }
 
 # The posterior of a fitted model, rebuilt from its stored settings and mode
@@ -431,7 +522,7 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
   if (!is.null(zeta_prior_mean)) tmb_data$zeta_prior_mean <- as.numeric(zeta_prior_mean)
   if (!is.null(zeta_prior_sd)) tmb_data$zeta_prior_sd <- as.numeric(zeta_prior_sd)
   if (!is.null(design)) tmb_data$design <- design
-  parameters <- fit$posterior[c("zeta", "g", "coef", "theta1", "log_scale")]
+  parameters <- fit$posterior[names(problem$parameters)]
   map <- list(log_scale = factor(rep(NA, length(parameters$log_scale))))
   inner_control <- fit$settings$inner_control
   objective <- TMB::MakeADFun(tmb_data, parameters, map = map, random = problem$random, DLL = "alfak2",
@@ -447,14 +538,31 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 
 #' Fit the sparse joint count model
 #'
-#' Fits fitness to two sparse karyotype samples with a single count likelihood
-#' on a sparse domain: the well-sampled ("major") karyotypes and all their
-#' one-step neighbours. Division dynamics use a closed form in which each
+#' Fits fitness to sparse karyotype samples of one population, two or more
+#' timepoints, with a single count likelihood on a sparse domain: the
+#' well-sampled ("major") karyotypes and all their one-step neighbours. Division dynamics use a closed form in which each
 #' karyotype grows on its own and receives mutational influx from its
 #' neighbours; an unobserved neighbour of an abundant karyotype is thereby
 #' evidence that the neighbour is less fit. Fitness away from the domain is
 #' predicted with [predict()] from a fitted trend in chromosome dosage,
 #' curvature and distance to the nearest major karyotype.
+#'
+#' With more than two timepoints every later sample is compared with the
+#' same closed-form dynamics started at the first sample, each with its own
+#' depth; the dynamics are not restarted at intermediate samples. Fitness is
+#' taken to be constant over the whole series, and the history of the balance
+#' prior is at least the time from the first to the last sample. Two-timepoint
+#' fits are unchanged. By default (`intermediate = "majors"`) the majors and
+#' the domain come from the first and the last sample, and the samples in
+#' between count for the majors only, weighted by the inverse of their
+#' dispersion in a first fit (`diagnostics$intermediate_weight`,
+#' `intermediate_dispersion`). Clones that arise, grow by chance and are lost
+#' between samples, or are thinned by passaging, would otherwise count once
+#' per sample and read as fit. On simulated passaged cultures the default was
+#' as accurate as the first and the last sample alone; every sample for every
+#' karyotype (`"all"`) was 4-6% more accurate with large bottlenecks (20000
+#' cells) and up to 2.4 times less accurate with small ones (200)
+#' (validation/sparse_joint/multi_timepoint).
 #'
 #' Observed karyotypes that are not next to a major karyotype are left out of
 #' the likelihood, together with their cells. They would enter only because
@@ -470,6 +578,37 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 #' has no cell inside the model domain." and its `coverage` element holds the
 #' same table. [check_sparse_joint_counts()] summarises a count matrix before
 #' fitting.
+#'
+#' The scales of the trend and the residual are fitted by Laplace marginal
+#' likelihood. `nlminb`'s own verdict on convergence is not taken as it is:
+#' where the inner Hessian is nearly singular the Laplace approximation drops
+#' for no reason in the data, and `nlminb` stops there with "false
+#' convergence", or reports that at a true optimum. The fit checks the point
+#' itself (healthy inner Hessian, the same objective from its own mode, no
+#' better inner mode from the initial values, a small finite-difference
+#' gradient). `diagnostics$convergence` is 0 when the point was accepted and 1
+#' when not, with a warning of class `alfak2_convergence_warning`;
+#' `diagnostics$optimisation` tells how (`status`, `stage`, `reasons`,
+#' `restarts`, `evaluations`, `nlminb_convergence`, `nlminb_message`,
+#' `min_eigen`, `projected_gradient`, `objective_difference`,
+#' `joint_difference`, `flat_direction`, `flat_composition`). The fit itself
+#' is the same as before this check (alfak2 ff13cf4); so is the choice of
+#' history, by the lowest objective.
+#'
+#' Most fits that are not accepted have a karyotype with very few cells, whose
+#' initial abundance or birth rate the data hardly constrain. A count in the
+#' second sample, for one, has two explanations of nearly equal weight: the
+#' karyotype was there and not sampled, or its neighbours made it during the
+#' interval. The Laplace approximation is then nearly flat along that
+#' quantity, or jumps from one explanation to the other as the scales change.
+#' For a fit that is not accepted, `flat_direction` lists the latent variables
+#' with the largest shares of the flattest direction of the inner Hessian
+#' (`variable`, `karyotype`, its `cells` in each sample, `major`, `share`),
+#' `flat_composition` its make-up by kind of latent variable (`variable`,
+#' `major`, `share`), and the warning names both when that Hessian is nearly
+#' singular. On simulated data, fits that searching again turned into
+#' accepted ones predicted fitness as well as before
+#' (validation/sparse_joint/convergence).
 #'
 #' `relative_sd` is not the model's own posterior standard deviation, which
 #' is kept as `relative_sd_model`. That one takes the model to be exact, and
@@ -492,17 +631,19 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 #' every fitness difference. Rerun with other values to see how much a
 #' conclusion depends on it.
 #'
-#' @param counts Two-column count matrix with karyotype row names, or an
-#'   `alfak2_data` object.
-#' @param dt Time between the samples, if `counts` is a matrix.
+#' @param counts Count matrix with karyotype row names and one column per
+#'   timepoint, at least two, in time order; or an `alfak2_data` object.
+#' @param dt Time between the samples, if `counts` is a matrix: one interval
+#'   for two timepoints, or one per pair of consecutive timepoints. See also
+#'   `times`.
 #' @param beta Missegregation rate per chromosome copy and division, if
 #'   `counts` is a matrix.
 #' @param birth_rate Assumed baseline birth (division) rate per unit of `dt`.
 #' @param birth_rate_log_sd Prior standard deviation of the log baseline birth
 #'   rate around `log(birth_rate)`.
-#' @param major_frequency Minimum share of either sample for a karyotype to
+#' @param major_frequency Minimum share of any sample for a karyotype to
 #'   anchor the domain as a major karyotype.
-#' @param major_count Minimum number of cells, over both samples, for a major
+#' @param major_count Minimum number of cells, over all samples, for a major
 #'   karyotype. A single cell must not be enough.
 #' @param max_states Largest domain to fit. If the domain would be larger,
 #'   the share required of a major karyotype is raised until it fits.
@@ -513,12 +654,12 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 #'   distance.
 #' @param shell_sd Prior standard deviation of the shell coefficient.
 #' @param initial_frequency Prior mean and standard deviation of the log
-#'   frequency at the first timepoint of a karyotype seen at neither
-#'   timepoint. It is a frequency, not a count: a domain has thousands of
-#'   unseen karyotypes, and a prior in counts would give them a large share of
-#'   a small sample. A karyotype seen only at the second timepoint is centred
-#'   on its frequency there, with the same standard deviation: absent other
-#'   evidence its frequency is taken not to have changed.
+#'   frequency at the first timepoint of a karyotype seen at no timepoint. It
+#'   is a frequency, not a count: a domain has thousands of unseen
+#'   karyotypes, and a prior in counts would give them a large share of a
+#'   small sample. A karyotype seen only later is centred on its frequency at
+#'   the earliest timepoint it was seen, with the same standard deviation:
+#'   absent other evidence its frequency is taken not to have changed.
 #' @param initial_state How abundances at the first timepoint are treated.
 #'   `"balance"`, the default, starts every karyotype that is not major at
 #'   mutation-selection balance with the major karyotypes next to it, so that
@@ -530,8 +671,8 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 #'   sample, as under a new treatment.
 #' @param history Time, in units of `dt`, over which the balance built up
 #'   before the first sample. By default it is chosen among the interval
-#'   between the samples and 30, 100, 300, 1000 and 3000 divisions at
-#'   `birth_rate` that are longer than the interval: the model is fitted at
+#'   between the first and the last sample and 30, 100, 300, 1000 and 3000
+#'   divisions at `birth_rate` that are longer than that interval: the model is fitted at
 #'   each and the fit with the highest marginal likelihood is kept, so a fit
 #'   takes up to six times as long; `diagnostics$history_profile` lists the
 #'   candidates. A single value fixes the history; several values are the
@@ -548,11 +689,27 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 #'   `deficit_unobserved`, unobserved karyotypes take `deficit`, as up to
 #'   alfak2 33a045c (`c(floor = 0.009, deficit = 0.6)`). `NULL` reports the
 #'   model's own.
-#' @param control List passed to [stats::nlminb()] for the scale parameters.
+#' @param control List passed to [stats::nlminb()] for the first search of
+#'   the scale parameters; see Details for what follows it.
 #' @param inner_control TMB inner Newton controls.
+#' @param times Sampling times, one per column of `counts`, instead of `dt`;
+#'   only their differences matter. When given, `dt` is not used.
+#' @param intermediate With more than two samples, how the samples between
+#'   the first and the last are used. `"majors"`, the default: the majors and
+#'   the domain are chosen from the first and the last sample, as for two
+#'   samples, and the samples in between count for the majors only, with
+#'   weight `intermediate_weight`; the other karyotypes are fitted to the first
+#'   and the last sample. `"all"`: like the first and the last, for every
+#'   state, with the majors chosen from every sample. See Details.
+#' @param intermediate_weight With `intermediate = "majors"`, the weight of the
+#'   samples in between, in (0, 1]. `NULL` estimates it: the inverse of the
+#'   dispersion of the majors' counts in those samples in a first fit (at the
+#'   shortest history), at most 1, so that a population that drifts between
+#'   samples (small passaging bottlenecks) leans on the first and the last.
 #'
 #' @return An `alfak2_sparse_joint_fit` object. `summary` has one row per
-#'   domain karyotype, with its counts and the counts the fit expects;
+#'   domain karyotype, with its counts (`count_t0`, `count_t1`, ..., one
+#'   column per timepoint) and the counts the fit expects (`expected_t0`, ...);
 #'   `fitness_mean` is the net growth rate per unit of `dt`,
 #'   and `relative_fitness` is that rate minus the count-weighted mean over
 #'   the major karyotypes, with `relative_sd` its uncertainty.
@@ -582,8 +739,17 @@ fit_sparse_joint <- function(counts,
                              balance_sd = 1,
                              calibration = sparse_joint_default_calibration,
                              control = list(eval.max = 200, iter.max = 100),
-                             inner_control = list(maxit = 200, tol = 1e-10)) {
-  data <- if (inherits(counts, "alfak2_data")) counts else prepare_alfak2_data(counts, dt = dt, beta = beta)
+                             inner_control = list(maxit = 200, tol = 1e-10),
+                             times = NULL,
+                             intermediate = c("majors", "all"),
+                             intermediate_weight = NULL) {
+  data <- if (inherits(counts, "alfak2_data")) {
+    counts
+  } else if (is.null(times)) {
+    prepare_alfak2_data(counts, dt = dt, beta = beta)
+  } else {
+    prepare_alfak2_data(counts, beta = beta, times = times)
+  }
   validate_scalar(birth_rate, "birth_rate", lower = .Machine$double.eps)
   validate_scalar(birth_rate_log_sd, "birth_rate_log_sd", lower = .Machine$double.eps)
   validate_scalar(major_frequency, "major_frequency", lower = 0, upper = 1)
@@ -597,6 +763,7 @@ fit_sparse_joint <- function(counts,
     stop("`initial_frequency` must give a finite mean and a positive standard deviation.", call. = FALSE)
   }
   initial_state <- match.arg(initial_state)
+  intermediate <- match.arg(intermediate)
   calibration <- sparse_joint_validate_calibration(calibration)
   if (is.null(history)) {
     history <- if (initial_state == "balance") sparse_joint_history_candidates(data$dt, birth_rate) else data$dt
@@ -613,28 +780,51 @@ fit_sparse_joint <- function(counts,
   if (any(observed_cn < min_cn | observed_cn > max_cn)) {
     stop("Observed karyotypes must lie within the copy-number bounds.", call. = FALSE)
   }
-  if (any(colSums(counts) <= 0)) stop("Both timepoints need at least one cell.", call. = FALSE)
+  if (any(colSums(counts) <= 0)) {
+    stop(if (ncol(counts) == 2L) "Both timepoints need at least one cell." else "Every timepoint needs at least one cell.",
+         call. = FALSE)
+  }
   # Checked once, before any candidate history is fitted: a timepoint with no
   # cell next to a major karyotype leaves nothing to fit.
   coverage <- sparse_joint_check_coverage(counts, major_frequency, major_count, max_states,
-                                          as.integer(min_cn), as.integer(max_cn))
+                                          as.integer(min_cn), as.integer(max_cn),
+                                          sparse_joint_major_columns(data, list(intermediate = intermediate)))
+  # With intermediate samples for the majors only, their weight: the inverse of
+  # the majors' dispersion in a first fit (at the shortest history), at most 1.
+  dispersion <- NA_real_
+  if (ncol(counts) > 2L && intermediate == "majors") {
+    if (is.null(intermediate_weight)) {
+      arguments <- mget(names(formals(sys.function())), envir = environment())
+      arguments$counts <- data
+      arguments$history <- history[[1L]]
+      arguments$intermediate_weight <- 1
+      first <- withCallingHandlers(do.call(fit_sparse_joint, arguments),
+                                   alfak2_convergence_warning = function(w) invokeRestart("muffleWarning"))
+      dispersion <- sparse_joint_intermediate_dispersion(first)
+      intermediate_weight <- if (is.finite(dispersion)) 1 / max(1, dispersion) else 1
+    }
+    validate_scalar(intermediate_weight, "intermediate_weight", lower = .Machine$double.eps, upper = 1)
+  }
   if (length(history) > 1L) {
     # Candidate histories differ only in the means of the balance prior, so
     # their marginal likelihoods compare directly: fit at each, keep the best.
     started <- proc.time()[["elapsed"]]
     arguments <- mget(names(formals(sys.function())), envir = environment())
     arguments$counts <- data
+    # Only the chosen candidate's convergence is warned about.
     fits <- lapply(history, function(h) {
       arguments$history <- h
-      do.call(fit_sparse_joint, arguments)
+      withCallingHandlers(do.call(fit_sparse_joint, arguments),
+                          alfak2_convergence_warning = function(w) invokeRestart("muffleWarning"))
     })
     objective <- vapply(fits, function(f) f$diagnostics$objective, numeric(1))
-    fit <- fits[[which.min(objective)]]
-    fit$diagnostics$history_profile <- data.frame(
-      history = history, objective = objective,
-      convergence = vapply(fits, function(f) f$diagnostics$convergence, numeric(1))
-    )
+    convergence <- vapply(fits, function(f) f$diagnostics$convergence, numeric(1))
+    fit <- fits[[sparse_joint_choose_candidate(objective, convergence)]]
+    fit$diagnostics$history_profile <- data.frame(history = history, objective = objective,
+                                                  convergence = convergence)
+    if (is.finite(dispersion)) fit$diagnostics$intermediate_dispersion <- dispersion
     fit$diagnostics$seconds <- proc.time()[["elapsed"]] - started
+    sparse_joint_convergence_warning(fit$diagnostics$optimisation)
     return(fit)
   }
   started <- proc.time()[["elapsed"]]
@@ -645,6 +835,14 @@ fit_sparse_joint <- function(counts,
                    shell_sd = shell_sd, initial_frequency = initial_frequency, initial_state = initial_state,
                    history = history, balance_sd = balance_sd, calibration = calibration,
                    inner_control = inner_control)
+  # Only with more than two samples, so that two-sample fits stay as they were.
+  if (ncol(data$counts) > 2L) {
+    settings$intermediate <- intermediate
+    if (intermediate == "majors") settings$intermediate_weight <- intermediate_weight
+  }
+  # Internal: fit two timepoints with the template for more, to check that it
+  # gives the same fit.
+  if (identical(getOption("alfak2.sparse_joint_template"), "series")) settings$template <- "series"
   problem <- sparse_joint_problem(data, settings)
   domain <- problem$domain
   n <- length(domain$labels)
@@ -660,7 +858,12 @@ fit_sparse_joint <- function(counts,
   random <- problem$random
   objective <- TMB::MakeADFun(tmb_data, parameters, map = map, random = random, DLL = "alfak2",
                               silent = TRUE, inner.control = inner_control)
-  optimum <- sparse_joint_optimise_scales(objective, control)
+  labels <- sparse_joint_latent_labels(
+    names(objective$env$par)[objective$env$random],
+    states = data.frame(karyotype = domain$labels, cells = apply(domain$y, 1L, paste, collapse = " -> "),
+                        major = seq_len(n) <= domain$n_major, stringsAsFactors = FALSE)
+  )
+  optimum <- sparse_joint_optimise_scales(objective, control, labels = labels)
   # Uncertainty is conditional on the fitted scales: the marginal likelihood
   # is often flat in a scale.
   solver <- sparse_joint_posterior(objective, tmb_data, parameters, map, random, optimum$par, inner_control)
@@ -673,12 +876,14 @@ fit_sparse_joint <- function(counts,
   scale <- stats::setNames(exp(log_scale), scale_names)
 
   self <- 2 * exp(kernel$log_self) - 1
+  n_time <- ncol(domain$y)
+  timepoint <- seq_len(n_time) - 1L
   summary <- cbind(
-    data.frame(karyotype = domain$labels, count_t0 = domain$y0, count_t1 = domain$y1,
-               expected_t0 = solver$expected_t0, expected_t1 = solver$expected_t1,
-               major = seq_len(n) <= domain$n_major,
-               shell = sparse_joint_major_distance(domain$karyotypes, domain$major),
-               stringsAsFactors = FALSE),
+    data.frame(karyotype = domain$labels, stringsAsFactors = FALSE),
+    stats::setNames(as.data.frame(domain$y), paste0("count_t", timepoint)),
+    stats::setNames(as.data.frame(solver$expected), paste0("expected_t", timepoint)),
+    data.frame(major = seq_len(n) <= domain$n_major,
+               shell = sparse_joint_major_distance(domain$karyotypes, domain$major)),
     sparse_joint_fitness_columns(self, g_hat[, 1L], g_hat[, 2L])
   )
   # Relative to the count-weighted mean fitness of the majors.
@@ -686,24 +891,24 @@ fit_sparse_joint <- function(counts,
                                     summary$log_birth_sd, ifelse(summary$major, total, 0))
   summary$relative_fitness <- relative$mean
   summary$relative_sd <- sparse_joint_calibrate(relative$sd, relative$mean, summary$shell, birth_rate, calibration,
-                                                observed = summary$count_t0 + summary$count_t1 > 0)
+                                                observed = rowSums(problem$used) > 0)
   summary$relative_sd_model <- relative$sd
   observed_level <- sparse_joint_observed_level(summary)
-  structure(list(
+  fit <- structure(list(
     data = data,
     summary = summary,
     dropped = domain$dropped,
     # What rebuilding the posterior needs: see sparse_joint_rebuild().
     settings = settings,
-    posterior = list(zeta = solver$mode[solver$names == "zeta"], g = solver$mode[solver$names == "g"],
-                     coef = solver$mode[solver$names == "coef"], theta1 = solver$mode[solver$names == "theta1"],
-                     log_scale = log_scale),
+    posterior = c(lapply(stats::setNames(nm = random), function(name) solver$mode[solver$names == name]),
+                  list(log_scale = log_scale)),
     trend = list(coefficients = coef_hat[, 1L], covariance = coef_covariance, centre = centre,
                  major = domain$major, shell_power = shell_power, scales = scale,
                  observed_level = observed_level, reference = relative$reference,
                  calibration = calibration, birth_rate = birth_rate),
     diagnostics = list(
       convergence = optimum$convergence, message = optimum$message, objective = optimum$objective,
+      optimisation = optimum$check,
       finite_uncertainty = all(is.finite(g_hat[, 2L])) && all(is.finite(relative$sd)),
       n_states = n, n_major = domain$n_major, n_edges = length(kernel$from),
       dropped_karyotypes = length(domain$dropped), dropped_cells = domain$dropped_cells,
@@ -714,6 +919,11 @@ fit_sparse_joint <- function(counts,
       seconds = proc.time()[["elapsed"]] - started
     )
   ), class = "alfak2_sparse_joint_fit")
+  if (n_time > 2L) fit$diagnostics$times <- alfak2_data_times(data)
+  if (!is.null(settings$intermediate_weight)) fit$diagnostics$intermediate_weight <- settings$intermediate_weight
+  if (is.finite(dispersion)) fit$diagnostics$intermediate_dispersion <- dispersion
+  sparse_joint_convergence_warning(fit$diagnostics$optimisation)
+  fit
 }
 
 #' Predict fitness from a sparse joint fit
