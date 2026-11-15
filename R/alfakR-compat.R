@@ -145,8 +145,14 @@ sparse_joint_alfakR_xval <- function(fit, fq, observation, level, divisor) {
     weight[state] <- 0
     prior_mean <- problem$tmb_data$zeta_prior_mean
     prior_sd <- problem$tmb_data$zeta_prior_sd
-    prior_mean[state] <- never_seen
-    prior_sd[state] <- fit$settings$initial_frequency[[2L]]
+    # A matrix (pairwise method): one column per pair.
+    if (is.matrix(prior_mean)) {
+      prior_mean[state, ] <- never_seen
+      prior_sd[state, ] <- fit$settings$initial_frequency[[2L]]
+    } else {
+      prior_mean[state] <- never_seen
+      prior_sd[state] <- fit$settings$initial_frequency[[2L]]
+    }
     # A fold holding every major karyotype leaves nothing to predict from.
     major <- setdiff(seq_len(n_major), state)
     if (!length(major)) return(NULL)
@@ -310,12 +316,15 @@ as_alfakR <- function(fit, minobs = 20, nboot = 45, n0 = 1e5, nb = 1e7, correct_
   # Frequencies of the frequent karyotypes among themselves: at the first
   # sample, drawn with the fitness for those in the domain, the observed count
   # for the others; then moved back to time 0 with each draw's fitness.
-  zeta_index <- which(solver$names == "zeta")
+  # Each state's log abundance at the first sample among the latent
+  # variables; a state with none there takes its observed count.
+  zeta_index <- sparse_joint_first_sample_latent(fit, solver)
   inside <- match(fq, fit$summary$karyotype)
+  inside[!is.na(inside)][is.na(zeta_index[inside[!is.na(inside)]])] <- NA
   log_count <- matrix(log(pmax(counts[fq, 1L], .Machine$double.xmin)), length(fq), nboot)
   rows <- which(!is.na(inside))
   if (length(rows)) {
-    mode <- fit$posterior$zeta[inside[rows]]
+    mode <- sparse_joint_first_sample_zeta(fit)[inside[rows]]
     deviation <- draws$latent[zeta_index[inside[rows]], , drop = FALSE]
     pairs <- nboot %/% 2L
     shift <- matrix(0, length(rows), nboot)
