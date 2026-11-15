@@ -214,7 +214,12 @@ sparse_joint_posterior <- function(objective, tmb_data, parameters, map, random,
   latent <- objective$env$random
   report <- objective$report(mode)
   expected <- tmb_data
-  if (identical(tmb_data$model, "sparse_joint_series")) {
+  series_method <- tmb_data$model %in% c("sparse_joint_pairwise", "sparse_joint_state_space")
+  if (series_method) {
+    # The prior residuals of these templates are set to zero there as well.
+    computed <- sparse_joint_series_method_expected(tmb_data, parameters, map, mode, report)
+    expected <- computed$data
+  } else if (identical(tmb_data$model, "sparse_joint_series")) {
     expected$y <- cbind(exp(unname(mode[names(mode) == "zeta"])), exp(report$log_intensity))
   } else {
     expected$y0 <- exp(unname(mode[names(mode) == "zeta"]))
@@ -222,13 +227,13 @@ sparse_joint_posterior <- function(objective, tmb_data, parameters, map, random,
   }
   # The balance prior on initial abundances is not log-linear either: its
   # curvature is taken at zero residual in the same way.
-  expected$balance_offset <- as.numeric(report$balance_residual)
+  if (!series_method) expected$balance_offset <- as.numeric(report$balance_residual)
   information <- TMB::MakeADFun(expected, parameters, map = map, random = random, DLL = "alfak2",
                                 silent = TRUE, inner.control = inner_control)$env$spHess(mode, random = TRUE)
   factor <- Matrix::Cholesky(information, LDL = FALSE)
   n <- nrow(information)
   solve <- function(rhs) as.matrix(Matrix::solve(factor, rhs))
-  expected_counts <- if (is.null(expected$y)) cbind(expected$y0, expected$y1) else expected$y
+  expected_counts <- if (series_method) computed$counts else if (is.null(expected$y)) cbind(expected$y0, expected$y1) else expected$y
   list(
     mode = unname(mode[latent]), names = names(mode)[latent], solve = solve,
     # Fitted expected counts, for comparison with the observed ones: one
@@ -398,6 +403,7 @@ sparse_joint_history_candidates <- function(dt, birth_rate) {
 # gives the same objective for two timepoints; `settings$template = "series"`
 # forces it, to check exactly that.
 sparse_joint_template <- function(data, settings) {
+  if (ncol(data$counts) > 2L && !is.null(settings$series) && settings$series != "anchored") return(settings$series)
   if (ncol(data$counts) > 2L || identical(settings$template, "series")) "series" else "pair"
 }
 
@@ -482,12 +488,14 @@ sparse_joint_used_counts <- function(domain, settings) {
 # the domain, the division kernel, the trend design and the TMB inputs. Used by
 # the fit and to rebuild a fit's posterior later from its stored settings.
 sparse_joint_problem <- function(data, settings) {
+  template <- sparse_joint_template(data, settings)
+  if (template == "pairwise") return(sparse_joint_pairwise_problem(data, settings))
+  if (template == "state_space") return(sparse_joint_state_space_problem(data, settings))
   domain <- sparse_joint_domain(data$counts, settings$major_frequency, settings$major_count, settings$max_states,
                                 as.integer(settings$min_cn), as.integer(settings$max_cn),
                                 sparse_joint_major_columns(data, settings))
   n <- length(domain$labels)
   kernel <- sparse_division_kernel(domain$karyotypes, data$beta)
-  template <- sparse_joint_template(data, settings)
   # The counts the likelihood uses: with `intermediate = "majors"`, the
   # samples between the first and the last count for the majors only.
   used <- sparse_joint_used_counts(domain, settings)
@@ -548,11 +556,14 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
   problem <- sparse_joint_problem(fit$data, fit$settings)
   tmb_data <- problem$tmb_data
   if (!is.null(weight)) tmb_data$weight <- as.numeric(weight)
-  if (!is.null(zeta_prior_mean)) tmb_data$zeta_prior_mean <- as.numeric(zeta_prior_mean)
-  if (!is.null(zeta_prior_sd)) tmb_data$zeta_prior_sd <- as.numeric(zeta_prior_sd)
+  # A matrix keeps its shape (pairwise method: one column per pair).
+  keep_shape <- function(new, old) if (is.matrix(old)) matrix(as.numeric(new), nrow(old)) else as.numeric(new)
+  if (!is.null(zeta_prior_mean)) tmb_data$zeta_prior_mean <- keep_shape(zeta_prior_mean, tmb_data$zeta_prior_mean)
+  if (!is.null(zeta_prior_sd)) tmb_data$zeta_prior_sd <- keep_shape(zeta_prior_sd, tmb_data$zeta_prior_sd)
   if (!is.null(design)) tmb_data$design <- design
   parameters <- fit$posterior[names(problem$parameters)]
-  map <- list(log_scale = factor(rep(NA, length(parameters$log_scale))))
+  map <- problem$map
+  map$log_scale <- factor(rep(NA, length(parameters$log_scale)))
   inner_control <- fit$settings$inner_control
   objective <- TMB::MakeADFun(tmb_data, parameters, map = map, random = problem$random, DLL = "alfak2",
                               silent = TRUE, inner.control = inner_control)
@@ -731,6 +742,17 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 #' @param inner_control TMB inner Newton controls.
 #' @param times Sampling times, one per column of `counts`, instead of `dt`;
 #'   only their differences matter. When given, `dt` is not used.
+#' @param series With more than two samples, how they are tied together.
+#'   `"anchored"`, the default: one trajectory from the first sample, with
+#'   the majors and the domain from the first and the last sample (see
+#'   `intermediate`). `"pairwise"`: every pair of consecutive samples is
+#'   fitted as two samples are, with its own majors, domain, initial
+#'   abundances and depth, and all pairs share one landscape. `"state_space"`:
+#'   every sample has latent abundances, linked from one sample to the next
+#'   by the same dynamics plus a drift whose scale is estimated
+#'   (`diagnostics$drift`); the pairs' domains are joined. Two samples give
+#'   the same fit with all three. The three are compared in
+#'   validation/sparse_joint/series_methods.
 #' @param intermediate With more than two samples, how the samples between
 #'   the first and the last are used. `"majors"`, the default: the majors and
 #'   the domain are chosen from the first and the last sample, as for two
@@ -782,6 +804,7 @@ fit_sparse_joint <- function(counts,
                              control = list(eval.max = 200, iter.max = 100),
                              inner_control = list(maxit = 200, tol = 1e-10),
                              times = NULL,
+                             series = c("anchored", "pairwise", "state_space"),
                              intermediate = c("majors", "all"),
                              intermediate_weight = NULL) {
   data <- if (inherits(counts, "alfak2_data")) {
@@ -805,6 +828,7 @@ fit_sparse_joint <- function(counts,
   }
   initial_state <- match.arg(initial_state)
   intermediate <- match.arg(intermediate)
+  series <- match.arg(series)
   calibration <- sparse_joint_validate_calibration(calibration)
   if (is.null(history)) {
     history <- if (initial_state == "balance") sparse_joint_history_candidates(data$dt, birth_rate) else data$dt
@@ -828,13 +852,21 @@ fit_sparse_joint <- function(counts,
   # Checked once, before any candidate history is fitted: a first or last
   # sample with no cell next to a major karyotype leaves nothing to fit.
   n_input <- ncol(counts)
-  coverage <- sparse_joint_check_coverage(counts, major_frequency, major_count, max_states,
-                                          as.integer(min_cn), as.integer(max_cn),
-                                          sparse_joint_major_columns(data, list(intermediate = intermediate)),
-                                          required = c(1L, n_input))
-  # A sample in between with no cell on the states it counts for is left out
-  # (see sparse_joint_uncounted_samples()), and the rest fitted.
-  left_out <- sparse_joint_uncounted_samples(coverage, intermediate)
+  # The pairwise and state-space methods: every pair of consecutive samples
+  # with its own domain, each sample with a cell in it.
+  other_method <- n_input > 2L && series != "anchored"
+  coverage <- if (other_method) {
+    sparse_joint_check_pair_coverage(counts, major_frequency, major_count, max_states,
+                                     as.integer(min_cn), as.integer(max_cn))
+  } else {
+    sparse_joint_check_coverage(counts, major_frequency, major_count, max_states,
+                                as.integer(min_cn), as.integer(max_cn),
+                                sparse_joint_major_columns(data, list(intermediate = intermediate)),
+                                required = c(1L, n_input))
+  }
+  # Anchored: a sample in between with no cell on the states it counts for is
+  # left out (see sparse_joint_uncounted_samples()), and the rest fitted.
+  left_out <- if (other_method) integer(0) else sparse_joint_uncounted_samples(coverage, intermediate)
   if (length(left_out)) {
     input_times <- alfak2_data_times(data)
     dropped_samples <- cbind(data.frame(sample = left_out, time = input_times[left_out]),
@@ -858,7 +890,7 @@ fit_sparse_joint <- function(counts,
   # With intermediate samples for the majors only, their weight: the inverse of
   # the majors' dispersion in a first fit (at the shortest history), at most 1.
   dispersion <- NA_real_
-  if (ncol(counts) > 2L && intermediate == "majors") {
+  if (ncol(counts) > 2L && intermediate == "majors" && series == "anchored") {
     if (is.null(intermediate_weight)) {
       arguments <- mget(names(formals(sys.function())), envir = environment())
       arguments$counts <- data
@@ -902,9 +934,14 @@ fit_sparse_joint <- function(counts,
                    history = history, balance_sd = balance_sd, calibration = calibration,
                    inner_control = inner_control)
   # Only with more than two samples, so that two-sample fits stay as they were.
-  if (ncol(data$counts) > 2L) {
+  if (ncol(data$counts) > 2L && series == "anchored") {
     settings$intermediate <- intermediate
     if (intermediate == "majors") settings$intermediate_weight <- intermediate_weight
+  } else if (ncol(data$counts) > 2L) {
+    settings$series <- series
+    # Internal options of the evaluation (validation/sparse_joint/series_methods).
+    if (series == "pairwise") settings$pair_history <- getOption("alfak2.pair_history", "age")
+    if (series == "state_space") settings$drift <- getOption("alfak2.state_space_drift")
   }
   # Internal: fit two timepoints with the template for more, to check that it
   # gives the same fit.
@@ -916,7 +953,8 @@ fit_sparse_joint <- function(counts,
   total <- problem$total
   centre <- problem$centre
   design <- problem$design
-  scale_names <- c("dosage", "curvature", "interaction", "residual")
+  scale_names <- if (is.null(problem$scale_names)) c("dosage", "curvature", "interaction", "residual") else
+    problem$scale_names
   tmb_data <- problem$tmb_data
   parameters <- problem$parameters
   free_scale <- problem$free_scale
@@ -924,12 +962,19 @@ fit_sparse_joint <- function(counts,
   random <- problem$random
   objective <- TMB::MakeADFun(tmb_data, parameters, map = map, random = random, DLL = "alfak2",
                               silent = TRUE, inner.control = inner_control)
+  latent_names <- names(objective$env$par)[objective$env$random]
   labels <- sparse_joint_latent_labels(
-    names(objective$env$par)[objective$env$random],
+    latent_names,
     states = data.frame(karyotype = domain$labels, cells = apply(domain$y, 1L, paste, collapse = " -> "),
-                        major = seq_len(n) <= domain$n_major, stringsAsFactors = FALSE)
+                        major = seq_len(n) <= domain$n_major, stringsAsFactors = FALSE),
+    state_index = sparse_joint_latent_states(problem, latent_names)
   )
-  optimum <- sparse_joint_optimise_scales(objective, control, labels = labels)
+  optimum <- if (is.null(problem$scale_bounds)) {
+    sparse_joint_optimise_scales(objective, control, labels = labels)
+  } else {
+    sparse_joint_optimise_scales(objective, control, lower = problem$scale_bounds$lower,
+                                 upper = problem$scale_bounds$upper, labels = labels)
+  }
   # Uncertainty is conditional on the fitted scales: the marginal likelihood
   # is often flat in a scale.
   solver <- sparse_joint_posterior(objective, tmb_data, parameters, map, random, optimum$par, inner_control)
@@ -937,7 +982,8 @@ fit_sparse_joint <- function(counts,
   g_hat <- cbind(solver$mode[g_index], sqrt(solver$variance(g_index)))
   coef_hat <- cbind(solver$mode[solver$names == "coef"])
   coef_covariance <- sparse_joint_coef_covariance(solver)
-  log_scale <- tmb_data$log_scale_prior_mean
+  # Scales not free keep their values (the prior mean, or a fixed drift).
+  log_scale <- parameters$log_scale
   log_scale[free_scale] <- optimum$par
   scale <- stats::setNames(exp(log_scale), scale_names)
 
@@ -966,7 +1012,7 @@ fit_sparse_joint <- function(counts,
     dropped = domain$dropped,
     # What rebuilding the posterior needs: see sparse_joint_rebuild().
     settings = settings,
-    posterior = c(lapply(stats::setNames(nm = random), function(name) solver$mode[solver$names == name]),
+    posterior = c(sparse_joint_fill_latent(parameters, map, solver$mode, solver$names, random),
                   list(log_scale = log_scale)),
     trend = list(coefficients = coef_hat[, 1L], covariance = coef_covariance, centre = centre,
                  major = domain$major, shell_power = shell_power, scales = scale,
@@ -986,6 +1032,11 @@ fit_sparse_joint <- function(counts,
     )
   ), class = "alfak2_sparse_joint_fit")
   if (n_time > 2L) {
+    if (!is.null(settings$series)) {
+      fit$diagnostics$series <- settings$series
+      if (settings$series == "pairwise") fit$diagnostics$pair_history <- settings$pair_history
+      if (settings$series == "state_space") fit$diagnostics$drift <- scale[["drift"]]
+    }
     fit$diagnostics$times <- alfak2_data_times(data)
     # None left out here; a caller that left samples out replaces it.
     fit$diagnostics$dropped_samples <- cbind(data.frame(sample = integer(0), time = numeric(0)), coverage[0L, ])

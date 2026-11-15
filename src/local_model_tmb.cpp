@@ -3,6 +3,8 @@
 #include "sparse_joint_model.h"
 #include "sparse_joint_cohort_model.h"
 #include "sparse_joint_series_model.h"
+#include "sparse_joint_pairwise_model.h"
+#include "sparse_joint_state_space_model.h"
 
 template<class Type>
 Type softplus_floor(Type x, Type floor) {
@@ -365,6 +367,8 @@ Type objective_function<Type>::operator() () {
     if (model == "sparse_joint") return sparse_joint_model(this);
     if (model == "sparse_joint_cohort") return sparse_joint_cohort_model(this);
     if (model == "sparse_joint_series") return sparse_joint_series_model(this);
+    if (model == "sparse_joint_pairwise") return sparse_joint_pairwise_model(this);
+    if (model == "sparse_joint_state_space") return sparse_joint_state_space_model(this);
   }
   return local_model(this);
 }

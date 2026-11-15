@@ -25,6 +25,7 @@ fit_sparse_joint(
   control = list(eval.max = 200, iter.max = 100),
   inner_control = list(maxit = 200, tol = 1e-10),
   times = NULL,
+  series = c("anchored", "pairwise", "state_space"),
   intermediate = c("majors", "all"),
   intermediate_weight = NULL
 )
@@ -111,6 +112,18 @@ the scale parameters; see Details for what follows it.}
 
 \item{times}{Sampling times, one per column of \code{counts}, instead of \code{dt};
 only their differences matter. When given, \code{dt} is not used.}
+
+\item{series}{With more than two samples, how they are tied together.
+\code{"anchored"}, the default: one trajectory from the first sample, with
+the majors and the domain from the first and the last sample (see
+\code{intermediate}). \code{"pairwise"}: every pair of consecutive samples is
+fitted as two samples are, with its own majors, domain, initial
+abundances and depth, and all pairs share one landscape. \code{"state_space"}:
+every sample has latent abundances, linked from one sample to the next
+by the same dynamics plus a drift whose scale is estimated
+(\code{diagnostics$drift}); the pairs' domains are joined. Two samples give
+the same fit with all three. The three are compared in
+validation/sparse_joint/series_methods.}
 
 \item{intermediate}{With more than two samples, how the samples between
 the first and the last are used. \code{"majors"}, the default: the majors and

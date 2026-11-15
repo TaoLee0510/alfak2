@@ -163,6 +163,11 @@ error, fitted to simulated landscapes, to the model's own posterior standard
 deviation (`relative_sd_model`), which is too small on its own. The error grows
 with the predicted difference, and more for karyotypes seen in neither
 sample: how far below the clones they lie is not identified by zero counts.
+Because `relative_sd` grows with the difference itself, its 95% intervals
+always contain zero. They are for coverage, not for testing whether a
+karyotype differs from the reference. On simulated neutral cultures, about
+5% of karyotypes had |`relative_fitness`| / `relative_sd_model` above 4.5
+([series methods](validation/sparse_joint/series_methods/README.md)).
 
 The baseline birth rate has to be supplied; two samples do not identify it.
 Rankings hardly depend on it. Fitness differences between well-sampled clones
@@ -272,6 +277,38 @@ fit; it suits large populations passaged through large bottlenecks only. The
 default takes 2-4 times as long as two samples, `"all"` up to 20 times
 ([stage 2](validation/sparse_joint/multi_timepoint/README.md)). Cohort fits
 and the two older pipelines take two samples.
+
+`series` chooses how the samples are tied together. All three methods share
+one landscape, and with two samples all three give the same fit.
+
+| `series` | dynamics | majors and domain | samples in between |
+| --- | --- | --- | --- |
+| `"anchored"` (default) | one trajectory from the first sample | from the first and the last sample | as above |
+| `"pairwise"` | each pair of consecutive samples from its earlier sample as observed | each pair's own | end of one pair, start of the next |
+| `"state_space"` | latent abundances at every sample, linked by the dynamics plus a drift whose scale is estimated (`fit$diagnostics$drift`) | each pair's own | each counted once |
+
+```r
+fit <- fit_sparse_joint(counts, times = c(0, 120, 240, 360), beta = 0.00005, birth_rate = 0.9,
+                        series = "state_space")
+```
+
+The three were compared on passaged cultures (as above), on clonal sweeps
+(the first sample while clones still replace one another, samples 120 days
+apart) and on neutral cultures. Results are the median RMSE ratio to the
+first and last sample alone
+([series methods](validation/sparse_joint/series_methods/README.md)).
+- **Clonal sweeps**: `anchored` 0.89–0.94, `pairwise` 0.68–0.85,
+  `state_space` 0.79–0.82.
+- **`pairwise` under drift**: up to 1.8 with bottlenecks of 200 cells, and
+  1.1–2.0 on neutral cultures. Each pair restarts from the observed sample,
+  so passaging drift within a pair reads as selection.
+- **`state_space`**: 0.93–1.03 on the passaged cultures, but up to 1.3 at
+  one and two steps on neutral cultures. It takes 3–11 times as long as
+  `anchored`; with 8 samples some fits take more than 6 hours and up to
+  10 GB.
+
+`anchored` stays the default. The other two suit clonal sweeps through large
+bottlenecks.
 
 The first and the last sample must each have a cell in the domain. Some
 samples in between have no cell on the states they count for: no cell on a

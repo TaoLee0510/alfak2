@@ -505,7 +505,16 @@ benchmark; an additional multiplicative factor on $s_i$ was estimated to be
 close to zero and omitted. On landscapes not used for estimation, the nominal
 95\% intervals covered between 89\% and 100\% of true values, depending on
 wavelength and distance (Section~\ref{sec:validation}). Both $\tilde s_i$ and
-$s_i$ are returned.
+$s_i$ are returned. For karyotypes seen in neither sample, $\kappa$ is 1.1:
+zero counts do not identify how far below the majors they lie.
+
+Since $\tilde s_i\ge\kappa|\rho_i|$, $|\rho_i|/\tilde s_i\le1/\kappa$, which is
+1.67 for observed karyotypes and 0.91 for unobserved ones. The calibrated
+95\% intervals therefore always contain zero. They describe the error of the
+estimate, and they cannot test whether a karyotype differs from the
+reference. A test can use $|\rho_i|/s_i$ against a threshold set on neutral
+data. On simulated neutral passaged cultures, 5\% of karyotypes exceeded
+about 4.5.
 
 \subsection{Prediction Beyond the Model Domain}
 \label{sec:sj-predict}
@@ -647,6 +656,70 @@ the fit is the fit to the other samples. A clonal sweep produces such a
 sample when the population in the middle lies two or more steps from the
 majors of both ends. The first and the last sample must each have a count in
 the domain.
+
+\paragraph{Pairs of consecutive samples.}
+That such a sample carries no information follows from the design, not from
+the data. Two further methods model every pair of consecutive samples
+$(t_{k-1},t_k)$, $k=1,\dots,K$, with its own majors $\mathcal{M}_k$ and domain
+$\mathcal{D}_k$, chosen from those two samples by (\ref{eq:share})--(\ref{eq:domain}).
+The states are $\bigcup_k\mathcal{D}_k$. The landscape, i.e.\ the birth rates
+and the trend, is the same for all pairs, and the trend is centred on the
+count-weighted mean karyotype over all samples. Write $\Delta_k=t_k-t_{k-1}$, and
+$n^{(k)}(\Delta;z)$ for (\ref{eq:forward}) over $\Delta$ within $\mathcal{D}_k$ from
+initial log abundances $z$. With $K=1$ both methods are (\ref{eq:poisson}).
+
+In the \emph{pairwise} method each pair is fitted as two samples are, with
+initial abundances $\zeta_{k}$ of its own:
+\begin{equation}
+  y_{k-1,i}\sim\operatorname{Poisson}\bigl(e^{\zeta_{ki}}\bigr),
+  \qquad
+  y_{ki}\sim\operatorname{Poisson}\bigl(\exp\{\theta_k-d_r\Delta_k\}\,n^{(k)}_i(\Delta_k;\zeta_k)\bigr),
+  \qquad i\in\mathcal{D}_k .
+  \label{eq:pairwise}
+\end{equation}
+The non-majors of $\mathcal{D}_k$ have the balance prior
+(\ref{eq:balance-prior}), fed by the pair's majors, over the history plus the
+population's age $t_{k-1}$ at the pair's first sample. A sample in between is
+the end of one pair and the start of the next, so it counts twice. Given the
+centre of the cohort's trend, this is the cohort model
+(Section~\ref{sec:sj-cohort}) of the pairs with every birth rate and the trend
+shared, and the fits agree to $10^{-14}$.
+
+In the \emph{state-space} method every sample has latent log intensities
+$z_k$, with $z_0=\zeta$. Each sample is observed once,
+$y_{ki}\sim\operatorname{Poisson}(e^{z_{ki}})$. From one sample to the next,
+\begin{equation}
+  z_{ki}\sim\mathcal{N}\Bigl(\log n^{(k)}_i(\Delta_k;z_{k-1})-d_r\Delta_k+\theta_k,\;
+  \frac{c\,v_{ki}}{c+v_{ki}}\Bigr),
+  \qquad
+  v_{ki}=\frac{\sigma^2_{\mathrm{drift}}\,\Delta_k}{f_{ki}},
+  \quad c=4,
+  \label{eq:state-space}
+\end{equation}
+where $f_{ki}=\tfrac12\bigl(y_{k-1,i}/N_{k-1}+y_{ki}/N_k\bigr)+1/(N_{k-1}+N_k)$ is the state's
+mean share at the two samples plus half a cell. The variance is that of
+neutral drift in frequency, on the log scale, and it is capped smoothly. The
+drift $\sigma^2_{\mathrm{drift}}$ is a fifth scale of the outer optimisation.
+Its prior is log-normal with median $10^{-4}$ per day and standard deviation
+$2.5$ on the log scale, and its bounds are $10^{-9}$ and $1$. As
+$\sigma^2_{\mathrm{drift}}\to0$ the method becomes the anchored model with
+every sample used for every karyotype, except that the closed form composed
+over the intervals keeps part of the second order in $M$. At
+$\sigma^2_{\mathrm{drift}}=10^{-8}$ the two fits correlate at $0.997$. The
+expected information (\ref{eq:laplace}) is taken with the transitions'
+residuals at their fitted values.
+
+On the simulations of the anchored model, and on clonal sweeps and neutral
+cultures (validation/sparse\_joint/series\_methods), the pairwise method was
+up to 1.8 times less accurate than the first and the last sample alone with
+bottlenecks of 200 cells, and 1.1--2.0 times on neutral cultures. Restarting
+from the observed sample at every pair reads passaging drift within a pair as
+selection. The state-space method was within 0.93--1.03 on passaged cultures
+and up to 1.3 times less accurate one and two steps from the observed
+karyotypes of neutral cultures. In clonal sweeps both were more accurate
+than the anchored model, with median RMSE ratios of 0.68--0.85 and 0.79--0.82,
+against 0.89--0.94. The state-space method takes 3--11 times as long as the
+anchored model. The anchored model is the default.
 
 \subsection{Export in the \texttt{alfakR} Output Format}
 \label{sec:sj-alfakR}

@@ -722,6 +722,33 @@ landscape, medians over landscapes:
   passage had no cell in the domain at all. The simulated cultures here have
   none.
 
+`series_methods/`: three ways to tie the samples together
+(`fit_sparse_joint(series = ...)`).
+- `anchored` is the method above.
+- `pairwise` fits each pair of consecutive samples as two samples, with its
+  own majors and domain.
+- `state_space` has latent abundances at every sample, linked by the dynamics
+  plus an estimated drift.
+
+All three share one landscape. They were compared on the cultures above
+(e1), on clonal sweeps (e2) and on neutral cultures (e3). Results are the
+median RMSE ratio to `ends`, as ranges over distances 0–2:
+
+| | e1, bottleneck 200 / 20000 | e2, 4 / 8 samples | e3 |
+| --- | --- | --- | --- |
+| `anchored` | 0.99–1.01 / 1.00–1.01 | 0.89–0.94 / 0.93 | 0.75–1.02 |
+| `pairwise` | 1.61–1.78 / 0.91–1.01 | 0.77–0.85 / 0.68–0.73 | 1.14–2.01 |
+| `state_space` | 0.95–1.00 / 0.93–0.97 | 0.79–0.82 / 0.79–0.81 | 0.83–1.29 |
+
+- Only `anchored` passes the gates set beforehand, so it stays the default.
+- `pairwise` reads passaging drift within each pair as selection.
+- `state_space` costs 3–11 times as much; with 8 samples some fits take more
+  than 6 h.
+- The calibrated 95% intervals always contain zero, since
+  `relative_sd` ≥ 0.6 |`relative_fitness`|. Power is therefore measured at a
+  controlled false-positive rate. 42 `state_space` fits are being rerun with
+  more time; their numbers are interim.
+
 ## Patient regrowth
 
 `patient_regrowth/` (two samples). A recurrence grown from 2000, 200 or 20

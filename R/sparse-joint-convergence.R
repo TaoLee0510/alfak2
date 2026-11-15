@@ -125,10 +125,12 @@ sparse_joint_inner_flattest <- function(env, mode = env$last.par, iterations = 2
 # `zeta` and `g` follow, one row each in their order (`karyotype`, `cells`:
 # its counts in each sample, as text, `major`, and in a cohort `sample`);
 # `nodes` likewise the karyotypes of a cohort's shared birth rates `m`.
-sparse_joint_latent_labels <- function(names, states, nodes = NULL) {
-  index <- as.integer(stats::ave(seq_along(names), names, FUN = seq_along))
+sparse_joint_latent_labels <- function(names, states, nodes = NULL, state_index = NULL) {
+  # `state_index`: the state of each latent variable, where it is not its
+  # position among those of its name (the pairwise and state-space methods).
+  index <- if (is.null(state_index)) as.integer(stats::ave(seq_along(names), names, FUN = seq_along)) else state_index
   variable <- c(zeta = "initial abundance", g = "birth rate", m = "birth rate", coef = "trend coefficient",
-                theta1 = "depth", theta = "depth")[names]
+                theta1 = "depth", theta = "depth", zeta_later = "later abundance")[names]
   out <- data.frame(variable = ifelse(is.na(variable), names, variable), karyotype = NA_character_,
                     sample = NA_character_, cells = NA_character_, major = NA, stringsAsFactors = FALSE)
   fill <- function(out, rows, table) {
@@ -138,7 +140,7 @@ sparse_joint_latent_labels <- function(names, states, nodes = NULL) {
     }
     out
   }
-  out <- fill(out, names %in% c("zeta", "g"), states)
+  out <- fill(out, names %in% c("zeta", "g", "zeta_later"), states)
   fill(out, names == "m", nodes)
 }
 
