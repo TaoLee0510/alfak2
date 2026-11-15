@@ -668,6 +668,14 @@ count-weighted mean karyotype over all samples. Write $\Delta_k=t_k-t_{k-1}$, an
 $n^{(k)}(\Delta;z)$ for (\ref{eq:forward}) over $\Delta$ within $\mathcal{D}_k$ from
 initial log abundances $z$. With $K=1$ both methods are (\ref{eq:poisson}).
 
+Both samples of a pair need a count in $\mathcal{D}_k$. Without one, the
+pair's depth offset, or the initial abundances of its domain, are unbounded
+by that sample, for the reason given above. A sample in between without a
+count is left out, and its neighbours become a pair. If the first or the last
+sample has none, its neighbour is left out instead. This repeats until every
+pair is covered. The first and the last sample define the span, as in the
+anchored model. At worst they remain alone, which is (\ref{eq:poisson}).
+
 In the \emph{pairwise} method each pair is fitted as two samples are, with
 initial abundances $\zeta_{k}$ of its own:
 \begin{equation}

@@ -321,6 +321,16 @@ majors.
 - `fit$diagnostics$dropped_samples` lists the samples left out.
 - `as_alfakR()` still picks its karyotypes from every sample, as alfakR
   does.
+- With `"pairwise"` and `"state_space"`, both samples of each consecutive
+  pair need a cell in that pair's own domain. A sample in between without
+  one is left out, and its neighbours become a pair. If the first or the last
+  sample has none, its neighbour is left out instead, so the series keeps its
+  span. At worst this gives the two-sample fit of the ends.
+- Results on the Salehi trajectories of the ALFA-K paper benchmark (187 with
+  more than two passages that the default can fit):
+  - the default left out 103 samples in 53 trajectories;
+  - the pair rule left out one sample in each of 42;
+  - no trajectory stops.
 
 ### Outputs in the format of alfakR
 

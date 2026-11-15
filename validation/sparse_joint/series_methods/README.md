@@ -26,6 +26,30 @@ evaluation below and the paper benchmark.
 
 With two samples all three give the two-sample fit, bit for bit.
 
+**Pairs without coverage.** For `pairwise` and `state_space`, both samples of
+each pair need a cell in that pair's domain. In c7f809c a pair without one
+stopped the fit. The `benchmark` session found that this stopped 42 of the
+187 Salehi trajectories with more than two passages that `anchored` can fit,
+all of them sweep families. These are the trajectories the two methods are
+for.
+
+Such a sample carries no information about its pair, as an anchored sample
+in between with no count carries none. So it is now left out
+(`sparse_joint_pair_left_out()`, from the counts alone):
+- A sample in between with no cell in its pair's domain is left out, and its
+  neighbours become a pair.
+- If the first or the last sample has none, its neighbour is left out instead.
+- This repeats until every pair is covered; at worst the two-sample fit of the
+  ends remains.
+
+On the Salehi inputs (default settings, `min_cn = 0`):
+- none of the 187 stops;
+- 42 leave out one sample each, the uncovered sample itself;
+- 4 of those 42 have three passages and become two-sample fits.
+
+For comparison, `anchored` left out 103 samples in 53 of them. Fits in which
+every pair is covered are unchanged.
+
 ### Pairwise (A)
 
 Each pair is modelled as two samples are (`sparse_joint_model.h`):
