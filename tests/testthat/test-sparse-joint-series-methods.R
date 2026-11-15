@@ -108,9 +108,60 @@ test_that("predictions and alfakR outputs work for every series method", {
   }
 })
 
-test_that("a pair with a sample outside its own domain stops the fit", {
+test_that("a first sample outside every pair's domain stops the fit", {
+  # The first sample is kept; its neighbour is left out, and the first and
+  # the last sample alone still have no cell of the first in the domain.
   counts <- rbind("2.2.2" = c(0, 20, 15), "3.3.2" = c(1, 0, 0), "1.1.2" = c(1, 0, 0), "2.4.2" = c(1, 0, 0),
                   "4.2.3" = c(1, 0, 0))
-  expect_error(fit_sparse_joint(counts, dt = c(10, 10), beta = 0.001, series = "pairwise"),
+  expect_identical(sparse_joint_pair_left_out(counts, 0.01, 3, 5000, 1L, 4L)$left_out, 2L)
+  expect_error(suppressWarnings(fit_sparse_joint(counts, dt = c(10, 10), beta = 0.001, series = "pairwise")),
                class = "alfak2_domain_coverage_error")
+})
+
+# The simulated series with sample `k` replaced by `cells`.
+replace_series_sample <- function(sim, k, cells) {
+  counts <- sim$counts
+  extra <- setdiff(names(cells), rownames(counts))
+  counts <- rbind(counts, matrix(0, length(extra), ncol(counts), dimnames = list(extra, colnames(counts))))
+  counts[, k] <- 0
+  counts[names(cells), k] <- cells
+  counts[rowSums(counts) > 0, , drop = FALSE]
+}
+
+test_that("a sample in between with no cell in its pair's domain is left out", {
+  sim <- simulate_series_counts()
+  # Sample t2 holds single cells far from every major: in pair (t1, t2) it
+  # has no cell in the domain. It is left out, and t1 and t3 form a pair.
+  far <- c("4.4.4.4" = 1, "1.1.4.4" = 1, "4.1.1.4" = 1)
+  counts <- replace_series_sample(sim, 3L, far)
+  pairs <- sparse_joint_pair_left_out(counts, 0.01, 3, 5000, 1L, 4L)
+  expect_identical(pairs$left_out, 3L)
+  expect_identical(pairs$uncovered, "t2")
+  kept <- counts[, -3L]
+  kept <- kept[rowSums(kept) > 0, ]
+  for (method in c("pairwise", "state_space")) {
+    expect_warning(fit <- fit_sparse_joint(counts, times = sim$times, beta = sim$beta, max_cn = 4, history = 60,
+                                           series = method),
+                   class = "alfak2_samples_left_out_warning")
+    direct <- fit_sparse_joint(kept, times = sim$times[-3L], beta = sim$beta, max_cn = 4, history = 60,
+                               series = method)
+    expect_identical(fit$summary, direct$summary)
+    expect_identical(fit$diagnostics$dropped_samples$sample, 3L)
+    expect_identical(fit$diagnostics$dropped_samples$uncovered, "t2")
+    expect_equal(fit$input$counts, counts)
+  }
+})
+
+test_that("a last sample with no cell in its pair's domain pairs with a sample further in", {
+  sim <- simulate_series_counts()
+  # t2 has swept to a far clone; t3 holds two single cells of the earlier
+  # majors. In (t2, t3) the last sample has no cell in the domain, so t2 is
+  # left out and t3 pairs with t1, where those karyotypes are majors.
+  counts <- replace_series_sample(sim, 3L, c("4.4.4.4" = 300, "4.4.4.3" = 20))
+  counts <- replace_series_sample(list(counts = counts), 4L, c("2.2.2.2" = 1, "2.3.2.2" = 1))
+  pairs <- sparse_joint_pair_left_out(counts, 0.01, 3, 5000, 1L, 4L)
+  expect_identical(pairs$left_out, 3L)
+  expect_identical(pairs$uncovered, "t3")
+  # Every pair covered: nothing left out.
+  expect_identical(sparse_joint_pair_left_out(sim$counts, 0.01, 3, 5000, 1L, 4L)$left_out, integer(0))
 })

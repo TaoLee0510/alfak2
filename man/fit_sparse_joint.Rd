@@ -156,7 +156,10 @@ domain to the nearest major karyotype). With more than two timepoints,
 \code{diagnostics$times} are the sample times fitted and
 \code{diagnostics$dropped_samples} the samples left out. It has one row per
 sample left out (\code{sample}, its column in the input; \code{time}; and the
-coverage columns), and no rows when none was.
+coverage columns), and no rows when none was. For the pairwise and
+state-space methods its columns are \code{sample}, \code{time}, \code{timepoint},
+\code{cells} and \code{uncovered}: the sample without a cell in its pair's domain,
+which is the sample itself, or a first or last sample next to it.
 }
 \description{
 Fits fitness to sparse karyotype samples of one population, two or more
@@ -193,6 +196,15 @@ default, the domain with \code{"all"}) is left out with a warning
 nothing under the model, and the fit is the fit to the other samples.
 Leaving it out is the limit of its own likelihood. The input as given is
 kept in \code{input}, for \code{\link[=as_alfakR]{as_alfakR()}}.
+
+With \code{series} \code{"pairwise"} or \code{"state_space"}, each pair of consecutive
+samples has its own domain, and both samples of a pair need a cell in it.
+A sample in between without one is left out in the same way, and its
+neighbours become a pair. The first and the last sample are kept. When one
+of them has no cell in its pair's domain, its neighbour in between is left
+out instead, so that it pairs with a sample further in. This repeats until
+every pair is covered. At worst the first and the last sample remain, and
+the fit is the two-sample fit.
 
 Observed karyotypes that are not next to a major karyotype are left out of
 the likelihood, together with their cells. They would enter only because

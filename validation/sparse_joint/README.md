@@ -744,6 +744,9 @@ median RMSE ratio to `ends`, as ranges over distances 0–2:
 - `pairwise` reads passaging drift within each pair as selection.
 - `state_space` costs 3–11 times as much; with 8 samples some fits take more
   than 6 h.
+- A pair whose sample has no cell in the pair's domain no longer stops the
+  fit. The sample is left out, as for `anchored` (`series_methods/README.md`).
+  This stopped 42 of 187 Salehi trajectories in c7f809c; now none stops.
 - The calibrated 95% intervals always contain zero, since
   `relative_sd` ≥ 0.6 |`relative_fitness`|. Power is therefore measured at a
   controlled false-positive rate. 42 `state_space` fits are being rerun with

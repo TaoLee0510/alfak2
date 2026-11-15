@@ -243,6 +243,43 @@ sparse_joint_check_pair_coverage <- function(counts, major_frequency, major_coun
   coverage
 }
 
+# Samples that the pairwise and state-space methods leave out. Each pair of
+# consecutive samples has its own domain. A sample of a pair with no cell in
+# that domain carries no information about it: its depth offset is free, as
+# for an anchored sample in between (sparse_joint_uncounted_samples()).
+# - Such a sample in between is left out, and its neighbours become a pair.
+# - The first and the last sample are kept, as in the anchored method, where
+#   they define the domain. If one of them has no cell in its pair's domain,
+#   its neighbour in between is left out instead, so that it pairs with a
+#   sample further in.
+# This repeats, from the first uncovered pair on, until every pair is
+# covered. At worst the first and the last sample remain: the two-sample fit,
+# which checks its own coverage. Returns the positions left out (in order)
+# and, for each, the timepoint it was left out for.
+sparse_joint_pair_left_out <- function(counts, major_frequency, major_count, max_states, min_cn, max_cn) {
+  if (is.null(colnames(counts))) colnames(counts) <- paste0("t", seq_len(ncol(counts)) - 1L)
+  kept <- seq_len(ncol(counts))
+  left_out <- integer(0)
+  uncovered <- character(0)
+  while (length(kept) > 2L) {
+    coverage <- sparse_joint_pair_coverage(counts[, kept, drop = FALSE], major_frequency, major_count, max_states,
+                                           min_cn, max_cn)
+    # Two rows per pair, its earlier and its later sample; position in `kept`.
+    position <- coverage$pair + rep(c(0L, 1L), length.out = nrow(coverage))
+    empty <- which(coverage$cells_in_domain <= 0)
+    if (!length(empty)) break
+    pair <- coverage$pair[[empty[[1L]]]]
+    bad <- position[empty][coverage$pair[empty] == pair]
+    inner <- bad[bad > 1L & bad < length(kept)]
+    drop <- if (length(inner)) inner[[1L]] else setdiff(c(pair, pair + 1L), bad)[[1L]]
+    left_out <- c(left_out, kept[[drop]])
+    uncovered <- c(uncovered, colnames(counts)[kept[[bad[[1L]]]]])
+    kept <- kept[-drop]
+  }
+  order <- order(left_out)
+  list(left_out = left_out[order], uncovered = uncovered[order])
+}
+
 # The state of each latent variable of the pairwise and state-space methods,
 # for naming flat directions (NULL for the others: position among its name).
 sparse_joint_latent_states <- function(problem, names) {

@@ -612,6 +612,15 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 #' Leaving it out is the limit of its own likelihood. The input as given is
 #' kept in `input`, for [as_alfakR()].
 #'
+#' With `series` `"pairwise"` or `"state_space"`, each pair of consecutive
+#' samples has its own domain, and both samples of a pair need a cell in it.
+#' A sample in between without one is left out in the same way, and its
+#' neighbours become a pair. The first and the last sample are kept. When one
+#' of them has no cell in its pair's domain, its neighbour in between is left
+#' out instead, so that it pairs with a sample further in. This repeats until
+#' every pair is covered. At worst the first and the last sample remain, and
+#' the fit is the two-sample fit.
+#'
 #' Observed karyotypes that are not next to a major karyotype are left out of
 #' the likelihood, together with their cells. They would enter only because
 #' they were observed, while their unobserved siblings would not, which
@@ -782,7 +791,10 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 #'   `diagnostics$times` are the sample times fitted and
 #'   `diagnostics$dropped_samples` the samples left out. It has one row per
 #'   sample left out (`sample`, its column in the input; `time`; and the
-#'   coverage columns), and no rows when none was.
+#'   coverage columns), and no rows when none was. For the pairwise and
+#'   state-space methods its columns are `sample`, `time`, `timepoint`,
+#'   `cells` and `uncovered`: the sample without a cell in its pair's domain,
+#'   which is the sample itself, or a first or last sample next to it.
 #' @export
 fit_sparse_joint <- function(counts,
                              dt = 1,
@@ -853,30 +865,46 @@ fit_sparse_joint <- function(counts,
   # sample with no cell next to a major karyotype leaves nothing to fit.
   n_input <- ncol(counts)
   # The pairwise and state-space methods: every pair of consecutive samples
-  # with its own domain, each sample with a cell in it.
+  # with its own domain, each sample with a cell in it. Samples are left out
+  # until that holds (sparse_joint_pair_left_out()).
   other_method <- n_input > 2L && series != "anchored"
-  coverage <- if (other_method) {
-    sparse_joint_check_pair_coverage(counts, major_frequency, major_count, max_states,
-                                     as.integer(min_cn), as.integer(max_cn))
+  if (other_method) {
+    pairs <- sparse_joint_pair_left_out(counts, major_frequency, major_count, max_states,
+                                        as.integer(min_cn), as.integer(max_cn))
+    left_out <- pairs$left_out
+    if (length(left_out)) {
+      # `uncovered`: the sample without a cell in its pair's domain, the left
+      # out one itself or a first or last sample next to it.
+      detail <- data.frame(sample = left_out, time = alfak2_data_times(data)[left_out],
+                           timepoint = colnames(counts)[left_out], cells = colSums(counts)[left_out],
+                           uncovered = pairs$uncovered, stringsAsFactors = FALSE)
+      reason <- paste("a pair of consecutive samples had a sample with no cell in its domain",
+                      "(the sample itself, or a first or last sample next to it)")
+    } else {
+      coverage <- sparse_joint_check_pair_coverage(counts, major_frequency, major_count, max_states,
+                                                   as.integer(min_cn), as.integer(max_cn))
+    }
   } else {
-    sparse_joint_check_coverage(counts, major_frequency, major_count, max_states,
-                                as.integer(min_cn), as.integer(max_cn),
-                                sparse_joint_major_columns(data, list(intermediate = intermediate)),
-                                required = c(1L, n_input))
+    coverage <- sparse_joint_check_coverage(counts, major_frequency, major_count, max_states,
+                                            as.integer(min_cn), as.integer(max_cn),
+                                            sparse_joint_major_columns(data, list(intermediate = intermediate)),
+                                            required = c(1L, n_input))
+    # Anchored: a sample in between with no cell on the states it counts for
+    # is left out (see sparse_joint_uncounted_samples()), and the rest fitted.
+    left_out <- sparse_joint_uncounted_samples(coverage, intermediate)
+    if (length(left_out)) {
+      detail <- cbind(data.frame(sample = left_out, time = alfak2_data_times(data)[left_out]),
+                      coverage[left_out, , drop = FALSE])
+      reason <- sprintf("no cell on the %s", if (intermediate == "majors") "major karyotypes" else "model domain")
+    }
   }
-  # Anchored: a sample in between with no cell on the states it counts for is
-  # left out (see sparse_joint_uncounted_samples()), and the rest fitted.
-  left_out <- if (other_method) integer(0) else sparse_joint_uncounted_samples(coverage, intermediate)
   if (length(left_out)) {
-    input_times <- alfak2_data_times(data)
-    dropped_samples <- cbind(data.frame(sample = left_out, time = input_times[left_out]),
-                             coverage[left_out, , drop = FALSE])
+    dropped_samples <- detail
     rownames(dropped_samples) <- NULL
     warning(warningCondition(
-      sprintf(paste0("Left out %d of %d samples (%s): no cell on the %s. Such a sample carries no information ",
+      sprintf(paste0("Left out %d of %d samples (%s): %s. Such a sample carries no information ",
                      "under the model; see diagnostics$dropped_samples."),
-              length(left_out), n_input, paste(colnames(counts)[left_out], collapse = ", "),
-              if (intermediate == "majors") "major karyotypes" else "model domain"),
+              length(left_out), n_input, paste(colnames(counts)[left_out], collapse = ", "), reason),
       class = "alfak2_samples_left_out_warning", call = NULL))
     arguments <- mget(names(formals(sys.function())), envir = environment())
     arguments$counts <- sparse_joint_keep_samples(data, setdiff(seq_len(n_input), left_out))
