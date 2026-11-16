@@ -55,7 +55,7 @@ sm_methods <- function() {
     list(type = "series", birth_rate = 1, min_cn = 1L, max_cn = 8L, columns = columns, arguments = list(...),
          options = options)
   }
-  list(
+  methods <- list(
     zero = list(type = "zero"),
     ends = series("ends"),
     anchored = series("all", series = "anchored"),
@@ -66,6 +66,69 @@ sm_methods <- function() {
     pairwise_same = series("all", series = "pairwise", options = list(alfak2.pair_history = "same")),
     state_space = series("all", series = "state_space")
   )
+  # Choosing the missegregation rate (validation/sparse_joint/beta_choice,
+  # step 2): `ends` and `anchored` at the dataset's rate times each other
+  # multiple of `beta = "auto"`, one fit per task; `--stage=compose` keeps, per
+  # dataset, the candidate of lowest objective as `ends_auto` and
+  # `anchored_auto`, which is what fit_sparse_joint(beta = "auto") returns.
+  for (name in names(sm_beta_multiples)) {
+    for (base in c("ends", "anchored")) {
+      method <- methods[[base]]
+      method$beta_multiple <- sm_beta_multiples[[name]]
+      methods[[paste0(base, "_", name)]] <- method
+    }
+  }
+  for (base in c("ends", "anchored")) {
+    methods[[paste0(base, "_auto")]] <- list(type = "composed",
+                                             from = c(base, paste0(base, "_", names(sm_beta_multiples))))
+  }
+  methods
+}
+
+sm_beta_multiples <- c(b1o16 = 1 / 16, b1o4 = 1 / 4, b4 = 4, b16 = 16, b64 = 64)
+
+# Per dataset, the candidate fit of lowest objective of each composed method.
+sm_stage_compose <- function(config) {
+  index <- utils::read.csv(si_index_path(config), stringsAsFactors = FALSE)
+  composed <- Filter(function(m) identical(m$type, "composed"), config$methods)
+  for (name in names(composed)) {
+    from <- composed[[name]]$from
+    made <- missing <- 0L
+    for (dataset_id in index$dataset_id) {
+      paths <- vapply(from, function(m) si_fit_path(config, dataset_id, m), character(1))
+      if (!all(file.exists(paths))) {
+        missing <- missing + 1L
+        next
+      }
+      fits <- lapply(paths, readRDS)
+      ok <- vapply(fits, function(f) identical(f$status, "ok"), logical(1))
+      objective <- vapply(fits, function(f) {
+        o <- f$diagnostics$objective
+        if (identical(f$status, "ok") && length(o) && is.finite(o)) as.numeric(o) else NA_real_
+      }, numeric(1))
+      multiple <- vapply(from, function(m) {
+        b <- config$methods[[m]]$beta_multiple
+        if (is.null(b)) 1 else b
+      }, numeric(1))
+      if (all(is.na(objective))) {
+        result <- fits[[1L]]
+      } else {
+        best <- which.min(objective)
+        result <- fits[[best]]
+        result$beta_multiple <- multiple[[best]]
+      }
+      result$beta_profile <- data.frame(method = from, beta_multiple = multiple, objective = objective,
+                                        status = vapply(fits, function(f) f$status, character(1)))
+      result$seconds <- sum(vapply(fits, function(f) as.numeric(f$seconds), numeric(1)))
+      result$method <- name
+      path <- si_fit_path(config, dataset_id, name)
+      dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+      saveRDS(result, path)
+      made <- made + 1L
+    }
+    cat(name, ": composed", made, "datasets;", missing, "with a candidate missing\n")
+  }
+  invisible()
 }
 
 # Links from a build's directory to the set's inputs.
@@ -260,7 +323,8 @@ sm_fit_series <- function(config, dataset, nodes, method) {
   warnings <- character()
   fit <- withCallingHandlers(
     do.call(alfak2::fit_sparse_joint, c(
-      list(counts, times = times, beta = dataset$beta, birth_rate = method$birth_rate, min_cn = method$min_cn,
+      list(counts, times = times, beta = dataset$beta * if (is.null(method$beta_multiple)) 1 else method$beta_multiple,
+           birth_rate = method$birth_rate, min_cn = method$min_cn,
            max_cn = method$max_cn),
       method$arguments)),
     warning = function(w) {
@@ -287,6 +351,7 @@ sm_run_method <- function(config, dataset, nodes, method) {
       zero = list(status = "ok", prediction = data.frame(karyotype = nodes$karyotype, fitness = 0,
                                                          fitness_sd = NA_real_, stringsAsFactors = FALSE)),
       series = sm_fit_series(config, dataset, nodes, method),
+      composed = stop("Composed methods are made by --stage=compose.", call. = FALSE),
       stop("Unknown method type: ", method$type, call. = FALSE)
     ),
     error = function(e) list(status = "failed", prediction = NULL, detail = conditionMessage(e),

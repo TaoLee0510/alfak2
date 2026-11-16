@@ -429,9 +429,7 @@ write_alfakR_outputs <- function(x, outdir) {
 #'   `yi$x`.
 #' @param minobs,nboot,n0,nb,correct_efflux,landscape_data_output See
 #'   [as_alfakR()].
-#' @param pm Missegregation rate per chromosome copy and division, as in
-#'   alfakR. Several values or `"auto"` let alfak2 choose it; see `beta` of
-#'   [fit_sparse_joint()].
+#' @param pm Missegregation rate per chromosome copy and division.
 #' @param allow_noninteger_counts Logical; round non-integer counts with a
 #'   warning instead of stopping.
 #' @param ... Further arguments of [fit_sparse_joint()], such as

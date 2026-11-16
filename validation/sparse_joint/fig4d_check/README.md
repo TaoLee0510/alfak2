@@ -16,6 +16,16 @@ in vitro.
 Δf = f(frequent karyotype) − f(one-chromosome neighbour), as in the paper.
 "In vitro" means the lines SA039 and SA906; the other Salehi lines are PDX.
 
+> **Later qualification** (2026-11-16, `../beta_choice`). Choosing β by
+> marginal likelihood picks rates that are too high when time points are
+> close: with 6 days between them, half the picks were 4× or 16× the truth.
+> The PDX trajectories have shorter intervals than the in vitro ones, so part
+> of their preference for 4–16× the default may be that bias rather than
+> higher chromosomal instability. What stands is narrower:
+> - Fig. 4d's direction for alfak2 depends on the assumed rates.
+> - At any single common β, alfak2 reverses it.
+> - At the rates the data prefer, it agrees with the paper.
+
 ## Answer
 
 The reversal comes from using **one missegregation rate**, β = 5e-5 (the

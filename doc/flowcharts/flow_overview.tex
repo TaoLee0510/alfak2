@@ -14,9 +14,7 @@
   division.\\[2pt]
   \textbf{Checks and settings}\quad copy numbers within $[c_{\min},c_{\max}]$ ($c_{\max}$: largest observed
   $+1$); every time point has a cell; candidate histories of the balance prior
-  $H=\{t_K\}\cup\{30,100,300,1000,3000 \text{ divisions at } b_0\}$, those longer than $t_K$;
-  missegregation rates $B$: \code{beta} (default $5\times10^{-5}$ alone), or with \code{"auto"}
-  $5\times10^{-5}\times\{1/16,1/4,1,4,16,64\}$.};
+  $H=\{t_K\}\cup\{30,100,300,1000,3000 \text{ divisions at } b_0\}$, those longer than $t_K$.};
 \coordinate (chk) at (in.south);
 
 % ---- number of time points and series -----------------------------------------
@@ -60,10 +58,10 @@
   \textbf{1 Problem}\\ majors $\mathcal M$, domain $\mathcal D$, missegregation kernel, trend design,
   priors; stop if $t_0$ or $t_K$ has no cell in $\mathcal D$};
 \node[box=cCore, w=3.3cm, anchor=north west, font=\footnotesize] (c2) at ($(c1.north east)+(0.55,0)$) {%
-  \textbf{2 Fit at every $\beta\in B$, $h\in H$}\\ Laplace marginal likelihood: inner Newton over the latent
+  \textbf{2 Fit at every $h\in H$}\\ Laplace marginal likelihood: inner Newton over the latent
   variables, \code{nlminb} over the log scales; convergence check};
 \node[box=cCore, w=3.3cm, anchor=north west, font=\footnotesize] (c3) at ($(c2.north east)+(0.55,0)$) {%
-  \textbf{3 Best $\beta$ and $h$}\\ keep the lowest objective; posterior: mode and expected
+  \textbf{3 Best history}\\ keep the $h$ with the lowest objective; posterior: mode and expected
   information (sparse Cholesky)};
 \node[box=cCore, w=3.3cm, anchor=north west, font=\footnotesize] (c4) at ($(c3.north east)+(0.55,0)$) {%
   \textbf{4 Relative fitness}\\ $\rho_i=d_i-R$ against the majors' count-weighted mean fitness $R$;
@@ -88,7 +86,7 @@
 \path (core.south) ++(0,-0.55) coordinate (outtop);
 \node[box=cOut, w=4.55cm, anchor=north, font=\footnotesize] (o1) at (2.45, 0 |- outtop) {%
   \textbf{Fit object}\quad \code{summary} per domain state, \code{trend},
-  \code{diagnostics} (\code{series}, \code{dropped\_samples}, \code{beta\_profile}, \code{history\_profile},
+  \code{diagnostics} (\code{series}, \code{dropped\_samples}, \code{history\_profile},
   \code{convergence})};
 \node[box=cOut, w=4.55cm, anchor=north, font=\footnotesize] (o2) at (7.85, 0 |- outtop) {%
   \textbf{\code{predict()}}\quad in $\mathcal D$: the posterior; observed but outside $\mathcal D$:
