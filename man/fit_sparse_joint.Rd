@@ -38,8 +38,18 @@ timepoint, at least two, in time order; or an \code{alfak2_data} object.}
 for two timepoints, or one per pair of consecutive timepoints. See also
 \code{times}.}
 
-\item{beta}{Missegregation rate per chromosome copy and division, if
-\code{counts} is a matrix.}
+\item{beta}{Missegregation rate per chromosome copy and division. One
+value fixes it (for an \code{alfak2_data} object, its own rate is used). Several
+values are candidates, and \code{"auto"} takes 5e-5 times 1/16, 1/4, 1, 4, 16
+and 64: the model is fitted at each and the fit with the highest marginal
+likelihood is kept, as for \code{history}, so a fit takes as many times as
+long. \code{diagnostics$beta_profile} lists the candidates. The pairwise and
+state-space methods choose the rate with the anchored model and are then
+fitted at it. Only the product of the rate and \code{birth_rate} is
+identified. On the ALFA-K paper's simulations the chosen rate lay within
+4 times of the true one for 93\% of inputs, leaning one step low, and its
+landscapes were as accurate as at the true rate
+(validation/sparse_joint/beta_choice).}
 
 \item{birth_rate}{Assumed baseline birth (division) rate per unit of \code{dt}.}
 

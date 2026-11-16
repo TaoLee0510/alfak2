@@ -399,6 +399,69 @@ sparse_joint_history_candidates <- function(dt, birth_rate) {
   c(dt, divisions[divisions > dt])
 }
 
+# Candidate missegregation rates of `beta = "auto"`: 5e-5, the rate of the
+# ALFA-K paper, times 1/16 to 64 in steps of 4. On the paper's simulations
+# (true rates 5e-5 to 8e-4) the rate of lowest objective lay within 4 times
+# of the truth for 93% of inputs, and its landscape was as accurate as at the
+# true rate (validation/sparse_joint/beta_choice).
+sparse_joint_beta_grid <- 5e-5 * c(1 / 16, 1 / 4, 1, 4, 16, 64)
+
+# The rates to fit: one (fixed), several, or the grid for "auto".
+sparse_joint_beta_candidates <- function(beta) {
+  if (identical(beta, "auto")) return(sparse_joint_beta_grid)
+  if (!is.numeric(beta) || !length(beta) || any(!is.finite(beta)) || any(beta < 0) || any(beta > 1)) {
+    stop("`beta` must be one or more missegregation rates in [0, 1], or \"auto\".", call. = FALSE)
+  }
+  unique(as.numeric(beta))
+}
+
+# Several candidate missegregation rates: the model is fitted at each and the
+# fit of lowest objective kept, as for the history. The counts are the same at
+# every rate, so the marginal likelihoods compare directly. The pairwise and
+# state-space methods choose the rate with the anchored model, which costs
+# least, and are then fitted once at it. `arguments` are those of the call to
+# fit_sparse_joint().
+sparse_joint_fit_beta_candidates <- function(arguments, candidates) {
+  started <- proc.time()[["elapsed"]]
+  series <- match.arg(arguments$series, c("anchored", "pairwise", "state_space"))
+  n_time <- if (inherits(arguments$counts, "alfak2_data")) ncol(arguments$counts$counts) else NCOL(arguments$counts)
+  other_method <- n_time > 2L && series != "anchored"
+  fit_at <- function(args, rate) {
+    args$beta <- rate
+    if (inherits(args$counts, "alfak2_data")) args$counts$beta <- rate
+    do.call(fit_sparse_joint, args)
+  }
+  choose_with <- arguments
+  if (other_method) choose_with$series <- "anchored"
+  # Which time points are left out does not depend on the rate: its warning
+  # is given once, and only the chosen fit's convergence is warned about.
+  fits <- lapply(seq_along(candidates), function(i) tryCatch(withCallingHandlers(
+    fit_at(choose_with, candidates[[i]]),
+    alfak2_convergence_warning = function(w) invokeRestart("muffleWarning"),
+    alfak2_samples_left_out_warning = function(w) if (i > 1L || other_method) invokeRestart("muffleWarning")),
+    error = function(e) e))
+  failed <- vapply(fits, inherits, logical(1), "error")
+  if (all(failed)) stop(fits[[1L]])
+  objective <- vapply(fits, function(f) if (inherits(f, "error")) NA_real_ else f$diagnostics$objective, numeric(1))
+  convergence <- vapply(fits, function(f) if (inherits(f, "error")) NA_real_ else as.numeric(f$diagnostics$convergence),
+                        numeric(1))
+  history <- vapply(fits, function(f) if (inherits(f, "error")) NA_real_ else as.numeric(f$diagnostics$history),
+                    numeric(1))
+  chosen <- sparse_joint_choose_candidate(objective, convergence)
+  if (is.na(chosen)) stop("No candidate missegregation rate gave a fit.", call. = FALSE)
+  profile <- data.frame(beta = candidates, objective = objective, convergence = convergence, history = history)
+  if (other_method) {
+    fit <- fit_at(arguments, candidates[[chosen]])
+    profile$fitted_with <- "anchored"
+  } else {
+    fit <- fits[[chosen]]
+    sparse_joint_convergence_warning(fit$diagnostics$optimisation)
+  }
+  fit$diagnostics$beta_profile <- profile
+  fit$diagnostics$seconds <- proc.time()[["elapsed"]] - started
+  fit
+}
+
 # Template of a fit: "pair" (src/sparse_joint_model.h) for two timepoints,
 # "series" (src/sparse_joint_series_model.h) for more. The series template
 # gives the same objective for two timepoints; `settings$template = "series"`
@@ -694,8 +757,18 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 #' @param dt Time between the time points, if `counts` is a matrix: one interval
 #'   for two timepoints, or one per pair of consecutive timepoints. See also
 #'   `times`.
-#' @param beta Missegregation rate per chromosome copy and division, if
-#'   `counts` is a matrix.
+#' @param beta Missegregation rate per chromosome copy and division. One
+#'   value fixes it (for an `alfak2_data` object, its own rate is used). Several
+#'   values are candidates, and `"auto"` takes 5e-5 times 1/16, 1/4, 1, 4, 16
+#'   and 64: the model is fitted at each and the fit with the highest marginal
+#'   likelihood is kept, as for `history`, so a fit takes as many times as
+#'   long. `diagnostics$beta_profile` lists the candidates. The pairwise and
+#'   state-space methods choose the rate with the anchored model and are then
+#'   fitted at it. Only the product of the rate and `birth_rate` is
+#'   identified. On the ALFA-K paper's simulations the chosen rate lay within
+#'   4 times of the true one for 93% of inputs, leaning one step low, and its
+#'   landscapes were as accurate as at the true rate
+#'   (validation/sparse_joint/beta_choice).
 #' @param birth_rate Assumed baseline birth (division) rate per unit of `dt`.
 #' @param birth_rate_log_sd Prior standard deviation of the log baseline birth
 #'   rate around `log(birth_rate)`.
@@ -820,6 +893,12 @@ fit_sparse_joint <- function(counts,
                              series = c("anchored", "pairwise", "state_space"),
                              intermediate = c("majors", "all"),
                              intermediate_weight = NULL) {
+  # Several missegregation rates, or "auto": the rate is chosen as the history
+  # is (sparse_joint_fit_beta_candidates()).
+  candidates <- sparse_joint_beta_candidates(beta)
+  if (length(candidates) > 1L) {
+    return(sparse_joint_fit_beta_candidates(mget(names(formals(sys.function())), envir = environment()), candidates))
+  }
   data <- if (inherits(counts, "alfak2_data")) {
     counts
   } else if (is.null(times)) {

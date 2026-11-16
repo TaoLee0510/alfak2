@@ -184,6 +184,27 @@ predict(fit, karyotypes)   # relative fitness at the central rate, an interval
                            # covering the range, and fitness per division
 ```
 
+The missegregation rate `beta` acts the same way. It sets how many cells
+missegregation puts into a neighbour, so a neighbour seen less often reads as
+less fit. By default it is fixed at 5e-5, the rate of the ALFA-K paper. With
+`beta = "auto"`, or several values, the model is fitted at each candidate and
+the one of highest marginal likelihood is kept, as for the history
+(`fit$diagnostics$beta_profile`).
+- On the paper's simulations, with true rates of 5e-5 to 8e-4, the chosen
+  rate lay within 4 times of the truth for 93% of inputs. Its landscapes were
+  as accurate as at the true rate
+  ([beta choice](validation/sparse_joint/beta_choice/README.md)).
+- On the Salehi data, PDX trajectories prefer 4–16 times the default, and in
+  vitro ones the default
+  ([Fig. 4d check](validation/sparse_joint/fig4d_check/README.md)).
+- A fit then takes six times as long.
+
+```r
+fit <- fit_sparse_joint(counts, dt = 180, beta = "auto")
+fit$diagnostics$beta_profile   # objective at each candidate rate
+alfak_compat(yi, outdir, pm = "auto")   # the same through the alfakR interface
+```
+
 Several datasets, such as several patients or cultures with two time points
 each, can be fitted together. Each keeps its own domain and initial
 abundances; a karyotype that is abundant in one dataset and an unobserved

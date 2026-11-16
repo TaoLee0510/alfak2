@@ -79,6 +79,20 @@ Picks, as multiples of 5e-5, over all three windows:
   pick's r is 0.31, against 0.49 at the truth. At 4e-4 it is 0.55 against
   0.61.
 
+## Step 1: the option (`fit_sparse_joint(beta = ...)`)
+
+- **One value** fixes the rate, as before; the fit is bit for bit the same.
+- **Several values, or `"auto"`** (5e-5 × 1/16, 1/4, 1, 4, 16, 64), are
+  candidates. Each is fitted, with the history chosen inside it, and the fit
+  of lowest objective is kept.
+- **Diagnostics:** `diagnostics$beta_profile` lists the candidates.
+- **Pairwise and state space** take the rate the anchored model chooses.
+- **Cohorts** still take one rate.
+- **alfakR interface:** `alfak_compat(pm = "auto")` passes it through.
+- **Default:** the rate stays fixed at 5e-5 until the paper benchmark
+  (step 3) has been weighed.
+- **Tests:** `tests/testthat/test-sparse-joint-beta.R`.
+
 ## Files
 
 - **Tracked:** `sim_fit.R` (one fit per task) and `analyse_sim.R` (the

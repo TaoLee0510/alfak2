@@ -62,10 +62,11 @@
   \node[frame=cCoreB, fill=cCore!45, fit=(prior)(lik)(laplace)(check), inner xsep=9pt, inner ysep=9pt] (loop) {};
 \end{scope}
 \node[ftitle=cCoreB, anchor=west, fill=white] at ($(loop.north west)+(0.25,0)$)
-  {for every history $h\in H$ (one fit each)};
+  {for every rate $\beta\in B$ and history $h\in H$ (one fit each)};
 
 \node[box, w=12.6cm, below=0.55cm of loop] (best) {%
-  \textbf{8 History}\quad keep the candidate with the lowest objective (\code{history\_profile}).};
+  \textbf{8 Rate and history}\quad keep the candidate with the lowest objective (\code{beta\_profile},
+  \code{history\_profile}). One rate by default; \code{beta = "auto"} or several values are candidates.};
 \node[box, w=12.6cm, below=0.4cm of best] (post) {%
   \textbf{9 Posterior}\quad Gaussian at the mode $\hat u$ with covariance $H_E^{-1}$; $H_E$ is the
   expected information (counts replaced by their fitted expectations), factorised once by sparse
