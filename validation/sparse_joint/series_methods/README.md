@@ -166,6 +166,8 @@ false-positive rate:
 - `abm_constant.cpp`: the simulator with constant fitness (e3).
 - `hmc_check.R`: the HMC check above.
 - `report.R`: tables, gates and `overview.pdf`.
+- `auto_eval.R`: the automatic choice (`series = "auto"`), scored on the
+  existing fits (below); output in `results/<build>/auto/`.
 
 Results are in `results/` (git-ignored).
 
@@ -175,11 +177,10 @@ On HPC, the task lists hold one line per fit:
 
 ## Results (build cv10)
 
-> **Interim for `state_space`.** 42 of its 768 fits did not finish within the
-> 6 h job limit. All 42 have 8 samples (e1 8, e2 14, e3 20; 2 of the e2 ones
-> ran out of memory at 8 GB). They are being rerun with more time. Until then
-> they count as failed fits, and its other numbers are on the fits that
-> finished.
+42 of the 768 `state_space` fits did not finish within the first 6 h job
+limit, all with 8 samples (e1 8, e2 14, e3 20; 2 of the e2 ones also ran out
+of memory at 8 GB). They were rerun with 21 h and 16 GB, and all finished (the
+longest in 18.3 h). The numbers below include them.
 
 ### Accuracy
 
@@ -189,13 +190,13 @@ distances 0, 1 and 2.
 | set | setting | `anchored` | `pairwise` | `state_space` |
 | --- | --- | --- | --- | --- |
 | e1 | bottleneck 200 | 0.99–1.01 | 1.61–1.78 | 0.95–1.00 |
-| e1 | bottleneck 2000 | 1.00 | 1.08–1.14 | 0.98–1.03 |
+| e1 | bottleneck 2000 | 1.00 | 1.08–1.14 | 0.99–1.02 |
 | e1 | bottleneck 20000 | 1.00–1.01 | 0.91–1.01 | 0.93–0.97 |
 | e2 | 4 samples | 0.89–0.94 | 0.77–0.85 | 0.79–0.82 |
 | e2 | 8 samples | 0.93 | 0.68–0.73 | 0.79–0.81 |
-| e3 | bottleneck 200 | 0.89–1.01 | 1.35–1.68 | 1.04–1.17 |
-| e3 | bottleneck 2000 | 0.83–1.02 | 1.14–1.72 | 1.00–1.29 |
-| e3 | bottleneck 20000 | 0.75–1.00 | 1.24–2.01 | 0.83–1.26 |
+| e3 | bottleneck 200 | 0.89–1.01 | 1.35–1.68 | 1.03–1.15 |
+| e3 | bottleneck 2000 | 0.83–1.02 | 1.14–1.72 | 0.99–1.23 |
+| e3 | bottleneck 20000 | 0.75–1.00 | 1.24–2.01 | 0.81–1.17 |
 
 - **`pairwise`** restarts from the observed sample at every pair. Passaging
   drift within each pair is then read as selection. It is worst with small
@@ -208,7 +209,7 @@ distances 0, 1 and 2.
   `pairwise` everywhere, and slightly worse on e1 and e3. `"age"` is kept.
 - **Coverage** of the reported 95% intervals is 0.99–1.00 on e1 and e3 for
   every method. On e2, at distance 0, it is 0.80 for `ends`, 0.88 for
-  `anchored`, 0.94 for `state_space` and 0.96 for `pairwise`.
+  `anchored`, 0.93 for `state_space` and 0.96 for `pairwise`.
 
 ### Power
 
@@ -226,10 +227,10 @@ At a controlled 5% false-positive rate (Measures), effect 0.05:
 | --- | --- | --- | --- | --- |
 | z*, all distances | 4.6 | 4.5 | 8.5 | 7.0 |
 | e1, all distances | 0.18 | 0.17 | 0.015 | 0.04 |
-| e1, distance 0 | 0.22 | 0.21 | 0.10 | 0.19 |
-| e2, all distances | 0.30 | 0.45 | 0.13 | 0.36 |
-| e2, distance 0 | 0.22 | 0.38 | 0.50 | 0.55 |
-| e2, distance 1 | 0.33 | 0.47 | 0.13 | 0.41 |
+| e1, distance 0 | 0.22 | 0.21 | 0.10 | 0.16 |
+| e2, all distances | 0.30 | 0.45 | 0.13 | 0.37 |
+| e2, distance 0 | 0.22 | 0.38 | 0.50 | 0.53 |
+| e2, distance 1 | 0.33 | 0.47 | 0.13 | 0.37 |
 
 - Even for `ends`, z* is about 4.5, not 1.96: the model's own sd is too small
   (`relative_sd_model`; this is why the calibration exists).
@@ -245,11 +246,11 @@ At a controlled 5% false-positive rate (Measures), effect 0.05:
 
 | | `ends` | `anchored` | `pairwise` | `state_space` |
 | --- | --- | --- | --- | --- |
-| failed fits | 0 | 0 | 0 | 42 (time limit, interim) |
-| not accepted, e1 / e2 / e3 | 29% / 46% / 32% | 32% / 56% / 29% | 27% / 68% / 22% | 46% / 93% / 63% of finished |
-| median time, s (e1 / e2 / e3) | 73 / 126 / 85 | 196 / 444 / 244 | 344 / 789 / 468 | 814 / 1972 / 1426 of finished |
-| time per fit relative to `anchored`, 4 / 8 samples (median) | 0.4–0.5 / 0.2–0.25 | 1 | 1.3–1.7 / 1.6–2.0 | 2.6–4.0 / 7–11 |
-| median peak memory, GB | 0.6–0.8 | 1.1–1.6 | 1.5–2.1 | 2.1–3.3 (up to 10.5) |
+| failed fits | 0 | 0 | 0 | 0 (42 after a rerun with more time) |
+| not accepted, e1 / e2 / e3 | 29% / 46% / 32% | 32% / 56% / 29% | 27% / 68% / 22% | 47% / 94% / 65% |
+| median time, s (e1 / e2 / e3) | 73 / 126 / 85 | 196 / 444 / 244 | 344 / 789 / 468 | 888 / 2140 / 1664 |
+| time per fit relative to `anchored`, 4 / 8 samples (median) | 0.4–0.5 / 0.2–0.25 | 1 | 1.3–1.7 / 1.6–2.0 | 2.6–4.0 / 7.7–12.4 |
+| median peak memory, GB | 0.6–0.8 | 1.1–1.6 | 1.5–2.1 | 2.1–3.3 (up to 16) |
 
 "Not accepted" means the convergence check did not accept the fit; such fits
 are scored as they are, as for the earlier stages. For `state_space` the
@@ -263,7 +264,7 @@ them is needed. Its cost is that of the model, not of the search.
 | `anchored` | 21 / 24 | pass | pass | pass | yes |
 | `pairwise` | 5 / 24 | fail | pass | pass | no |
 | `pairwise_same` | 4 / 24 | fail | pass | pass | no |
-| `state_space` | 16 / 24 | fail | pass | fail (interim) | no |
+| `state_space` | 16 / 24 | fail | pass | pass | no |
 
 The e3 gate counts interval calls, which are 0 by construction (above). As
 written it cannot fail, so it says nothing. Measured at a controlled
@@ -274,7 +275,50 @@ the `benchmark` session) is weighed before this is final. Both new methods
 are kept:
 - `pairwise` for clonal sweeps through large bottlenecks;
 - `state_space` where clones sweep under moderate drift. It costs 3–4 times
-  as much as `anchored` with 4 samples, and 7–11 times as much with 8, where
-  some fits take more than 6 h and up to 10 GB.
+  as much as `anchored` with 4 samples, and 8–12 times as much with 8, where
+  some fits take up to 18 h and 16 GB.
 
 Neither suits small bottlenecks or samples a few days apart.
+
+### Automatic choice (`series = "auto"`)
+
+`auto_eval.R` picks, for each dataset, one of the methods already fitted,
+from measures of the counts and of the anchored fit, and scores the pick as
+that method's fit. Nothing is refitted. The measures, the candidate rules and
+the criterion were fixed before any rule was scored (script header):
+- a rule is acceptable if it passes the e1 gate above and, on e3, is at most
+  0.01 above `anchored` at every distance;
+- among those, the lowest e2 ratio; within 0.01 of it, the simpler rule.
+
+Two measures carry the choice:
+- `ends_major`: the least share, over the samples in between, of a sample's
+  cells on the majors of the first and last sample. A clonal sweep takes a
+  sample off them.
+- `weight`: the anchored fit's intermediate weight, 1 / max(1, dispersion of
+  the majors' counts). It is low under strong passaging drift.
+
+Chosen: `ends_major < 0.3` → `pairwise` if `weight >= 0.5` (or no sample in
+between is left to measure it), otherwise `state_space`; `anchored` if
+`ends_major >= 0.3`. This is `sparse_joint_auto_thresholds`.
+
+| rule | e1 cells | e1 | e2 | e3 | picks on e2 (a / p / s) |
+| --- | --- | --- | --- | --- | --- |
+| chosen (0.3, weight 0.5) | 21 / 24 | 1.00 | 0.80–0.85 | 0.85–1.01 | 46% / 47% / 7% |
+| 0.3, weight 0.8 | 21 / 24 | 1.00 | 0.81–0.83 | 0.85–1.01 | 46% / 32% / 22% |
+| 0.3, always `pairwise` | 21 / 24 | 1.00 | 0.79–0.86 | 0.85–1.01 | 46% / 54% / 0% |
+| 0.3, always `state_space` | 21 / 24 | 1.00 | 0.83–0.87 | 0.84–1.01 | 46% / 0% / 54% |
+| `anchored` | 21 / 24 | 1.00 | 0.91–0.93 | 0.84–1.01 | |
+| best fitted method per dataset | | 0.93–0.94 | 0.74–0.77 | 0.77–0.97 | |
+
+Ratios are median RMSE ratios to `ends` over distances 0–2. The rule keeps
+`anchored` on all of e1 and 95% of e3, and on e2 its median ratio (0.81) lies
+between `anchored` (0.93) and the best fitted method per dataset (0.74).
+- 0.3 is the largest share threshold that is acceptable. At 0.5 the rule
+  leaves `anchored` on 18% of the neutral datasets and adds errors there
+  (0.015–0.035 above `anchored` on e3).
+- The weight threshold is not: 0.8 gives 0.82, just outside the 0.01 band.
+- Choosing the thresholds on landscapes 1–6 and scoring on 7–12 (and back)
+  says nothing: on a half, even `anchored` fails the e1 gate.
+
+The paper benchmark (E4) is the held-out check. Until it passes, `anchored`
+stays the default and `"auto"` must be requested.

@@ -738,19 +738,24 @@ median RMSE ratio to `ends`, as ranges over distances 0–2:
 | --- | --- | --- | --- |
 | `anchored` | 0.99–1.01 / 1.00–1.01 | 0.89–0.94 / 0.93 | 0.75–1.02 |
 | `pairwise` | 1.61–1.78 / 0.91–1.01 | 0.77–0.85 / 0.68–0.73 | 1.14–2.01 |
-| `state_space` | 0.95–1.00 / 0.93–0.97 | 0.79–0.82 / 0.79–0.81 | 0.83–1.29 |
+| `state_space` | 0.95–1.00 / 0.93–0.97 | 0.79–0.82 / 0.79–0.81 | 0.81–1.23 |
 
 - Only `anchored` passes the gates set beforehand, so it stays the default.
 - `pairwise` reads passaging drift within each pair as selection.
-- `state_space` costs 3–11 times as much; with 8 samples some fits take more
-  than 6 h.
+- `state_space` costs 3–12 times as much; with 8 samples some fits take up
+  to 18 h and 16 GB.
+- `series = "auto"` keeps `anchored` unless a sample in between has less
+  than 30% of its cells on the first and last samples' majors (a sweep);
+  there it takes `pairwise` if the anchored intermediate weight is at least
+  0.5, otherwise `state_space`. It keeps `anchored` on all of e1 and 95% of
+  e3, and gives 0.81 on e2. The rule was fixed on e1–e3 and is checked on
+  the paper benchmark.
 - A pair whose sample has no cell in the pair's domain no longer stops the
   fit. The sample is left out, as for `anchored` (`series_methods/README.md`).
   This stopped 42 of 187 Salehi trajectories in c7f809c; now none stops.
 - The calibrated 95% intervals always contain zero, since
   `relative_sd` ≥ 0.6 |`relative_fitness`|. Power is therefore measured at a
-  controlled false-positive rate. 42 `state_space` fits are being rerun with
-  more time; their numbers are interim.
+  controlled false-positive rate.
 
 ## Patient regrowth
 

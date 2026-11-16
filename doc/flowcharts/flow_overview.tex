@@ -1,0 +1,136 @@
+% alfak2 sparse joint model: how fit_sparse_joint() chooses its path.
+% Mirrors fit_sparse_joint() in R/sparse-joint.R and the series methods in
+% R/sparse-joint-series-methods.R. Build: pdflatex flow_overview.tex
+\documentclass[tikz,border=4pt]{standalone}
+\input{flowstyle}
+\begin{document}
+\begin{tikzpicture}
+
+% ---- input and checks ---------------------------------------------------
+\node[box=cIn, w=15.1cm] (in) at (7.85,0) {%
+  \textbf{Input}\quad \code{fit\_sparse\_joint(counts, dt | times, beta, \ldots)}, also reached from
+  \code{fit\_alfak2()} and \code{alfak\_compat()}. counts: cells per karyotype (rows) and sample (columns),
+  samples $t_0<t_1<\dots<t_K$ in time order, $K\ge1$; $\beta$: missegregation rate per chromosome copy and
+  division.\\[2pt]
+  \textbf{Checks and settings}\quad copy numbers within $[c_{\min},c_{\max}]$ ($c_{\max}$: largest observed
+  $+1$); every sample has a cell; candidate histories of the balance prior
+  $H=\{t_K\}\cup\{30,100,300,1000,3000 \text{ divisions at } b_0\}$, those longer than $t_K$.};
+\coordinate (chk) at (in.south);
+
+% ---- number of samples and series -----------------------------------------
+\node[dec, below=0.5cm of chk] (many) {More than two samples? ($K\ge2$)};
+\node[dec, below=0.75cm of many] (series) {\code{series = "auto"}?};
+\node[box, w=4.6cm, font=\footnotesize, right=1.1cm of series] (named) {%
+  \code{series} names a method: \code{"anchored"}, \code{"pairwise"} (A) or \code{"state\_space"} (B).
+  The fit goes straight to it (dashed tags below).};
+\draw[arr] (many) -- node[lab, right] {yes} (series);
+\draw[arr] (series) -- node[lab, above] {no} (named);
+
+% ---- automatic choice -------------------------------------------------------
+\node[box, w=7.4cm, below=1.1cm of series] (share) {%
+  $s=\min_{0<k<K} s_k$, where $s_k$ is the share of sample $k$'s cells that lie on the majors
+  of $t_0$ and $t_K$\\[2pt]
+  {\footnotesize A clonal sweep leaves a sample in between off the majors of both ends.}};
+\node[dec, below=0.45cm of share] (dshare) {$s\ge\autoshare$?};
+\node[box, w=7.4cm, below=0.5cm of dshare] (weight) {%
+  $\omega$: \code{intermediate\_weight} if given; otherwise from a first anchored fit
+  ($\omega=1$, shortest $h$, the samples with a cell on the majors):
+  $\omega=1/\max(1,\hat\phi)$, $\hat\phi$ the dispersion of the majors' counts in the samples in between.
+  NA when no sample in between is left.};
+\node[dec, below=0.45cm of weight] (dweight) {$\omega\ge\autoweight$ or NA?};
+\draw[arr] (series) -- node[lab, right, pos=0.3] {yes (drawn as the default)} (share);
+\draw[arr] (share) -- (dshare);
+\draw[arr] (dshare) -- node[lab, right] {no: sweep} (weight);
+\draw[arr] (weight) -- (dweight);
+
+\begin{scope}[on background layer]
+  \node[frame=cDecB, fill=cAuto, fit=(share)(dshare)(weight)(dweight), inner xsep=10pt] (autoframe) {};
+\end{scope}
+\node[ftitle=cDecB, anchor=west] at ($(autoframe.north west)+(0.25,0)$)
+  {\code{series = "auto"}: choice from the data};
+
+% ---- the four paths ------------------------------------------------------------
+\path (dweight.south) ++(0,-1.1) coordinate (rowtop);
+\node[box=cTwo,   w=3.25cm, anchor=north] (two)  at (1.85,  0 |- rowtop) {%
+  \textbf{Two-sample fit}\\{\footnotesize $t_0$ and $t_K$ only; every \code{series} gives this fit (core chart)}};
+\node[box=cPair,  w=3.25cm, anchor=north] (pair) at (5.8,   0 |- rowtop) {%
+  \textbf{A: pairwise}\\{\footnotesize each pair of consecutive samples fitted as two samples, one shared landscape}};
+\node[box=cState, w=3.25cm, anchor=north] (ss)   at (9.75,  0 |- rowtop) {%
+  \textbf{B: state space}\\{\footnotesize a latent abundance at every sample, linked by the dynamics plus drift}};
+\node[box=cAnch,  w=3.25cm, anchor=north] (anch) at (13.7,  0 |- rowtop) {%
+  \textbf{Anchored}\\{\footnotesize one trajectory from $t_0$; samples in between count for the majors}};
+
+% manual entry tags
+\node[tag=cPairB,  anchor=south west] (tp) at ($(pair.north)+(0.15,0.12)$) {\code{"pairwise"}};
+\node[tag=cStateB, anchor=south west] (ts) at ($(ss.north)+(0.15,0.12)$)   {\code{"state\_space"}};
+\node[tag=cAnchB,  anchor=south west] (ta) at ($(anch.north)+(0.15,0.12)$) {\code{"anchored"}};
+\draw[darr] (tp.south) -- (tp.south |- pair.north);
+\draw[darr] (ts.south) -- (ts.south |- ss.north);
+\draw[darr] (ta.south) -- (ta.south |- anch.north);
+
+% auto arrows into the paths
+\draw[arr] (dweight.west) -| node[lab, pos=0.72, left] {yes: little drift} (pair.north);
+\draw[arr] (dweight.south) -- ++(0,-0.3) -| node[lab, pos=0.25, above] {no: drift} (ss.north);
+\draw[arr] (dshare.east) -| node[lab, pos=0.2, above] {yes: no sweep} (anch.north);
+\draw[arr] (many.west) -| node[lab, pos=0.15, above] {no: two samples} (two.north);
+
+% ---- leaving samples out ----------------------------------------------------------
+\node[box, w=7.2cm, anchor=north] (pc) at ($(pair.south)!0.5!(ss.south)+(0,-0.75)$) {%
+  \textbf{Pair coverage} (A and B)\quad every pair $(t_{k-1},t_k)$ has its own majors and domain
+  $\mathcal D_k$. A sample with no cell in its pair's $\mathcal D_k$ is left out; for an uncovered
+  $t_0$ or $t_K$, its neighbour in between is left out instead. Repeat until every pair is covered.};
+\node[box, w=3.25cm, anchor=north, font=\footnotesize] (ac) at (anch.south |- pc.north) {%
+  \textbf{Anchored samples}\quad majors and $\mathcal D$ from $t_0$, $t_K$; a sample in between with
+  no cell on the majors is left out; weight $\omega$ from a first fit};
+\draw[arr] (pair.south) -- (pair.south |- pc.north);
+\draw[arr] (ss.south) -- (ss.south |- pc.north);
+\draw[arr] (anch) -- (ac);
+
+% ---- common core --------------------------------------------------------------------
+\path (pc.south) ++(0,-1.3) coordinate (coretop);
+\node[box=cCore, w=3.3cm, anchor=north, font=\footnotesize] (c1) at (1.95, 0 |- coretop) {%
+  \textbf{1 Problem}\\ majors $\mathcal M$, domain $\mathcal D$, missegregation kernel, trend design,
+  priors; stop if $t_0$ or $t_K$ has no cell in $\mathcal D$};
+\node[box=cCore, w=3.3cm, anchor=north west, font=\footnotesize] (c2) at ($(c1.north east)+(0.55,0)$) {%
+  \textbf{2 Fit at every $h\in H$}\\ Laplace marginal likelihood: inner Newton over the latent
+  variables, \code{nlminb} over the log scales; convergence check};
+\node[box=cCore, w=3.3cm, anchor=north west, font=\footnotesize] (c3) at ($(c2.north east)+(0.55,0)$) {%
+  \textbf{3 Best history}\\ keep the $h$ with the lowest objective; posterior: mode and expected
+  information (sparse Cholesky)};
+\node[box=cCore, w=3.3cm, anchor=north west, font=\footnotesize] (c4) at ($(c3.north east)+(0.55,0)$) {%
+  \textbf{4 Relative fitness}\\ $\rho_i=d_i-R$ against the majors' count-weighted mean fitness $R$;
+  posterior sd plus model error gives the calibrated $\tilde s_i$};
+\draw[arr] (c1.east |- c2.west) -- (c2.west);
+\draw[arr] (c2.east |- c3.west) -- (c3.west);
+\draw[arr] (c3.east |- c4.west) -- (c4.west);
+\begin{scope}[on background layer]
+  \node[frame=cCoreB, fill=white, fit=(c1)(c2)(c3)(c4), inner ysep=9pt] (core) {};
+\end{scope}
+\node[ftitle=cCoreB] at ($(pair.south |- core.north)!0.5!(ss.south |- core.north)$) {Common core (core chart)};
+
+% paths into the core, with their TMB template
+\draw[arr, draw=cTwoB] (two.south) -- node[lab, pos=0.82, right] {\code{pair}} (two.south |- core.north);
+\draw[arr, draw=cPairB] (pair.south |- pc.south) -- node[lab, right] {A: \code{pairwise}} (pair.south |- core.north);
+\draw[arr, draw=cStateB] (ss.south |- pc.south) -- node[lab, right] {B: \code{state\_space}} (ss.south |- core.north);
+\draw[arr, draw=cAnchB] (ac.south) -- node[lab, right] {\code{series}} (ac.south |- core.north);
+% fallback to the two-sample fit
+\draw[arr, draw=cTwoB] (pc.west) -- node[lab, above, align=center, text width=1.9cm] {only $t_0$ and $t_K$ left} (pc.west -| two.south);
+
+% ---- output ----------------------------------------------------------------------------
+\path (core.south) ++(0,-0.55) coordinate (outtop);
+\node[box=cOut, w=4.55cm, anchor=north, font=\footnotesize] (o1) at (2.45, 0 |- outtop) {%
+  \textbf{Fit object}\quad \code{summary} per domain state, \code{trend},
+  \code{diagnostics} (\code{series\_choice}, \code{dropped\_samples}, \code{history\_profile},
+  \code{convergence})};
+\node[box=cOut, w=4.55cm, anchor=north, font=\footnotesize] (o2) at (7.85, 0 |- outtop) {%
+  \textbf{\code{predict()}}\quad in $\mathcal D$: the posterior; observed but outside $\mathcal D$:
+  level of the observed non-majors; otherwise the trend plus its residual};
+\node[box=cOut, w=4.55cm, anchor=north, font=\footnotesize] (o3) at (13.25, 0 |- outtop) {%
+  \textbf{\code{as\_alfakR()}, \code{alfak\_compat()}}\quad the files of \code{alfakR::alfak()}:
+  landscape, posterior draws for bootstrap replicates, cross-validation};
+\draw[arr] (core.south -| o1.north) -- (o1.north);
+\draw[arr] (o1.east |- o2.west) -- (o2.west);
+\draw[arr] (o2.east |- o3.west) -- (o3.west);
+
+\end{tikzpicture}
+\end{document}
