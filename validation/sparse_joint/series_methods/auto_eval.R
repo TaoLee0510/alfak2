@@ -14,13 +14,14 @@
 # Indicators, from the counts alone with the fits' settings (major frequency
 # 0.01, major count 3, max states 5000, copy numbers 1-8), plus one from the
 # anchored fit:
-#   ends_major   least share, over the samples in between, of a sample's
-#                cells on the first and last samples' majors (0: anchored
-#                leaves that sample out);
+#   ends_major   least share, over the time points in between, of the cells
+#                at a time point on the majors of the first and last time
+#                points (0: anchored leaves that time point out);
 #   ends_domain  the same for cells in the anchored domain (those majors and
 #                their one-step neighbours);
-#   continuity   least share, over consecutive pairs, of the later sample's
-#                cells within one step of the earlier sample's own majors;
+#   continuity   least share, over consecutive pairs, of the cells at the later
+#                time point within one step of the earlier time point's own
+#                majors;
 #   weight       the anchored fit's intermediate weight, 1 / max(1,
 #                dispersion of the majors' counts): low with strong drift.
 # Rules:
@@ -238,6 +239,7 @@ print(knitr::kable(stability, digits = 3))
 cat("\nIndicator by set (median, 10% quantile):\n\n")
 q <- stats::aggregate(cbind(ends_major, ends_domain, continuity, weight) ~ set + samples, all,
                       function(v) sprintf("%.2f (%.2f)", stats::median(v), stats::quantile(v, 0.1)))
-print(knitr::kable(q))
+# The `samples` column counts time points; the header says so.
+print(knitr::kable(q, col.names = sub("^samples$", "time points", names(q))))
 sink()
 cat(readLines(file.path(out_dir, "report.md")), sep = "\n")

@@ -160,7 +160,7 @@ model with \code{\link[=fit_sparse_joint]{fit_sparse_joint()}}; of the other arg
 \code{dt}, \code{beta} and \code{sparse_joint_control} then apply, and giving any other
 is an error. \code{"two_layer"} retains separate local and extrapolation fits;
 \code{"joint_count"} fits a single count likelihood and structured landscape
-prior on the entire bounded target graph. On simulated sparse samples the
+prior on the entire bounded target graph. On simulated sparse data the
 sparse joint model predicted fitness at distances 0 to 2 better than both
 (\code{validation/sparse_joint/README.md}).}
 
@@ -192,7 +192,7 @@ An \code{alfak2_sparse_joint_fit} object for \code{pipeline = "sparse_joint"},
 otherwise an \code{alfak2_fit} object.
 }
 \description{
-By default fits the sparse joint count model, built for sparse samples at
+By default fits the sparse joint count model, built for sparse counts at
 two or more timepoints: see \code{\link[=fit_sparse_joint]{fit_sparse_joint()}}, whose result is
 returned. Its outputs
 can be converted to those of alfakR with \code{\link[=as_alfakR]{as_alfakR()}}, or produced

@@ -3,8 +3,8 @@
 #   e1  the stage-2 passaged cultures of ../multi_timepoint (288 datasets),
 #       linked, not copied;
 #   e2  clonal sweeps: the same landscapes sampled from day 240 or 480, 120
-#       days apart, where clones replace one another between samples;
-#   e3  neutral: the stage-2 design, but from the first sample on every viable
+#       days apart, where clones replace one another between time points;
+#   e3  neutral: the stage-2 design, but from the first time point on every viable
 #       karyotype divides at one rate, so every fitness difference a method
 #       reports is a false positive.
 # Inputs in results/inputs/<set>, fits and scores of a build in
@@ -30,7 +30,7 @@ sm_config <- function(set = sm_sets, build = NULL) {
   if (set == "e2") {
     # Day 1440 is late enough that clones rarely replace one another within a
     # window; from day 240 or 480, 120 days apart, an intermediate population
-    # lies mostly off the first and last samples' majors in half or more of
+    # lies mostly off the majors of the first and last time points in half or more of
     # the windows (truth populations, checked 2026-11-14).
     config$starts <- c(240, 480)
     config$spacings <- 120
@@ -46,8 +46,8 @@ sm_config <- function(set = sm_sets, build = NULL) {
 }
 
 # Every method fits the same counts with the same settings as stage 2; only
-# the multi-sample method differs. `ends`: the first and last sample, a
-# two-sample fit.
+# the multi-time-point method differs. `ends`: the first and last time point, a
+# two-time-point fit.
 sm_methods <- function() {
   # `options`: alfak2's internal options set during the fit (the variants
   # compared while choosing a method's details).
@@ -60,7 +60,7 @@ sm_methods <- function() {
     ends = series("ends"),
     anchored = series("all", series = "anchored"),
     # Pairwise: a pair starts at balance over the history plus the
-    # population's age at its first sample (default), or over the history
+    # population's age at its first time point (default), or over the history
     # alone.
     pairwise = series("all", series = "pairwise"),
     pairwise_same = series("all", series = "pairwise", options = list(alfak2.pair_history = "same")),
@@ -218,8 +218,8 @@ sm_stage_datasets <- function(config, workers) {
   cat("Datasets:", nrow(index), " index:", si_index_path(config), "\n")
 }
 
-# How far each dataset's samples in between lie from the first and last
-# samples' majors (with the installed alfak2's own functions, defaults of
+# How far each dataset's time points in between lie from the majors of the
+# first and last time points (with the installed alfak2's own functions, defaults of
 # fit_sparse_joint()): the gate of e2 is that clonal sweeps reproduce what the
 # Salehi trajectories show.
 sm_sweep_table <- function(config) {

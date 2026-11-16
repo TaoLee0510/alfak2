@@ -70,7 +70,7 @@ test_that("two-timepoint fits are the same with either template", {
   expect_equal(sparse_joint_rebuild(series, posterior = FALSE)$g, series$posterior$g, tolerance = 1e-6)
 })
 
-test_that("compiled series model evaluates the closed form at every sample time", {
+test_that("compiled series model evaluates the closed form at every time point", {
   sim <- simulate_series_counts()
   data <- prepare_alfak2_data(sim$counts, beta = sim$beta, times = sim$times)
   problem <- sparse_joint_problem(data, series_settings(initial_state = "free"))
@@ -97,7 +97,7 @@ test_that("compiled series model evaluates the closed form at every sample time"
   expect_true(all(is.finite(objective$gr())))
 })
 
-test_that("a series fit uses every sample", {
+test_that("a series fit uses every time point", {
   sim <- simulate_series_counts()
   fit <- fit_sparse_joint(sim$counts, times = sim$times, beta = sim$beta, birth_rate = 1, major_frequency = 0.05,
                           max_cn = 4)
@@ -111,7 +111,7 @@ test_that("a series fit uses every sample", {
   coverage <- fit$diagnostics$domain_coverage
   expect_equal(coverage$timepoint, paste0("t", 0:3))
   expect_equal(coverage$cells_in_domain, unname(colSums(sim$counts)))
-  # The history is at least the time from the first to the last sample.
+  # The history is at least the time from the first to the last time point.
   expect_equal(fit$diagnostics$history_profile$history, sparse_joint_history_candidates(60, 1))
   # The majors' expected counts follow the observed ones at every timepoint.
   for (k in 0:3) {
@@ -161,13 +161,13 @@ test_that("functions that take two timepoints say so", {
   expect_error(fit_alfak2(sim$counts, dt = c(20, 20, 20), beta = sim$beta, pipeline = "two_layer"),
                "two_layer pipeline fits two timepoints")
   expect_error(fit_sparse_joint_cohort(list(a = sim$counts, b = sim$counts[, 1:2]), dt = 20),
-               "two timepoints per sample; a has 4")
+               "two timepoints per dataset; a has 4")
   empty <- cbind(sim$counts, 0)
   expect_error(fit_sparse_joint(empty, dt = c(20, 20, 20, 20), beta = sim$beta, max_cn = 4),
                "Every timepoint needs at least one cell")
 })
 
-test_that("intermediate samples can count for the majors only", {
+test_that("intermediate time points can count for the majors only", {
   sim <- simulate_series_counts()
   all <- fit_sparse_joint(sim$counts, times = sim$times, beta = sim$beta, max_cn = 4, history = 60,
                           intermediate = "all")
@@ -180,7 +180,7 @@ test_that("intermediate samples can count for the majors only", {
   n_major <- problem$domain$n_major
   weight <- problem$tmb_data$sample_weight
   expect_equal(dim(weight), c(length(problem$domain$labels), 3L))
-  # Majors count in every sample; the others in the last one only.
+  # Majors count at every time point; the others at the last one only.
   expect_true(all(weight[seq_len(n_major), ] == 1))
   expect_true(all(weight[-seq_len(n_major), 1:2] == 0))
   expect_true(all(weight[, 3] == 1))
@@ -190,7 +190,7 @@ test_that("intermediate samples can count for the majors only", {
   # A rebuilt posterior reproduces the fit's own.
   rebuilt <- sparse_joint_rebuild(majors)
   expect_equal(rebuilt$solver$mode, unname(unlist(majors$posterior[problem$random])), tolerance = 1e-6)
-  # The majors come from the first and the last sample.
+  # The majors come from the first and the last time point.
   ends <- sim$counts[, c(1, 4)]
   expect_setequal(problem$domain$labels[seq_len(n_major)],
                   sparse_joint_major(ends, 0.01, 3, 5000, 1L, 4L))
@@ -205,13 +205,13 @@ test_that("intermediate samples can count for the majors only", {
   expect_equal(dispersion, sparse_joint_intermediate_dispersion(first))
   expect_error(fit_sparse_joint(sim$counts, times = sim$times, beta = sim$beta, max_cn = 4, history = 60,
                                 intermediate = "majors", intermediate_weight = 2), "intermediate_weight")
-  # Two samples have nothing in between: the option changes nothing.
+  # Two time points have nothing in between: the option changes nothing.
   pair <- sim$counts[, c(1, 4)]
   expect_equal(fit_sparse_joint(pair, dt = 60, beta = sim$beta, max_cn = 4, history = 60, intermediate = "majors")$summary,
                fit_sparse_joint(pair, dt = 60, beta = sim$beta, max_cn = 4, history = 60)$summary)
 })
 
-test_that("a sample in between with no counted cell is left out", {
+test_that("a time point in between with no counted cell is left out", {
   sim <- simulate_series_counts()
   far <- "4.2.2.4"
   counts <- rbind(sim$counts, matrix(0, 1L, 4L, dimnames = list(far, colnames(sim$counts))))
@@ -222,7 +222,7 @@ test_that("a sample in between with no counted cell is left out", {
       fit <- fit_sparse_joint(counts, times = sim$times, beta = sim$beta, max_cn = 4, history = 60,
                               intermediate = mode, intermediate_weight = if (mode == "majors") 1),
       class = "alfak2_samples_left_out_warning")
-    # The same as the fit to the other samples.
+    # The same as the fit to the other time points.
     rest <- fit_sparse_joint(counts[, -2L], times = sim$times[-2L], beta = sim$beta, max_cn = 4, history = 60,
                              intermediate = mode, intermediate_weight = if (mode == "majors") 1)
     expect_equal(fit$summary, rest$summary)
@@ -237,13 +237,13 @@ test_that("a sample in between with no counted cell is left out", {
     expect_s3_class(rest$diagnostics$dropped_samples, "data.frame")
     expect_equal(nrow(rest$diagnostics$dropped_samples), 0L)
   }
-  # Every sample in between left out: the fit to the first and the last.
+  # Every time point in between left out: the fit to the first and the last.
   ends <- counts
   ends[, 3L] <- 0
   ends[far, 3L] <- 2
   expect_warning(
     pair <- fit_sparse_joint(ends, times = sim$times, beta = sim$beta, max_cn = 4, history = 60),
-    "Left out 2 of 4 samples (t1, t2)", fixed = TRUE)
+    "Left out 2 of 4 time points (t1, t2)", fixed = TRUE)
   two <- fit_sparse_joint(sim$counts[, c(1L, 4L)], dt = 60, beta = sim$beta, max_cn = 4, history = 60)
   expect_equal(pair$summary, two$summary)
   expect_null(two$diagnostics$dropped_samples)
@@ -254,7 +254,7 @@ test_that("a sample in between with no counted cell is left out", {
   plain <- pair
   plain$input <- NULL
   expect_false(far %in% as_alfakR(plain, minobs = 2, nboot = 3, xval = FALSE)$landscape$k)
-  # A first or a last sample with no cell in the domain still stops the fit.
+  # A first or a last time point with no cell in the domain still stops the fit.
   last <- counts
   last[, 4L] <- 0
   last[far, 4L] <- 2
@@ -262,7 +262,7 @@ test_that("a sample in between with no counted cell is left out", {
                class = "alfak2_domain_coverage_error")
 })
 
-test_that("with majors only, a sample in between with cells on their neighbours only is left out", {
+test_that("with majors only, a time point in between with cells on their neighbours only is left out", {
   sim <- simulate_series_counts()
   fit0 <- fit_sparse_joint(sim$counts, times = sim$times, beta = sim$beta, max_cn = 4, history = 60,
                            intermediate_weight = 1)
@@ -276,7 +276,7 @@ test_that("with majors only, a sample in between with cells on their neighbours 
     "no cell on the major karyotypes", class = "alfak2_samples_left_out_warning")
   expect_equal(fit$diagnostics$dropped_samples$sample, 2L)
   expect_gt(fit$diagnostics$dropped_samples$cells_in_domain, 0)
-  # Counted for every karyotype, the sample says something and stays.
+  # Counted for every karyotype, the time point says something and stays.
   expect_no_warning(all <- fit_sparse_joint(counts, times = sim$times, beta = sim$beta, max_cn = 4, history = 60,
                                             intermediate = "all"),
                     class = "alfak2_samples_left_out_warning")

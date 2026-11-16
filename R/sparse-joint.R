@@ -22,13 +22,13 @@ one_step_neighbours <- function(karyotypes, min_cn, max_cn) {
   out[!duplicated(format_karyotypes(out)), , drop = FALSE]
 }
 
-# Major karyotypes anchor the domain: at least `major_frequency` of any
-# sample and at least `major_count` cells over all samples. The share adapts the rule to depth:
+# Major karyotypes anchor the domain: at least `major_frequency` of the cells at any
+# time point and at least `major_count` cells over all time points. The share adapts the rule to depth:
 # one cell in 3000 may be a member of the mutational cloud around a clone.
 # The count is needed as well. A major's neighbours enter the likelihood
 # whether observed or not, and an unobserved neighbour is evidence only if a
 # cell falling on it would have left it a neighbour. Were a single cell enough
-# to make a karyotype major, all cells of a small sample would sit on majors
+# to make a karyotype major, all cells at a time point with few cells would sit on majors
 # by construction and every unobserved neighbour would look strongly unfit.
 # Without any such karyotype the most abundant ones are used. If the domain
 # would exceed `max_states`, the share is raised to the lowest value that fits.
@@ -64,7 +64,7 @@ sparse_joint_major_distance <- function(karyotypes, major) {
 sparse_joint_domain <- function(counts, major_frequency, major_count, max_states, min_cn, max_cn,
                                 major_columns = NULL) {
   observed <- rownames(counts)
-  # `major_columns`: the samples the majors are chosen from (all by default).
+  # `major_columns`: the time points the majors are chosen from (all by default).
   from <- if (is.null(major_columns)) counts else counts[, major_columns, drop = FALSE]
   major_labels <- sparse_joint_major(from, major_frequency, major_count, max_states, min_cn, max_cn)
   major <- parse_karyotypes(major_labels)
@@ -78,9 +78,9 @@ sparse_joint_domain <- function(counts, major_frequency, major_count, max_states
        dropped = observed[outside], dropped_cells = sum(counts[outside, ]))
 }
 
-# How much of each sample the domain holds: per timepoint, its cells and those
+# How much of each time point the domain holds: its cells and those
 # inside the domain, its karyotypes, those that meet the share and count of a
-# major in that sample (`major_candidates`) and the majors seen in it, the
+# major at that time point (`major_candidates`) and the majors seen in it, the
 # karyotypes it shares with another timepoint (with two timepoints, those both
 # share), and the median distance from its cells outside the domain to the
 # nearest major.
@@ -107,22 +107,23 @@ sparse_joint_domain_coverage <- function(counts, domain, major_frequency, major_
   do.call(rbind, rows)
 }
 
-# Error for a sample with a timepoint that has no cell inside its domain. The
+# Error for a dataset with a timepoint that has no cell inside its domain. The
 # first sentence of the message is fixed, since callers match it; the rest
 # says why. `coverage` is attached to the condition; with `by_sample` it has
-# a `sample` column (cohort fits).
-sparse_joint_coverage_error <- function(coverage, first, by_sample = FALSE) {
+# a `sample` column naming the unit: a dataset of a cohort, or a pair of time
+# points (`unit`).
+sparse_joint_coverage_error <- function(coverage, first, by_sample = FALSE, unit = "Dataset") {
   plural <- function(n, word) sprintf("%d %s%s", as.integer(n), word, if (n == 1) "" else "s")
   empty <- coverage[coverage$cells_in_domain <= 0, , drop = FALSE]
   reasons <- vapply(seq_len(nrow(empty)), function(i) {
     row <- empty[i, ]
     same <- if (by_sample) coverage$sample == row$sample else rep(TRUE, nrow(coverage))
     other <- coverage[same & coverage$timepoint != row$timepoint, , drop = FALSE]
-    where <- if (by_sample) sprintf("Sample %s, timepoint %s", row$sample, row$timepoint) else
+    where <- if (by_sample) sprintf("%s %s, timepoint %s", unit, row$sample, row$timepoint) else
       sprintf("Timepoint %s", row$timepoint)
     if (nrow(other) == 1L) {
-      shared <- if (row$shared == 0) "the samples share no karyotype" else
-        sprintf("the samples share %s", plural(row$shared, "karyotype"))
+      shared <- if (row$shared == 0) "the time points share no karyotype" else
+        sprintf("the time points share %s", plural(row$shared, "karyotype"))
       majors <- other$majors[[1L]]
       source <- if (majors == 1) sprintf("the only major comes from %s", other$timepoint[[1L]]) else
         sprintf("all %d majors come from %s", as.integer(majors), other$timepoint[[1L]])
@@ -134,11 +135,11 @@ sparse_joint_coverage_error <- function(coverage, first, by_sample = FALSE) {
     sprintf("%s: none of its %s lies within one step of a major karyotype; %s, %s, and the median distance to the nearest major is %s.",
             where, plural(row$cells, "cell"), source, shared, format(row$median_distance_outside))
   }, character(1))
-  message <- paste(c(first, reasons, "The samples may be too far apart, or one of them may be noisy."), collapse = " ")
+  message <- paste(c(first, reasons, "The time points may be too far apart, or one of them may be noisy."), collapse = " ")
   stop(errorCondition(message, class = "alfak2_domain_coverage_error", coverage = coverage, call = NULL))
 }
 
-# Coverage of a sample's domain; an error if a timepoint in `required` (all by
+# Coverage of a dataset's domain; an error if a timepoint in `required` (all by
 # default) has no cell in it.
 sparse_joint_check_coverage <- function(counts, major_frequency, major_count, max_states, min_cn, max_cn,
                                         major_columns = NULL, required = NULL) {
@@ -151,7 +152,7 @@ sparse_joint_check_coverage <- function(counts, major_frequency, major_count, ma
   coverage
 }
 
-# "t0 812 of 1000 (81%), t1 640 of 1000 (64%)", optionally prefixed by sample.
+# "t0 812 of 1000 (81%), t1 640 of 1000 (64%)", optionally prefixed by dataset.
 sparse_joint_format_coverage <- function(coverage) {
   label <- if (is.null(coverage$sample)) coverage$timepoint else paste(coverage$sample, coverage$timepoint)
   paste(sprintf("%s %d of %d (%.0f%%)", label, as.integer(coverage$cells_in_domain), as.integer(coverage$cells),
@@ -172,7 +173,7 @@ sparse_joint_design <- function(karyotypes, centre, major, shell_power) {
 
 # Prior on the log expected count at the first timepoint. Seen then: the
 # count itself, essentially free. Seen only later: its frequency at the
-# earliest timepoint it was seen, scaled to the first sample's depth. Never
+# earliest timepoint it was seen, scaled to the depth at the first time point. Never
 # seen: rare, on the frequency scale given by `initial_frequency`.
 sparse_joint_initial_prior <- function(y0, y1, initial_frequency) {
   sparse_joint_initial_prior_matrix(cbind(y0, y1), initial_frequency)
@@ -284,7 +285,7 @@ sparse_joint_coef_covariance <- function(solver, coef_index = which(solver$names
 # major karyotype. Floor and deficit were fitted to the development landscapes
 # of `benchmark/sparse_two_timepoint` (validation/sparse_joint/calibration_fit.R).
 #
-# Karyotypes seen in neither sample have a deficit of their own. How far below
+# Karyotypes seen at neither time point have a deficit of their own. How far below
 # the majors they lie is not identified by zero counts, and the predicted
 # drop is too shallow on moderately rugged landscapes, by up to 40% in young
 # populations or at intervals of days to weeks; with the deficit of observed
@@ -310,7 +311,7 @@ sparse_joint_validate_calibration <- function(calibration) {
   c(floor = calibration[["floor"]], deficit = calibration[["deficit"]], deficit_unobserved = unobserved)
 }
 
-# `observed`: whether each karyotype was seen in a sample. Fits made before
+# `observed`: whether each karyotype was seen at a time point. Fits made before
 # `deficit_unobserved` existed carry two constants and use `deficit` for all.
 sparse_joint_calibrate <- function(model_sd, relative, shell, birth_rate, calibration, observed) {
   unobserved <- if ("deficit_unobserved" %in% names(calibration)) calibration[["deficit_unobserved"]] else
@@ -320,7 +321,7 @@ sparse_joint_calibrate <- function(model_sd, relative, shell, birth_rate, calibr
 }
 
 # Fitness relative to a reference: the count-weighted mean fitness of the
-# major karyotypes. Two samples say nothing about absolute fitness, and the
+# major karyotypes. Two time points say nothing about absolute fitness, and the
 # posterior of every log birth rate carries the uncertainty of the baseline,
 # which is common to all karyotypes and cancels in a difference. `latent` is
 # the position of each row's log birth rate among the latent variables,
@@ -407,8 +408,8 @@ sparse_joint_template <- function(data, settings) {
   if (ncol(data$counts) > 2L || identical(settings$template, "series")) "series" else "pair"
 }
 
-# The samples the majors are chosen from: all of them, or with more than two
-# samples and `settings$intermediate` "majors" the first and the last. A clone
+# The time points the majors are chosen from: all of them, or with more than two
+# time points and `settings$intermediate` "majors" the first and the last. A clone
 # that rises and falls between them, or appears in between only, would
 # otherwise become a major, and the domain grow around it.
 sparse_joint_major_columns <- function(data, settings) {
@@ -416,11 +417,11 @@ sparse_joint_major_columns <- function(data, settings) {
   if (n_time > 2L && identical(settings$intermediate, "majors")) c(1L, n_time) else NULL
 }
 
-# Samples between the first and the last with no cell on the states they
+# Time points between the first and the last with no cell on the states they
 # count for: the majors with `intermediate` "majors", the domain with "all".
-# Such a sample says nothing under the model. Its depth offset has a flat
+# Such a time point says nothing under the model. Its depth offset has a flat
 # prior, so its likelihood is largest as the offset goes to minus infinity,
-# where the sample contributes nothing, and the Laplace approximation over
+# where the time point contributes nothing, and the Laplace approximation over
 # that offset is improper. Leaving it out is that limit. Leaving it out
 # changes neither the majors nor the domain: it has no cell on them.
 sparse_joint_uncounted_samples <- function(coverage, intermediate) {
@@ -431,7 +432,7 @@ sparse_joint_uncounted_samples <- function(coverage, intermediate) {
   middle[counted <= 0]
 }
 
-# The data with only the samples in `kept` (in order, the first among them),
+# The data with only the time points in `kept` (in order, the first among them),
 # as prepare_alfak2_data() would give them: karyotypes with no cell left are
 # dropped.
 sparse_joint_keep_samples <- function(data, kept) {
@@ -443,10 +444,10 @@ sparse_joint_keep_samples <- function(data, kept) {
                   metadata = data$metadata, times = if (length(kept) > 2L) times else NULL)
 }
 
-# Dispersion of the majors' counts in the samples between the first and the
-# last, against the fit's expectations scaled to each sample's total over the
+# Dispersion of the majors' counts at the time points between the first and the
+# last, against the fit's expectations scaled to each time point's total over the
 # majors: about 1 for sampling noise alone, more when the population drifts
-# between samples (Pearson statistic per count).
+# between time points (Pearson statistic per count).
 sparse_joint_intermediate_dispersion <- function(fit) {
   summary <- fit$summary
   counts <- as.matrix(summary[grep("^count_t[0-9]+$", names(summary))])
@@ -461,13 +462,13 @@ sparse_joint_intermediate_dispersion <- function(fit) {
 }
 
 # The domain's counts as the likelihood uses them, with `sample_weight` (one
-# row per state, one column per sample after the first: 1 counts, 0 left out)
-# as an attribute. With more than two samples and `settings$intermediate`
-# "majors", the counts of the other states in the samples between the first
+# row per state, one column per time point after the first: 1 counts, 0 left out)
+# as an attribute. With more than two time points and `settings$intermediate`
+# "majors", the counts of the other states at the time points between the first
 # and the last are left out (and taken as zero for the priors): a rare clone
 # seen in one of them owes its count largely to the chance with which such a
 # clone arises, drifts and is lost, which the model does not describe, and the
-# same chance event would otherwise count once per sample.
+# same chance event would otherwise count once per time point.
 sparse_joint_used_counts <- function(domain, settings) {
   used <- domain$y
   n_time <- ncol(used)
@@ -497,7 +498,7 @@ sparse_joint_problem <- function(data, settings) {
   n <- length(domain$labels)
   kernel <- sparse_division_kernel(domain$karyotypes, data$beta)
   # The counts the likelihood uses: with `intermediate = "majors"`, the
-  # samples between the first and the last count for the majors only.
+  # time points between the first and the last count for the majors only.
   used <- sparse_joint_used_counts(domain, settings)
   total <- if (ncol(domain$y) == 2L) domain$y0 + domain$y1 else rowSums(used)
   centre <- colSums(domain$karyotypes * total) / sum(total)
@@ -524,7 +525,7 @@ sparse_joint_problem <- function(data, settings) {
     history = settings$history, balance_sd = settings$balance_sd, balance_offset = rep(0, n),
     weight = rep(1, n)
   ))
-  # Log depth ratio of each later sample to the first.
+  # Log depth ratio of each later time point to the first.
   depth <- if (template == "pair") list(theta1 = log(sum(domain$y1) / sum(domain$y0))) else
     list(theta = log(colSums(domain$y[, -1L, drop = FALSE]) / sum(domain$y[, 1L])))
   parameters <- c(list(
@@ -578,7 +579,7 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 
 #' Fit the sparse joint count model
 #'
-#' Fits fitness to sparse karyotype samples of one population, two or more
+#' Fits fitness to sparse karyotype counts of one population at two or more
 #' timepoints, with a single count likelihood on a sparse domain: the
 #' well-sampled ("major") karyotypes and all their one-step neighbours. Division dynamics use a closed form in which each
 #' karyotype grows on its own and receives mutational influx from its
@@ -587,39 +588,39 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 #' predicted with [predict()] from a fitted trend in chromosome dosage,
 #' curvature and distance to the nearest major karyotype.
 #'
-#' With more than two timepoints every later sample is compared with the
-#' same closed-form dynamics started at the first sample, each with its own
-#' depth; the dynamics are not restarted at intermediate samples. Fitness is
+#' With more than two timepoints every later time point is compared with the
+#' same closed-form dynamics started at the first time point, each with its own
+#' depth; the dynamics are not restarted at intermediate time points. Fitness is
 #' taken to be constant over the whole series, and the history of the balance
-#' prior is at least the time from the first to the last sample. Two-timepoint
+#' prior is at least the time from the first to the last time point. Two-timepoint
 #' fits are unchanged. By default (`intermediate = "majors"`) the majors and
-#' the domain come from the first and the last sample, and the samples in
+#' the domain come from the first and the last time point, and the time points in
 #' between count for the majors only, weighted by the inverse of their
 #' dispersion in a first fit (`diagnostics$intermediate_weight`,
 #' `intermediate_dispersion`). Clones that arise, grow by chance and are lost
-#' between samples, or are thinned by passaging, would otherwise count once
-#' per sample and read as fit. On simulated passaged cultures the default was
-#' as accurate as the first and the last sample alone; every sample for every
+#' between time points, or are thinned by passaging, would otherwise count once
+#' per time point and read as fit. On simulated passaged cultures the default was
+#' as accurate as the first and the last time point alone; every time point for every
 #' karyotype (`"all"`) was 4-6% more accurate with large bottlenecks (20000
 #' cells) and up to 2.4 times less accurate with small ones (200)
 #' (validation/sparse_joint/multi_timepoint).
 #'
-#' The first and the last sample must each have a cell in the domain. A
-#' sample in between with no cell on the states it counts for (the majors by
+#' The first and the last time point must each have a cell in the domain. A
+#' time point in between with no cell on the states it counts for (the majors by
 #' default, the domain with `"all"`) is left out with a warning
-#' (`diagnostics$dropped_samples`). Its depth is free, so such a sample says
-#' nothing under the model, and the fit is the fit to the other samples.
+#' (`diagnostics$dropped_samples`). Its depth is free, so such a time point says
+#' nothing under the model, and the fit is the fit to the other time points.
 #' Leaving it out is the limit of its own likelihood. The input as given is
 #' kept in `input`, for [as_alfakR()].
 #'
 #' With `series` `"pairwise"` or `"state_space"`, each pair of consecutive
-#' samples has its own domain, and both samples of a pair need a cell in it.
-#' A sample in between without one is left out in the same way, and its
-#' neighbours become a pair. The first and the last sample are kept. When one
+#' time points has its own domain, and both time points of a pair need a cell in it.
+#' A time point in between without one is left out in the same way, and its
+#' neighbours become a pair. The first and the last time point are kept. When one
 #' of them has no cell in its pair's domain, its neighbour in between is left
-#' out instead, so that it pairs with a sample further in. This repeats until
-#' every pair is covered. At worst the first and the last sample remain, and
-#' the fit is the two-sample fit.
+#' out instead, so that it pairs with a time point further in. This repeats until
+#' every pair is covered. At worst the first and the last time point remain, and
+#' the fit is the two-time-point fit.
 #'
 #' Observed karyotypes that are not next to a major karyotype are left out of
 #' the likelihood, together with their cells. They would enter only because
@@ -629,7 +630,7 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 #'
 #' `diagnostics$domain_coverage` reports, for each timepoint, how many of its
 #' cells lie inside the domain. If a timepoint has none, typically because
-#' every major karyotype comes from the other sample and the two samples share
+#' every major karyotype comes from the other time point and the two time points share
 #' no karyotype, there is nothing to fit and the function stops with an error
 #' of class `alfak2_domain_coverage_error`. Its message begins "A timepoint
 #' has no cell inside the model domain." and its `coverage` element holds the
@@ -653,14 +654,14 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 #' history, by the lowest objective.
 #'
 #' Most fits that are not accepted have a karyotype with very few cells, whose
-#' initial abundance or birth rate the data hardly constrain. A count in the
-#' second sample, for one, has two explanations of nearly equal weight: the
+#' initial abundance or birth rate the data hardly constrain. A count at the
+#' second time point, for one, has two explanations of nearly equal weight: the
 #' karyotype was there and not sampled, or its neighbours made it during the
 #' interval. The Laplace approximation is then nearly flat along that
 #' quantity, or jumps from one explanation to the other as the scales change.
 #' For a fit that is not accepted, `flat_direction` lists the latent variables
 #' with the largest shares of the flattest direction of the inner Hessian
-#' (`variable`, `karyotype`, its `cells` in each sample, `major`, `share`),
+#' (`variable`, `karyotype`, its `cells` at each time point, `major`, `share`),
 #' `flat_composition` its make-up by kind of latent variable (`variable`,
 #' `major`, `share`), and the warning names both when that Hessian is nearly
 #' singular. On simulated data, fits that searching again turned into
@@ -673,24 +674,24 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 #' observed karyotypes and half of the unobserved ones. The reported value is
 #' `sqrt(model sd^2 + (deficit * relative fitness)^2 +
 #' (floor * birth_rate * (1 + shell))^2)`, where `shell` is the distance to
-#' the nearest major karyotype. The deficit is 0.6 for karyotypes seen in a
-#' sample and 1.1 for those seen in neither: zero counts do not tell how far
+#' the nearest major karyotype. The deficit is 0.6 for karyotypes seen at a
+#' time point and 1.1 for those seen at none: zero counts do not tell how far
 #' below the major karyotypes an unobserved karyotype lies, and on moderately
 #' rugged simulated landscapes the predicted drop was up to 40% too shallow.
 #' On simulated landscapes the resulting 95% intervals covered at least 90%
 #' of the karyotypes in every regime tested, and close to all of them on
 #' smooth or very rugged landscapes, where they are wider than needed. The
-#' constants carry over to real samples only as far as those landscapes
+#' constants carry over to real data only as far as those landscapes
 #' resemble them.
 #'
-#' The baseline birth rate is supplied rather than estimated. Two samples
+#' The baseline birth rate is supplied rather than estimated. Two time points
 #' identify it only weakly, and a free baseline drifts upwards and inflates
 #' every fitness difference. Rerun with other values to see how much a
 #' conclusion depends on it.
 #'
 #' @param counts Count matrix with karyotype row names and one column per
 #'   timepoint, at least two, in time order; or an `alfak2_data` object.
-#' @param dt Time between the samples, if `counts` is a matrix: one interval
+#' @param dt Time between the time points, if `counts` is a matrix: one interval
 #'   for two timepoints, or one per pair of consecutive timepoints. See also
 #'   `times`.
 #' @param beta Missegregation rate per chromosome copy and division, if
@@ -698,9 +699,9 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 #' @param birth_rate Assumed baseline birth (division) rate per unit of `dt`.
 #' @param birth_rate_log_sd Prior standard deviation of the log baseline birth
 #'   rate around `log(birth_rate)`.
-#' @param major_frequency Minimum share of any sample for a karyotype to
+#' @param major_frequency Minimum share of the cells at any time point for a karyotype to
 #'   anchor the domain as a major karyotype.
-#' @param major_count Minimum number of cells, over all samples, for a major
+#' @param major_count Minimum number of cells, over all time points, for a major
 #'   karyotype. A single cell must not be enough.
 #' @param max_states Largest domain to fit. If the domain would be larger,
 #'   the share required of a major karyotype is raised until it fits.
@@ -714,27 +715,27 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 #'   frequency at the first timepoint of a karyotype seen at no timepoint. It
 #'   is a frequency, not a count: a domain has thousands of unseen
 #'   karyotypes, and a prior in counts would give them a large share of a
-#'   small sample. A karyotype seen only later is centred on its frequency at
+#'   time point with few cells. A karyotype seen only later is centred on its frequency at
 #'   the earliest timepoint it was seen, with the same standard deviation:
 #'   absent other evidence its frequency is taken not to have changed.
 #' @param initial_state How abundances at the first timepoint are treated.
 #'   `"balance"`, the default, starts every karyotype that is not major at
 #'   mutation-selection balance with the major karyotypes next to it, so that
-#'   its count in the first sample also informs its fitness. `"free"`
-#'   estimates one for every karyotype and so uses the first sample only as a
-#'   starting point. Balance takes fitness before the first sample to have
-#'   resembled fitness between the samples. On simulated landscapes it was
+#'   its count at the first time point also informs its fitness. `"free"`
+#'   estimates one for every karyotype and so uses the first time point only as a
+#'   starting point. Balance takes fitness before the first time point to have
+#'   resembled fitness between the time points. On simulated landscapes it was
 #'   still more accurate than `"free"` when the landscape changed at the first
-#'   sample, as under a new treatment.
+#'   time point, as under a new treatment.
 #' @param history Time, in units of `dt`, over which the balance built up
-#'   before the first sample. By default it is chosen among the interval
-#'   between the first and the last sample and 30, 100, 300, 1000 and 3000
+#'   before the first time point. By default it is chosen among the interval
+#'   between the first and the last time point and 30, 100, 300, 1000 and 3000
 #'   divisions at `birth_rate` that are longer than that interval: the model is fitted at
 #'   each and the fit with the highest marginal likelihood is kept, so a fit
 #'   takes up to six times as long; `diagnostics$history_profile` lists the
 #'   candidates. A single value fixes the history; several values are the
 #'   candidates. Up to alfak2 8327282 the history was the interval itself
-#'   (`history = dt`). With samples a few weeks apart that is far shorter than
+#'   (`history = dt`). With time points a few weeks apart that is far shorter than
 #'   the population has been evolving: the balance prior then holds the
 #'   neighbours of the major karyotypes far below their observed abundance, and
 #'   their fitness is overestimated (validation/sparse_joint/short_interval).
@@ -751,39 +752,29 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 #' @param inner_control TMB inner Newton controls.
 #' @param times Sampling times, one per column of `counts`, instead of `dt`;
 #'   only their differences matter. When given, `dt` is not used.
-#' @param series With more than two samples, how they are tied together.
-#'   `"anchored"`, the default: one trajectory from the first sample, with
-#'   the majors and the domain from the first and the last sample (see
-#'   `intermediate`). `"pairwise"`: every pair of consecutive samples is
-#'   fitted as two samples are, with its own majors, domain, initial
+#' @param series With more than two time points, how they are tied together.
+#'   `"anchored"`, the default: one trajectory from the first time point, with
+#'   the majors and the domain from the first and the last time point (see
+#'   `intermediate`). `"pairwise"`: every pair of consecutive time points is
+#'   fitted as two time points are, with its own majors, domain, initial
 #'   abundances and depth, and all pairs share one landscape. `"state_space"`:
-#'   every sample has latent abundances, linked from one sample to the next
+#'   every time point has latent abundances, linked from one time point to the next
 #'   by the same dynamics plus a drift whose scale is estimated
-#'   (`diagnostics$drift`); the pairs' domains are joined. `"auto"`: one of
-#'   the three, chosen from the data:
-#'   - the anchored method when every sample in between has at least 30% of
-#'     its cells on the first and last samples' majors;
-#'   - otherwise (a clonal sweep) the pairwise method when the anchored
-#'     intermediate weight is at least 0.5 (little drift), or when no sample
-#'     in between remains to measure it;
-#'   - else the state-space method.
-#'
-#'   The fit is that method's fit, and `diagnostics$series_choice` gives the
-#'   choice and the two measures. Two samples give the same fit with all
-#'   methods. The methods and the choice are compared in
+#'   (`diagnostics$drift`); the pairs' domains are joined. Two time points
+#'   give the same fit with all three. The three are compared in
 #'   validation/sparse_joint/series_methods.
-#' @param intermediate With more than two samples, how the samples between
+#' @param intermediate With more than two time points, how the time points between
 #'   the first and the last are used. `"majors"`, the default: the majors and
-#'   the domain are chosen from the first and the last sample, as for two
-#'   samples, and the samples in between count for the majors only, with
+#'   the domain are chosen from the first and the last time point, as for two
+#'   time points, and the time points in between count for the majors only, with
 #'   weight `intermediate_weight`; the other karyotypes are fitted to the first
-#'   and the last sample. `"all"`: like the first and the last, for every
-#'   state, with the majors chosen from every sample. See Details.
+#'   and the last time point. `"all"`: like the first and the last, for every
+#'   state, with the majors chosen from every time point. See Details.
 #' @param intermediate_weight With `intermediate = "majors"`, the weight of the
-#'   samples in between, in (0, 1]. `NULL` estimates it: the inverse of the
-#'   dispersion of the majors' counts in those samples in a first fit (at the
+#'   time points in between, in (0, 1]. `NULL` estimates it: the inverse of the
+#'   dispersion of the majors' counts at those time points in a first fit (at the
 #'   shortest history), at most 1, so that a population that drifts between
-#'   samples (small passaging bottlenecks) leans on the first and the last.
+#'   time points (small passaging bottlenecks) leans on the first and the last.
 #'
 #' @return An `alfak2_sparse_joint_fit` object. `summary` has one row per
 #'   domain karyotype, with its counts (`count_t0`, `count_t1`, ..., one
@@ -793,18 +784,18 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 #'   the major karyotypes, with `relative_sd` its uncertainty.
 #'   `diagnostics$domain_coverage` has one row per timepoint: `cells`,
 #'   `cells_in_domain` and their ratio `fraction`, `karyotypes`,
-#'   `major_candidates` (karyotypes with at least `major_frequency` of that
-#'   sample and `major_count` cells over both), `majors` (major karyotypes seen
+#'   `major_candidates` (karyotypes with at least `major_frequency` of the cells at that
+#'   time point and `major_count` cells over both), `majors` (major karyotypes seen
 #'   at that timepoint), `shared` (karyotypes seen at both timepoints) and
 #'   `median_distance_outside` (median distance from its cells outside the
 #'   domain to the nearest major karyotype). With more than two timepoints,
-#'   `diagnostics$times` are the sample times fitted and
-#'   `diagnostics$dropped_samples` the samples left out. It has one row per
-#'   sample left out (`sample`, its column in the input; `time`; and the
+#'   `diagnostics$times` are the times of the time points fitted and
+#'   `diagnostics$dropped_samples` the time points left out. It has one row per
+#'   time point left out (`sample`, its column in the input; `time`; and the
 #'   coverage columns), and no rows when none was. For the pairwise and
 #'   state-space methods its columns are `sample`, `time`, `timepoint`,
-#'   `cells` and `uncovered`: the sample without a cell in its pair's domain,
-#'   which is the sample itself, or a first or last sample next to it.
+#'   `cells` and `uncovered`: the time point without a cell in its pair's domain,
+#'   which is the time point itself, or a first or last time point next to it.
 #' @export
 fit_sparse_joint <- function(counts,
                              dt = 1,
@@ -826,7 +817,7 @@ fit_sparse_joint <- function(counts,
                              control = list(eval.max = 200, iter.max = 100),
                              inner_control = list(maxit = 200, tol = 1e-10),
                              times = NULL,
-                             series = c("anchored", "pairwise", "state_space", "auto"),
+                             series = c("anchored", "pairwise", "state_space"),
                              intermediate = c("majors", "all"),
                              intermediate_weight = NULL) {
   data <- if (inherits(counts, "alfak2_data")) {
@@ -872,52 +863,10 @@ fit_sparse_joint <- function(counts,
          call. = FALSE)
   }
   # Checked once, before any candidate history is fitted: a first or last
-  # sample with no cell next to a major karyotype leaves nothing to fit.
+  # time point with no cell next to a major karyotype leaves nothing to fit.
   n_input <- ncol(counts)
-  # Automatic choice of the series method (sparse_joint_auto_series()). Two
-  # samples give the two-sample fit with every method.
-  if (series == "auto" && n_input <= 2L) series <- "anchored"
-  if (series == "auto") {
-    if (intermediate != "majors") {
-      stop("`series = \"auto\"` chooses with `intermediate = \"majors\"`.", call. = FALSE)
-    }
-    share <- sparse_joint_ends_major_share(counts, major_frequency, major_count, max_states,
-                                           as.integer(min_cn), as.integer(max_cn))
-    weight <- NA_real_
-    if (share < sparse_joint_auto_thresholds[["ends_major"]]) {
-      weight <- if (!is.null(intermediate_weight)) intermediate_weight else {
-        # The anchored fit's own weight: from a first fit at the shortest
-        # history, on the samples the anchored method keeps.
-        coverage <- sparse_joint_check_coverage(counts, major_frequency, major_count, max_states,
-                                                as.integer(min_cn), as.integer(max_cn),
-                                                sparse_joint_major_columns(data, list(intermediate = "majors")),
-                                                required = c(1L, n_input))
-        left_out <- sparse_joint_uncounted_samples(coverage, "majors")
-        kept <- if (length(left_out)) sparse_joint_keep_samples(data, setdiff(seq_len(n_input), left_out)) else data
-        if (ncol(kept$counts) <= 2L) NA_real_ else {
-          arguments <- mget(names(formals(sys.function())), envir = environment())
-          arguments$counts <- kept
-          arguments$series <- "anchored"
-          arguments$history <- history[[1L]]
-          arguments$intermediate_weight <- 1
-          first <- withCallingHandlers(do.call(fit_sparse_joint, arguments),
-                                       alfak2_convergence_warning = function(w) invokeRestart("muffleWarning"))
-          dispersion <- sparse_joint_intermediate_dispersion(first)
-          if (is.finite(dispersion)) 1 / max(1, dispersion) else 1
-        }
-      }
-    }
-    chosen <- sparse_joint_auto_series(share, weight)
-    arguments <- mget(names(formals(sys.function())), envir = environment())
-    arguments$counts <- data
-    arguments$series <- chosen
-    fit <- do.call(fit_sparse_joint, arguments)
-    fit$diagnostics$series_choice <- list(requested = "auto", series = chosen, ends_major = share, weight = weight,
-                                          thresholds = sparse_joint_auto_thresholds)
-    return(fit)
-  }
-  # The pairwise and state-space methods: every pair of consecutive samples
-  # with its own domain, each sample with a cell in it. Samples are left out
+  # The pairwise and state-space methods: every pair of consecutive time points
+  # with its own domain, each time point with a cell in it. Time points are left out
   # until that holds (sparse_joint_pair_left_out()).
   other_method <- n_input > 2L && series != "anchored"
   if (other_method) {
@@ -925,13 +874,13 @@ fit_sparse_joint <- function(counts,
                                         as.integer(min_cn), as.integer(max_cn))
     left_out <- pairs$left_out
     if (length(left_out)) {
-      # `uncovered`: the sample without a cell in its pair's domain, the left
-      # out one itself or a first or last sample next to it.
+      # `uncovered`: the time point without a cell in its pair's domain, the left
+      # out one itself or a first or last time point next to it.
       detail <- data.frame(sample = left_out, time = alfak2_data_times(data)[left_out],
                            timepoint = colnames(counts)[left_out], cells = colSums(counts)[left_out],
                            uncovered = pairs$uncovered, stringsAsFactors = FALSE)
-      reason <- paste("a pair of consecutive samples had a sample with no cell in its domain",
-                      "(the sample itself, or a first or last sample next to it)")
+      reason <- paste("a pair of consecutive time points had a time point with no cell in its domain",
+                      "(the time point itself, or a first or last time point next to it)")
     } else {
       coverage <- sparse_joint_check_pair_coverage(counts, major_frequency, major_count, max_states,
                                                    as.integer(min_cn), as.integer(max_cn))
@@ -941,7 +890,7 @@ fit_sparse_joint <- function(counts,
                                             as.integer(min_cn), as.integer(max_cn),
                                             sparse_joint_major_columns(data, list(intermediate = intermediate)),
                                             required = c(1L, n_input))
-    # Anchored: a sample in between with no cell on the states it counts for
+    # Anchored: a time point in between with no cell on the states it counts for
     # is left out (see sparse_joint_uncounted_samples()), and the rest fitted.
     left_out <- sparse_joint_uncounted_samples(coverage, intermediate)
     if (length(left_out)) {
@@ -954,7 +903,7 @@ fit_sparse_joint <- function(counts,
     dropped_samples <- detail
     rownames(dropped_samples) <- NULL
     warning(warningCondition(
-      sprintf(paste0("Left out %d of %d samples (%s): %s. Such a sample carries no information ",
+      sprintf(paste0("Left out %d of %d time points (%s): %s. Such a time point carries no information ",
                      "under the model; see diagnostics$dropped_samples."),
               length(left_out), n_input, paste(colnames(counts)[left_out], collapse = ", "), reason),
       class = "alfak2_samples_left_out_warning", call = NULL))
@@ -963,11 +912,11 @@ fit_sparse_joint <- function(counts,
     fit <- do.call(fit_sparse_joint, arguments)
     fit$diagnostics$dropped_samples <- dropped_samples
     # The input as given, for as_alfakR(): alfakR picks its karyotypes from
-    # every sample.
+    # every time point.
     fit$input <- data
     return(fit)
   }
-  # With intermediate samples for the majors only, their weight: the inverse of
+  # With intermediate time points for the majors only, their weight: the inverse of
   # the majors' dispersion in a first fit (at the shortest history), at most 1.
   dispersion <- NA_real_
   if (ncol(counts) > 2L && intermediate == "majors" && series == "anchored") {
@@ -1013,7 +962,7 @@ fit_sparse_joint <- function(counts,
                    shell_sd = shell_sd, initial_frequency = initial_frequency, initial_state = initial_state,
                    history = history, balance_sd = balance_sd, calibration = calibration,
                    inner_control = inner_control)
-  # Only with more than two samples, so that two-sample fits stay as they were.
+  # Only with more than two time points, so that two-time-point fits stay as they were.
   if (ncol(data$counts) > 2L && series == "anchored") {
     settings$intermediate <- intermediate
     if (intermediate == "majors") settings$intermediate_weight <- intermediate_weight
@@ -1118,7 +1067,7 @@ fit_sparse_joint <- function(counts,
       if (settings$series == "state_space") fit$diagnostics$drift <- scale[["drift"]]
     }
     fit$diagnostics$times <- alfak2_data_times(data)
-    # None left out here; a caller that left samples out replaces it.
+    # None left out here; a caller that left time points out replaces it.
     fit$diagnostics$dropped_samples <- cbind(data.frame(sample = integer(0), time = numeric(0)), coverage[0L, ])
   }
   if (!is.null(settings$intermediate_weight)) fit$diagnostics$intermediate_weight <- settings$intermediate_weight
@@ -1144,7 +1093,7 @@ fit_sparse_joint <- function(counts,
 #'   unit of `dt`), `fitness_sd`, `conf_low`, `conf_high`, `relative_fitness`,
 #'   `relative_sd`, `relative_sd_model`, `shell` and `in_domain`.
 #'   `relative_fitness` is fitness minus the count-weighted mean fitness of
-#'   the major karyotypes, which is what two samples identify. `relative_sd`
+#'   the major karyotypes, which is what two time points identify. `relative_sd`
 #'   is its calibrated uncertainty and `relative_sd_model` the model's own;
 #'   see [fit_sparse_joint()]. Neither includes the uncertainty of the
 #'   baseline birth rate, which is common to all karyotypes.
@@ -1181,7 +1130,7 @@ predict.alfak2_sparse_joint_fit <- function(object, karyotypes, ...) {
     out$relative_sd_model[outside] <- ifelse(left_out, level$sd, relative$sd)
     out$shell[outside] <- sparse_joint_major_distance(cn, trend$major)
     # Observed karyotypes left out of the domain count as observed; the rest
-    # are predicted from the trend and were seen in neither sample.
+    # are predicted from the trend and were seen at no time point.
     out$relative_sd[outside] <- sparse_joint_calibrate(out$relative_sd_model[outside], relative$mean,
                                                        out$shell[outside], trend$birth_rate, trend$calibration,
                                                        observed = left_out)

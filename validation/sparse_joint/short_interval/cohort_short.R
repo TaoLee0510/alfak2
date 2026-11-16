@@ -1,9 +1,9 @@
 #!/usr/bin/env Rscript
 # Cohort model at a short interval: the eight patients of a diagnosis
-# landscape (wavelengths 0.8 and 1.6, first sample at day 120, 6 days apart,
+# landscape (wavelengths 0.8 and 1.6, first time point at day 120, 6 days apart,
 # 1000 cells each), fitted together with the balance prior and scored on
 # patient 1 against the truth, with history = interval (8327282) and with each
-# sample's history chosen as fit_sparse_joint() chooses it (si4).
+# dataset's history chosen as fit_sparse_joint() chooses it (si4).
 #
 #   R=validation/sparse_joint/short_interval/cohort_short.R
 #   Rscript $R --stage=datasets

@@ -30,8 +30,8 @@ simulate_sparse_joint_counts <- function(seed = 21, depth = 4000, dt = 60, beta 
 }
 
 # A population whose neighbours have been fed by the three clones for a long
-# time before the first sample, sampled deeply first and thinly afterwards:
-# what the neighbours' fitness is can only be read from the first sample.
+# time before the first time point, sampled deeply first and thinly afterwards:
+# what the neighbours' fitness is can only be read from the first time point.
 simulate_balanced_counts <- function(seed = 31, depth = c(30000, 300), history = 200, dt = 60, beta = 5e-4) {
   set.seed(seed)
   major <- rbind(c(2L, 2L, 2L, 2L), c(2L, 3L, 2L, 2L), c(2L, 2L, 1L, 2L))
@@ -49,8 +49,8 @@ simulate_balanced_counts <- function(seed = 31, depth = c(30000, 300), history =
        net = (2 * exp(kernel$log_self) - 1) * birth, dt = dt, beta = beta, history = history)
 }
 
-# Two samples from one landscape with different abundant clones. Clone
-# "2.3.2.2" is the fittest. It dominates sample B; sample A is thin and short,
+# Two datasets from one landscape with different abundant clones. Clone
+# "2.3.2.2" is the fittest. It dominates dataset B; dataset A is thin and short,
 # and has it as a neighbour of its dominant clone seen in a few cells at most.
 # Neighbours start absent, as in `simulate_sparse_joint_counts()`.
 simulate_cohort_counts <- function(seed = 41, depth = c(A = 300, B = 4000), dt = c(A = 10, B = 60),

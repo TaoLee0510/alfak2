@@ -1,6 +1,6 @@
 # alfak2 workflow, step by step
 
-This is how the default pipeline of alfak2 runs, from a two-sample count matrix
+This is how the default pipeline of alfak2 runs, from a two-time-point count matrix
 to a fitted landscape and, optionally, to the output files of alfakR. It is
 Section 4 of [`alfak2_method.tex`](alfak2_method.tex) in plain text; the model
 and its equations are Section 2 there, and the design decisions and benchmark
@@ -25,16 +25,16 @@ to the earlier pipelines is an error unless `pipeline = "two_layer"` or
 ## Part 1. Fitting (`fit_sparse_joint`)
 
 1. **Prepare the input.** A two-column matrix of integer counts, one column
-   per sample, with karyotype labels such as `"2.2.3.2"` as row names. Rows
-   with no cells are dropped. `dt` is the time between the samples (days for
+   per time point, with karyotype labels such as `"2.2.3.2"` as row names. Rows
+   with no cells are dropped. `dt` is the time between the two time points (days for
    the GBM inputs) and `beta` the missegregation probability per chromosome
    copy and division. Copy numbers must lie between `min_cn` (default 1) and
-   `max_cn` (default one above the largest observed), and both samples need
+   `max_cn` (default one above the largest observed), and both time points need
    cells.
 
 2. **Find the major karyotypes and the domain.**
-   - A karyotype is *major* if it holds at least 1% of either sample and at
-     least 3 cells over both. Without any, the most abundant one is used.
+   - A karyotype is *major* if it holds at least 1% of the cells at either time
+     point and at least 3 cells over both. Without any, the most abundant one is used.
    - The *domain* is the majors and every one-step neighbour of a major (one
      copy more or fewer of one chromosome), observed or not. An unobserved
      neighbour enters the likelihood because its absence next to an abundant
@@ -59,17 +59,17 @@ to the earlier pipelines is an error unless `pipeline = "two_layer"` or
    distance to the nearest major raised to the power 0.85 (the shell term).
 
 5. **Set the prior on initial abundances.**
-   - Seen in the first sample: centred on its count, essentially free.
-   - Seen only in the second: centred on its frequency there.
+   - Seen at the first time point: centred on its count, essentially free.
+   - Seen only at the second: centred on its frequency there.
    - Never seen: a frequency near 1e-5 with a wide spread.
    - Default `initial_state = "balance"`: every non-major state is centred
      instead on its mutation-selection balance with the majors next to it,
      what they would have fed it over a history `h` (by default the interval
-     between the samples), with spread `balance_sd = 1` on the log scale. Its
-     count in the first sample then informs its fitness. Majors stay free.
+     between the time points), with spread `balance_sd = 1` on the log scale. Its
+     count at the first time point then informs its fitness. Majors stay free.
 
 6. **Assemble the count model (compiled with TMB).**
-   - Latent variables: per state, the log expected count at the first sample
+   - Latent variables: per state, the log expected count at the first time point
      (zeta) and the log birth rate (g); the trend coefficients; the depth
      ratio (theta).
    - Fitness prior: g is centred on the trend with a residual scale; the
@@ -77,10 +77,10 @@ to the earlier pipelines is an error unless `pipeline = "two_layer"` or
      curvature coefficients have their own scales; the shell coefficient has
      prior sd 0.5.
    - Net growth rate: d = (2 P_ii - 1) exp(g).
-   - Dynamics in closed form: at the second sample each state has grown at
+   - Dynamics in closed form: at the second time point each state has grown at
      its own rate and received influx from its one-step neighbours, each
      source growing at its own rate (first order in missegregation).
-   - Likelihood: the counts of each sample are Poisson, with expectation
+   - Likelihood: the counts at each time point are Poisson, with expectation
      exp(zeta) at the first and the dynamics, scaled by theta, at the second.
 
 7. **Estimate the scale hyperparameters.** The dosage, curvature and residual
@@ -100,7 +100,7 @@ to the earlier pipelines is an error unless `pipeline = "two_layer"` or
    - `fitness_mean`: net growth rate per unit of `dt`; its absolute level
      follows the assumed birth rate.
    - `relative_fitness`: minus the count-weighted mean over the majors, which
-     is what two samples identify.
+     is what two time points identify.
    - `relative_sd_model`: the model's own posterior standard deviation, too
      small on its own.
    - `relative_sd`: calibrated,
@@ -132,7 +132,7 @@ Every row has `relative_fitness`, `relative_sd` and `relative_sd_model`.
     arguments, such as `birth_rate`, go to `fit_sparse_joint()`.
 
 12. **Choose karyotypes as alfakR does.** `fq`: at least `minobs` cells over
-    both samples. `nn`: their one-step neighbours without nullisomy. The
+    both time points. `nn`: their one-step neighbours without nullisomy. The
     landscape covers `fq`, `nn` and the neighbours of `nn`, in alfakR's
     order. `minobs` changes only this choice, not the fit.
 
@@ -184,15 +184,15 @@ Every row has `relative_fitness`, `relative_sd` and `relative_sd_model`.
   rates across a range (default three, evenly spaced on the log scale). Point
   predictions are at the lowest rate, intervals cover the whole range, and
   the agreement of rankings across rates is reported.
-- `fit_sparse_joint_cohort()`: several samples at once. Each keeps its domain
-  and initial abundances; a karyotype shares its fitness across samples with
-  an estimated deviation; the trend is shared or per sample, whichever has
+- `fit_sparse_joint_cohort()`: several two-time-point datasets at once. Each keeps its domain
+  and initial abundances; a karyotype shares its fitness across datasets with
+  an estimated deviation; the trend is shared or per dataset, whichever has
   the higher marginal likelihood. Its default is `initial_state = "free"`.
-- More than two samples of one population: `fit_sparse_joint(counts, times = ...)`
-  with one column per sample. The later samples are compared with the same
-  dynamics started at the first sample, each with its own depth. By default
-  the majors and the domain come from the first and the last sample, and the
-  samples in between inform the majors only, with a weight
+- More than two time points of one population: `fit_sparse_joint(counts, times = ...)`
+  with one column per time point. The later time points are compared with the same
+  dynamics started at the first time point, each with its own depth. By default
+  the majors and the domain come from the first and the last time point, and the
+  time points in between inform the majors only, with a weight
   `1 / max(1, dispersion)` from a first fit (`diagnostics$intermediate_weight`).
   `as_alfakR()` and `alfak_compat()` take such fits.
 - Every fit checks its scale optimisation (`diagnostics$optimisation`) and
@@ -203,10 +203,10 @@ Every row has `relative_fitness`, `relative_sd` and `relative_sd_model`.
 
 | Case | Time |
 | --- | --- |
-| One simulated sample | Seconds to about 4 minutes |
-| One GBM sample at three birth rates | Median 149 s |
+| One simulated dataset | Seconds to about 4 minutes |
+| One GBM dataset at three birth rates | Median 149 s |
 | `alfak_compat()` with cross-validation, GBM P6 (226 karyotypes) | About 8 minutes |
-| Simulated culture, 4-8 samples of 200-1000 cells (default) | Median 2.5-5 minutes, 2-4 times two samples |
+| Simulated culture, 4-8 time points of 200-1000 cells (default) | Median 2.5-5 minutes, 2-4 times two time points |
 
 ## Relation to the earlier pipelines
 

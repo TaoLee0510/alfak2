@@ -1,4 +1,4 @@
-test_that("a cohort of one sample with full sharing is the single-sample fit", {
+test_that("a cohort of one dataset with full sharing is the single-dataset fit", {
   sim <- simulate_cohort_counts()
   single <- fit_sparse_joint(sim$samples$A, dt = sim$dt[1L], beta = sim$beta, major_frequency = 0.05, max_cn = 4, initial_state = "free")
   cohort <- fit_sparse_joint_cohort(sim$samples["A"], dt = sim$dt[1L], beta = sim$beta, sharing = "full",
@@ -14,7 +14,7 @@ test_that("a cohort of one sample with full sharing is the single-sample fit", {
   expect_equal(predict(cohort, targets, sample = "A")[columns], predict(single, targets)[columns], tolerance = 1e-6)
 })
 
-test_that("samples share the karyotypes they have in common", {
+test_that("datasets share the karyotypes they have in common", {
   sim <- simulate_cohort_counts()
   fit <- fit_sparse_joint_cohort(sim$samples, dt = sim$dt, beta = sim$beta, major_frequency = 0.05, max_cn = 4, initial_state = "free")
   expect_true(fit$diagnostics$finite_uncertainty)
@@ -27,9 +27,9 @@ test_that("samples share the karyotypes they have in common", {
   shared <- landscape[landscape$karyotype == "2.3.2.2", ]
   expect_equal(shared$n_samples, 2L)
   expect_equal(shared$n_major, 1L)
-  # Alone, sample A takes "2.3.2.2" for one more unfit neighbour of its
-  # dominant clone. Sample B shows it to be the fitter of the two, and in the
-  # cohort sample A's own value follows.
+  # Alone, dataset A takes "2.3.2.2" for one more unfit neighbour of its
+  # dominant clone. Dataset B shows it to be the fitter of the two, and in the
+  # cohort dataset A's own value follows.
   gap <- function(summary) {
     summary$fitness_mean[summary$karyotype == "2.3.2.2"] - summary$fitness_mean[summary$karyotype == "2.2.2.2"]
   }
@@ -78,7 +78,7 @@ test_that("invalid cohort inputs are rejected", {
                                        dt = 10, beta = sim$beta), "missegregation")
 })
 
-test_that("the trend is per sample, shared, or chosen by marginal likelihood", {
+test_that("the trend is per dataset, shared, or chosen by marginal likelihood", {
   sim <- simulate_cohort_counts()
   fit <- function(trend) {
     fit_sparse_joint_cohort(sim$samples, dt = sim$dt, beta = sim$beta, major_frequency = 0.05, max_cn = 4,
@@ -88,13 +88,13 @@ test_that("the trend is per sample, shared, or chosen by marginal likelihood", {
   shared <- fit("shared")
   expect_equal(sample$diagnostics$trend, "sample")
   expect_equal(shared$diagnostics$trend, "shared")
-  # per sample: each sample's trend is centred on its own mean karyotype
+  # trend = "sample": each dataset's trend is centred on its own mean karyotype
   expect_false(isTRUE(all.equal(sample$trend$samples$A$centre, sample$trend$samples$B$centre)))
   expect_false(isTRUE(all.equal(sample$trend$samples$A$coefficients, sample$trend$samples$B$coefficients)))
   # shared: one set of coefficients and one centre
   expect_equal(shared$trend$samples$A$coefficients, shared$trend$samples$B$coefficients)
   expect_equal(shared$trend$samples$A$centre, shared$trend$samples$B$centre)
-  # a karyotype far from both samples is predicted from that sample's trend
+  # a karyotype far from both datasets is predicted from that dataset's trend
   far <- "1.4.1.4"
   in_a <- predict(sample, far, sample = "A")
   in_b <- predict(sample, far, sample = "B")
@@ -109,7 +109,7 @@ test_that("the trend is per sample, shared, or chosen by marginal likelihood", {
   expect_equal(chosen$landscape, if (which.min(objective) == 1L) shared$landscape else sample$landscape)
 })
 
-test_that("with balance, each sample's history is chosen as for a single sample", {
+test_that("with balance, each dataset's history is chosen as for a single dataset", {
   sim <- simulate_cohort_counts()
   cohort <- fit_sparse_joint_cohort(sim$samples, dt = sim$dt, beta = sim$beta, trend = "sample",
                                     major_frequency = 0.05, max_cn = 4, initial_state = "balance")
@@ -129,7 +129,7 @@ test_that("with balance, each sample's history is chosen as for a single sample"
                                       major_frequency = 0.05, max_cn = 4)$diagnostics$history_profiles)
 })
 
-test_that("a cohort sample with a timepoint outside its domain stops with an error naming it", {
+test_that("a cohort dataset with a timepoint outside its domain stops with an error naming it", {
   sim <- simulate_cohort_counts()
   far <- labelled_counts("2.2.2.2" = c(0, 20), "3.3.2.2" = c(1, 0), "1.1.2.2" = c(1, 0), "2.4.2.2" = c(1, 0))
   samples <- c(sim$samples, list(C = far))
@@ -137,15 +137,15 @@ test_that("a cohort sample with a timepoint outside its domain stops with an err
                                                max_cn = 4, ...)
   err <- tryCatch(fit(initial_state = "free", trend = "shared"), alfak2_domain_coverage_error = function(e) e)
   expect_s3_class(err, "alfak2_domain_coverage_error")
-  expect_match(conditionMessage(err), "^A timepoint has no cell inside its sample's model domain\\. Sample C, timepoint t0: ")
+  expect_match(conditionMessage(err), "^A timepoint has no cell inside its dataset's model domain\\. Dataset C, timepoint t0: ")
   expect_equal(err$coverage$sample, rep(c("A", "B", "C"), each = 2L))
   expect_equal(err$coverage$cells_in_domain[5:6], c(0, 20))
   # Chosen trend, and the balance prior, whose histories are chosen first.
   expect_error(fit(initial_state = "free"), class = "alfak2_domain_coverage_error")
-  expect_error(fit(initial_state = "balance"), "Sample C, timepoint t0", class = "alfak2_domain_coverage_error")
+  expect_error(fit(initial_state = "balance"), "Dataset C, timepoint t0", class = "alfak2_domain_coverage_error")
 })
 
-test_that("a cohort fit reports the domain coverage of each sample", {
+test_that("a cohort fit reports the domain coverage of each dataset", {
   sim <- simulate_cohort_counts()
   fit <- fit_sparse_joint_cohort(sim$samples, dt = sim$dt, beta = sim$beta, major_frequency = 0.05, max_cn = 4,
                                  initial_state = "free", trend = "shared")
@@ -157,7 +157,7 @@ test_that("a cohort fit reports the domain coverage of each sample", {
                c(sum(fit$samples$A$count_t0), sum(fit$samples$A$count_t1),
                  sum(fit$samples$B$count_t0), sum(fit$samples$B$count_t1)))
   expect_output(print(fit), "cells in the domain: lowest")
-  # Calibration: karyotypes seen in no sample have a deficit of their own.
+  # Calibration: karyotypes seen in no dataset have a deficit of their own.
   calibration <- sparse_joint_default_calibration
   land <- fit$landscape
   deficit <- ifelse(land$n_observed > 0, calibration[["deficit"]], calibration[["deficit_unobserved"]])

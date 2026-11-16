@@ -4,7 +4,7 @@
 #
 #   Rscript validation/sparse_joint/short_interval/report.R [--methods=a,b] [--output-dir=DIR]
 #
-# Cells are first-sample day (t0) x interval x wavelength class, five
+# Cells are day of the first time point (t0) x interval x wavelength class, five
 # landscapes each; every number is a median over the datasets of a cell.
 
 si_script_dir <- local({

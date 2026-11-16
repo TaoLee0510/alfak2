@@ -1,10 +1,10 @@
 #!/usr/bin/env Rscript
-# Stage 2 diagnostic: is the all-sample fit worse than first+last because of
-# passaging drift? The pilot (landscape mt_L05) found the all-sample fit worse
-# even at bottleneck 2e4, mostly on karyotypes seen only in intermediate
-# samples. This refits that landscape's windows at bottleneck 2e5, near the
+# Stage 2 diagnostic: is the fit on all time points worse than first+last
+# because of passaging drift? The pilot (landscape mt_L05) found the fit on all
+# time points worse even at bottleneck 2e4, mostly on karyotypes seen only at
+# intermediate time points. This refits that landscape's windows at bottleneck 2e5, near the
 # ALFA-K paper's ABM (n0 = 2e5), with the same seeds, spacings, depths and
-# numbers of samples, and compares all samples with first+last there.
+# numbers of time points, and compares all time points with first+last there.
 #
 #   Rscript validation/sparse_joint/multi_timepoint/drift_check.R --stage=datasets|fit|score [--workers=4]
 #     [--methods=all,ends]   (one build per run: `majors` on its own)
@@ -32,7 +32,7 @@ dc_link_truth <- function(config) {
 }
 
 # Errors of all and ends by group of scored karyotypes: observed at the first
-# or last sample, observed only in between, one and two steps away. Pilot
+# or last time point, observed only in between, one and two steps away. Pilot
 # datasets of the same landscape at bottleneck 2e4 for comparison.
 dc_score <- function(config) {
   series <- mt_config(NULL, "series")

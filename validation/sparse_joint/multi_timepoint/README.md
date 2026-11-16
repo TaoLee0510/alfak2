@@ -3,7 +3,7 @@
 Two timepoints are the minimum input of alfak2, not its limit. This study
 extends `fit_sparse_joint()` to one population sampled at two or more times,
 checks that two-timepoint fits are unchanged, and measures what the extra
-samples give and what passaging drift between them costs. The plan and its
+time points give and what passaging drift between them costs. The plan and its
 status are in the repository's local handoff
 (`HANDOFF_CLAUDE_2026-11-13_multi_timepoint.md`, git-ignored).
 
@@ -41,11 +41,11 @@ be identical. The pass criterion is a relative difference of at most 1e-8.
 least two, with `dt` as the intervals between consecutive timepoints or
 `times`. With more than two timepoints it uses `src/sparse_joint_series_model.h`:
 the first-order closed form of `src/sparse_joint_model.h`, started at the first
-sample and evaluated at every later sample time, each later sample with its
-own depth offset. Two timepoints keep `src/sparse_joint_model.h`. Majors are
-judged by their share of any sample; a karyotype first seen later starts from
+time point and evaluated at every later time point, each with its own depth
+offset. Two timepoints keep `src/sparse_joint_model.h`. Majors are
+judged by their share at any time point; a karyotype first seen later starts from
 its frequency at the earliest timepoint it was seen; the history of the
-balance prior is at least the time from the first to the last sample. Cohort
+balance prior is at least the time from the first to the last time point. Cohort
 fits, `as_alfakR()`, `alfak_compat()` and the two older pipelines take two
 timepoints and say so.
 
@@ -55,7 +55,7 @@ against ff13cf4). Two things changed later:
 - From cv4, `as_alfakR()` and `alfak_compat()` take more than two
   timepoints. The level is log(nb/n0) over the first interval.
 - From cv6, the majors and the domain come by default from the first and the
-  last sample (stage 2).
+  last time point (stage 2).
 
 Cohort fits and the two older pipelines still take only two timepoints.
 
@@ -96,16 +96,16 @@ most 1.03):
 
 - The pilot landscape (mt_L05) was unfavourable to `all` at every
   bottleneck. There the loss sat on karyotypes seen only between the first
-  and the last sample (fitness overestimated, RMSE ratio 1.24-1.50), and at a
+  and the last time point (fitness overestimated, RMSE ratio 1.24-1.50), and at a
   bottleneck of 2e5 (`drift_check.R`, near the ALFA-K paper's ABM) it was
   still 1.13: not passaging drift alone. Masking the rare karyotypes'
   intermediate counts (`majors_any`) did not help, because majors chosen from
-  every sample include clones that rise and fall in between; choosing majors
-  from the first and the last sample did (`majors1`).
+  every time point include clones that rise and fall in between; choosing
+  majors from the first and the last time point did (`majors1`).
 - `majors` (the default from cv6) weights the majors' intermediate counts by
   1 / max(1, dispersion) from a first fit; it fails the gate in 3 cells
-  (1.10 at one step, bottleneck 200, 8 samples of 200 cells; 1.12 and 1.08 at
-  d0, bottleneck 20000, 8 samples of 1000 cells). Median coverage per cell
+  (1.10 at one step, bottleneck 200, 8 time points of 200 cells; 1.12 and 1.08 at
+  d0, bottleneck 20000, 8 time points of 1000 cells). Median coverage per cell
   and distance 0.96-1.00 for `majors`, `majors1` and `ends`, 0.92-1.00 for
   `all`. Median time per fit: 2-4 times `ends`; `all` 3.5-21 times.
 - Decision (on my recommendation, under the user's authorisation): default
@@ -114,26 +114,26 @@ most 1.03):
   criteria, are already met and the remaining gaps are not where drift is
   largest.
 
-## Samples in between that carry no information (cv7, cv8)
+## Time points in between that carry no information (cv7, cv8)
 
 Found by the ALFA-K paper benchmark on the Salehi trajectories, in round
 21aedca. Of 205 trajectories with more than two passages, 61 could not be fitted
-on all samples:
+on all time points:
 - 43 stopped only because a passage in between had no cell in the domain:
   clonal sweeps, with the population in the middle two or more steps from both
   ends' majors.
 - 18 also stopped at an end.
 
 Ten more had a passage in between with cells on non-major neighbours only.
-With the default, that sample's depth offset was degenerate.
+With the default, the depth offset of that time point was degenerate.
 
-The depth offset of a later sample has a flat prior. A sample with no cell on
-the states it counts for (the majors, or the domain with `"all"`) therefore
-has its likelihood largest as the offset goes to minus infinity, where the
-sample adds nothing. The Laplace integral over the offset is improper. From
-cv7 such a sample is left out with a warning (`diagnostics$dropped_samples`),
+The depth offset of a later time point has a flat prior. A time point with no
+cell on the states it counts for (the majors, or the domain with `"all"`)
+therefore has its likelihood largest as the offset goes to minus infinity, where the
+time point adds nothing. The Laplace integral over the offset is improper. From
+cv7 such a time point is left out with a warning (`diagnostics$dropped_samples`),
 which is that limit. The ends are still required. `as_alfakR()` keeps
-alfakR's karyotypes from every sample (`fit$input`).
+alfakR's karyotypes from every time point (`fit$input`).
 
 The convergence check also reads an inner Hessian with non-finite entries as
 near-singular instead of stopping. Under 21aedca it stopped on
@@ -147,7 +147,7 @@ Checks:
 - HPC, cv7 and cv8 each against ff13cf4 and cv6: 140/140 reference fits
   identical (development, entry, free, rates, compat; cohort fits do not use
   the changed code), and cv8's convergence verdicts equal cv6's;
-- none of the 288 stage-2 datasets leaves a sample out;
+- none of the 288 stage-2 datasets leaves a time point out;
 - six stage-2 datasets refitted on the Mac with cv6 and cv7 (default): identical
   predictions, objectives and histories.
 

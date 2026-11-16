@@ -37,7 +37,7 @@ ub_config <- function(source = c("rugged", "diagnosis", "dev")) {
     zero = list(type = "zero"),
     # The package as committed (af362af), at its defaults.
     base = sparse(),
-    # Tighter spread of first-sample abundances around balance: their
+    # Tighter spread of abundances at the first time point around balance: their
     # differences must then come from fitness.
     bsd05 = sparse(balance_sd = 0.5),
     bsd025 = sparse(balance_sd = 0.25),

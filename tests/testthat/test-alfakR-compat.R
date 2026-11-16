@@ -96,13 +96,13 @@ test_that("as_alfakR reports frequencies at time 0 as alfakR does", {
   set.seed(6)
   shifted <- as_alfakR(fit, minobs = 20, nboot = 4, correct_efflux = TRUE, xval = FALSE, first_time = 40)$bootstrap_res
   expect_equal(shifted$final_fitness, at_first$final_fitness)
-  # alfakR's projection to the first sample, x0 * exp(f * t), gives back the
-  # frequencies at the first sample.
+  # alfakR's projection to the first time point, x0 * exp(f * t), gives back the
+  # frequencies at the first time point.
   projected <- shifted$final_frequencies * exp(shifted$final_fitness * 40)
   expect_equal(projected / rowSums(projected), at_first$final_frequencies, tolerance = 1e-10)
   expect_equal(shifted$initial_frequencies, shifted$final_frequencies)
   expect_false(isTRUE(all.equal(shifted$final_frequencies, at_first$final_frequencies)))
-  # With the default, the frequencies are the model's at the first sample
+  # With the default, the frequencies are the model's at the first time point
   # (a single draw is the posterior mode; karyotypes outside the domain keep
   # their observed count).
   one <- as_alfakR(fit, minobs = 20, nboot = 1, xval = FALSE)$bootstrap_res$final_frequencies
@@ -132,7 +132,7 @@ test_that("alfak_compat() takes alfakR's input and writes its files", {
   expect_named(models, c("mean", "median"))
   expect_equal(predict(models$mean, parse_karyotypes(landscape$k[1:4]))[, 1L], landscape$mean[1:4], tolerance = 1e-12)
 
-  # The time between the samples comes from the column names or passage times.
+  # The time between the time points comes from the column names or passage times.
   again <- tempfile("alfak2_alfak_")
   on.exit(unlink(again, recursive = TRUE), add = TRUE)
   bare <- x
@@ -141,19 +141,19 @@ test_that("alfak_compat() takes alfakR's input and writes its files", {
   alfak_compat(list(x = bare), again, passage_times = c(10, 10 + sim$dt), minobs = 20, nboot = 5, pm = sim$beta,
         max_cn = 4)
   expect_equal(readRDS(file.path(again, "landscape.Rds")), landscape)
-  # The first sample at time 10 moves the reported frequencies to time 0.
+  # The first time point, at time 10, moves the reported frequencies to time 0.
   boot0 <- readRDS(file.path(dir, "bootstrap_res.Rds"))
   boot10 <- readRDS(file.path(again, "bootstrap_res.Rds"))
   projected <- boot10$final_frequencies * exp(boot10$final_fitness * 10)
   expect_equal(projected / rowSums(projected), boot0$final_frequencies, tolerance = 1e-10)
 
-  expect_error(alfak_compat(list(x = x[, 1L, drop = FALSE], dt = 1), dir), "two or more samples")
-  expect_error(alfak_compat(list(x = bare), dir, passage_times = c(0, 10, 20)), "one finite time per sample")
+  expect_error(alfak_compat(list(x = x[, 1L, drop = FALSE], dt = 1), dir), "two or more time points")
+  expect_error(alfak_compat(list(x = bare), dir, passage_times = c(0, 10, 20)), "one finite time per time point")
   expect_error(alfak_compat(list(x = x, dt = sim$dt), dir, nn_prior = "none"), "nn_prior")
   expect_error(alfak_compat(list(x = x + 0.5, dt = sim$dt), dir), "non-integer")
 })
 
-test_that("as_alfakR() and alfak_compat() take fits of more than two samples", {
+test_that("as_alfakR() and alfak_compat() take fits of more than two time points", {
   sim <- simulate_series_counts()
   fit <- fit_sparse_joint(sim$counts, times = sim$times, beta = sim$beta, max_cn = 4)
   set.seed(8)
@@ -163,7 +163,7 @@ test_that("as_alfakR() and alfak_compat() take fits of more than two samples", {
   expect_equal(colnames(out$bootstrap_res$final_fitness), fq)
   expect_equal(out$landscape$k, unique(c(fq, nn, alfakR_neighbours(nn))))
   expect_equal(unname(rowSums(out$bootstrap_res$final_frequencies)), rep(1, 5))
-  # alfakR's level: population growth over the first interval between samples.
+  # alfakR's level: population growth over the first interval between time points.
   prediction <- predict(fit, out$landscape$k)
   expect_equal(out$landscape$mean, prediction$relative_fitness + log(1e7 / 1e5) / diff(sim$times)[[1L]],
                tolerance = 1e-12)

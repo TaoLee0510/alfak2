@@ -11,7 +11,7 @@
 
 \item{karyotypes}{Character labels or an integer matrix of karyotypes.}
 
-\item{sample}{Name or index of a sample, or \code{NULL} for the shared landscape.}
+\item{sample}{Name or index of a dataset, or \code{NULL} for the shared landscape.}
 
 \item{...}{Unused.}
 }
@@ -20,15 +20,15 @@ Data frame with \code{karyotype}, \code{fitness_mean}, \code{fitness_sd},
 \code{conf_low}, \code{conf_high}, \code{relative_fitness}, \code{relative_sd},
 \code{relative_sd_model}, \code{shell} and \code{source}, which is \code{"sample"},
 \code{"landscape"}, \code{"observed_level"} or \code{"trend"}. Relative fitness is
-measured from the count-weighted mean of the sample's major karyotypes,
-or of all samples' when \code{sample} is \code{NULL}; \code{shell} is the distance to the
-nearest major karyotype of the sample, or of any sample.
+measured from the count-weighted mean of the dataset's major karyotypes,
+or of all datasets' when \code{sample} is \code{NULL}; \code{shell} is the distance to the
+nearest major karyotype of the dataset, or of any dataset.
 }
 \description{
 Without \code{sample}, returns the shared landscape: the posterior of a
-karyotype in any sample's domain, and the trend elsewhere. With \code{sample},
-returns fitness in that sample: its own posterior inside its domain; the
-shared value, widened by the between-sample deviation, for a karyotype that
-only other samples have in their domain; and otherwise as
-\code{\link[=predict.alfak2_sparse_joint_fit]{predict.alfak2_sparse_joint_fit()}} does for a single sample.
+karyotype in any dataset's domain, and the trend elsewhere. With \code{sample},
+returns fitness in that dataset: its own posterior inside its domain; the
+shared value, widened by the between-dataset deviation, for a karyotype that
+only other datasets have in their domain; and otherwise as
+\code{\link[=predict.alfak2_sparse_joint_fit]{predict.alfak2_sparse_joint_fit()}} does for a single dataset.
 }

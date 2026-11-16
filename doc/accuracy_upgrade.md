@@ -168,7 +168,7 @@ reference relative-SD ratios to 0.923–1.035; two rare-state cases retain mater
 mean discrepancies. Gaussianizing the full mixture again would lose the
 improvement. It remains an approximation, not exact posterior integration.
 
-On twelve unchanged 27-node development samples with deployment eta priors,
+On twelve unchanged 27-node development datasets with deployment eta priors,
 relative RMSE improves at d0–d2 but shape error rises slightly at d1/d2. Raw
 proper interval scores regress in smooth-d0 and rough-d2. No calibrated
 all-distance comparison or new independent test is claimed. The prototype is

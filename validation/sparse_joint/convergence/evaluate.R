@@ -12,7 +12,7 @@
 #     relative difference at most 1e-8, convergence fields aside). The fix
 #     also changes which candidate a fit keeps (only accepted ones), and
 #     restarted candidates report other objectives; so where the kept history
-#     (or a cohort's per-sample histories or trend) is the baseline's, the
+#     (or a cohort's per-dataset histories or trend) is the baseline's, the
 #     record is compared without the objectives of the other candidates, and
 #     where it changed, only the kept candidate's objective is compared with
 #     the baseline's objective for that candidate;
@@ -75,7 +75,7 @@ history_of <- function(record) {
   value <- record[["diagnostics"]][["history"]]
   if (is.null(value)) NA_real_ else as.numeric(value[[1L]])
 }
-# What a record kept: its history, or a cohort's trend and per-sample
+# What a record kept: its history, or a cohort's trend and per-dataset
 # histories (cohort records do not store those, so they are chosen again from
 # the profiles by each build's rule: the baseline's lowest objective, the
 # fix's lowest accepted one).

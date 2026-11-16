@@ -132,7 +132,7 @@ grf_sample_counts <- function(population, size, overdispersion = 0) {
 #' @param overdispersion Dirichlet-multinomial concentration; `0` means
 #'   multinomial.
 #' @param initial_population Number of cells in the simulated population before
-#'   the first sample. Defaults to `5 * max(n0, n1)`.
+#'   the first time point. Defaults to `5 * max(n0, n1)`.
 #' @param initial_shell_depth Initial population support around the founder in
 #'   one-missegregation steps.
 #' @param time_step Internal ABM time step.

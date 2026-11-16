@@ -1,4 +1,4 @@
-% alfak2 sparse joint model, more than two samples: method A, pairwise
+% alfak2 sparse joint model, more than two time points: method A, pairwise
 % (series = "pairwise"). Mirrors sparse_joint_pair_left_out(),
 % sparse_joint_pair_domains() and sparse_joint_pairwise_problem() in
 % R/sparse-joint-series-methods.R. Build: pdflatex flow_pairwise.tex
@@ -8,29 +8,28 @@
 \begin{tikzpicture}
 
 \node[box=cPair, w=9.4cm] (in) at (0,0) {%
-  \textbf{A: pairwise} (\code{series = "pairwise"}, or chosen by \code{"auto"} for a sweep with little
-  drift: $s<\autoshare$ and $\omega\ge\autoweight$ or NA)\\
-  samples $t_0<t_1<\dots<t_K$, $K\ge2$};
+  \textbf{A: pairwise} (\code{series = "pairwise"})\\
+  time points $t_0<t_1<\dots<t_K$, $K\ge2$};
 
 \node[box, w=9.4cm, below=0.45cm of in] (pairs) {%
-  \textbf{1 Pair domains}\quad for every pair of consecutive samples $(t_{k-1},t_k)$, its own majors
-  $\mathcal M_k$ and domain $\mathcal D_k$ from those two samples alone (core chart steps 1--2).};
-\node[dec, below=0.45cm of pairs] (cover) {Does each sample have a cell in its pair's $\mathcal D_k$?};
+  \textbf{1 Pair domains}\quad for every pair of consecutive time points $(t_{k-1},t_k)$, its own majors
+  $\mathcal M_k$ and domain $\mathcal D_k$ from those two time points alone (core chart steps 1--2).};
+\node[dec, below=0.45cm of pairs] (cover) {Does each time point have a cell in its pair's $\mathcal D_k$?};
 \draw[arr] (in) -- (pairs);
 \draw[arr] (pairs) -- (cover);
 
 % coverage loop, right-hand column
 \node[box, w=4.3cm, font=\footnotesize, anchor=north west] (leave) at ($(cover.south -| pairs.east)+(0.6,-0.35)$) {%
-  \textbf{Leave a sample out} (warning, \code{dropped\_samples}): the uncovered sample if it lies in
+  \textbf{Leave a time point out} (warning, \code{dropped\_samples}): the uncovered time point if it lies in
   between, and its neighbours become a pair; for an uncovered $t_0$ or $t_K$, its neighbour in between,
-  so that it pairs with a sample further in.};
-\node[dec, below=0.45cm of leave] (two) {More than two\\samples left?};
+  so that it pairs with a time point further in.};
+\node[dec, below=0.45cm of leave] (two) {More than two\\time points left?};
 \node[box=cTwo, w=4.3cm, font=\footnotesize, below=0.5cm of two] (twofit) {%
-  \textbf{Two-sample fit} of $t_0$ and $t_K$ (core chart)};
+  \textbf{Two-time-point fit} of $t_0$ and $t_K$ (core chart)};
 \draw[arr] (cover.east) -| node[lab, above, pos=0.25] {no} (leave.north);
 \draw[arr] (leave) -- (two);
 \draw[arr, draw=cTwoB] (two) -- node[lab, right] {no} (twofit);
-\draw[arr] (two.east) -- ++(0.35,0) node[lab, above, pos=0.5] {yes} |- (pairs.east);
+\draw[arr] (two.east) -- ($(two.east -| leave.east)+(0.35,0)$) node[lab, above, pos=0.5] {yes} |- (pairs.east);
 
 \node[box, w=9.4cm, below=0.6cm of cover] (states) {%
   \textbf{2 States}\quad $\bigcup_k\mathcal D_k$, the majors of every pair first; for each state,
@@ -39,18 +38,18 @@
 
 \node[box, w=9.4cm, below=0.4cm of states] (own) {%
   \textbf{3 Per pair}\quad its own initial log abundances $\zeta_k$ (prior from that pair's counts, as
-  for two samples), its own depth offset $\theta_k$ and reference. The non-majors of $\mathcal D_k$
+  for two time points), its own depth offset $\theta_k$ and reference. The non-majors of $\mathcal D_k$
   start at balance with $\mathcal M_k$, built up over $h+t_{k-1}$ (the population's age at the pair's
-  first sample).};
+  first time point).};
 \node[box, w=9.4cm, below=0.4cm of own] (lik) {%
-  \textbf{4 Likelihood of each pair}, as for two samples:\\
+  \textbf{4 Likelihood of each pair}, as for two time points:\\
   $y_{k-1,i}\sim\mathrm{Poisson}(e^{\zeta_{ki}})$,\quad
   $y_{ki}\sim\mathrm{Poisson}\bigl(e^{\theta_k-d_r\Delta_k}\,n^{(k)}_i(\Delta_k;\zeta_k)\bigr)$,\quad
   $i\in\mathcal D_k$, $\Delta_k=t_k-t_{k-1}$.\\
-  A sample in between ends one pair and starts the next: it counts twice.};
+  A time point in between ends one pair and starts the next: it counts twice.};
 \node[box, w=9.4cm, below=0.4cm of lik] (shared) {%
   \textbf{5 Shared by every pair}\quad one landscape: the log birth rates $g$ and the trend, centred on
-  the count-weighted mean karyotype of all samples; scales $\sigma_d$, $\sigma_c$, $\sigma_r$.
+  the count-weighted mean karyotype of all time points; scales $\sigma_d$, $\sigma_c$, $\sigma_r$.
   TMB template \code{sparse\_joint\_pairwise}.};
 \draw[arr] (states) -- (own);
 \draw[arr] (own) -- (lik);
@@ -63,14 +62,14 @@
 
 % ---- schematic --------------------------------------------------------------
 \begin{scope}[shift={($(twofit.south)+(-0.5,-1.75)$)}]
-  \node[font=\footnotesize\bfseries, anchor=west] at (-1.35,1.45) {How the samples are used};
+  \node[font=\footnotesize\bfseries, anchor=west] at (-1.35,1.45) {How the time points are used};
   \foreach \k/\x in {0/-1.0, 1/0.0, 2/1.0, 3/2.0} {
     \node[circle, draw=cPairB, fill=cPair, minimum size=5mm, inner sep=0pt, font=\scriptsize] (s\k) at (\x,0) {$t_\k$};
   }
   \foreach \a/\b/\k in {s0/s1/1, s1/s2/2, s2/s3/3} {
     \draw[->, cPairB, line width=0.8pt] (\a) to[bend left=50] node[above, font=\scriptsize, text=black] {$\zeta_\k$} (\b);
   }
-  \node[font=\scriptsize, align=center] at (0.5,-0.8) {each pair restarts from its first sample,\\
+  \node[font=\scriptsize, align=center] at (0.5,-0.8) {each pair restarts from its first time point,\\
     with its own $\mathcal D_k$, $\zeta_k$, $\theta_k$};
 \end{scope}
 

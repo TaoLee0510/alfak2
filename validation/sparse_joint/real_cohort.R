@@ -1,4 +1,4 @@
-# Checks of the sparse joint model on real two-timepoint samples, where there
+# Checks of the sparse joint model on real two-time-point datasets, where there
 # is no truth to score against.
 #
 #   Rscript validation/sparse_joint/real_cohort.R --input-dir=DIR --output-dir=DIR
@@ -7,15 +7,15 @@
 # Inputs are ALFA-K input files (.Rds lists whose `x` is a count matrix with
 # karyotype row names and the sampling days as column names). They are read
 # in place; everything written goes to --output-dir, which should lie outside
-# the repository when the samples are patient data.
+# the repository when the datasets are patient data.
 #
 # What is checked:
-#   1. every sample fits, at each of three birth rates across the range;
+#   1. every dataset fits, at each of three birth rates across the range;
 #   2. rankings agree across those rates;
 #   3. the counts the fit expects resemble the observed counts;
-#   4. two halves of the cells of a sample give the same answer, within the
+#   4. two halves of the cells of a dataset give the same answer, within the
 #      reported uncertainty;
-#   5. the cohort fit, and how far it moves each sample.
+#   5. the cohort fit, and how far it moves each dataset.
 # Set STT_R_LIB to the library holding the alfak2 build under test.
 
 library_dir <- Sys.getenv("STT_R_LIB", unset = "")
@@ -46,7 +46,7 @@ samples <- lapply(files, function(file) {
   list(counts = counts[rowSums(counts) > 0, , drop = FALSE], dt = diff(as.numeric(colnames(counts))))
 })
 names(samples) <- sub("[.][Rr]ds$", "", basename(files))
-cat("Samples:", length(samples), " birth rates:", signif(rate_range[1L], 3), "to", signif(rate_range[2L], 3),
+cat("Datasets:", length(samples), " birth rates:", signif(rate_range[1L], 3), "to", signif(rate_range[2L], 3),
     "per day, centre", signif(central_rate, 3), "\n")
 copy_numbers <- unlist(lapply(samples, function(s) range(alfak2:::parse_karyotypes(rownames(s$counts)))))
 min_cn <- min(1L, min(copy_numbers))
@@ -60,7 +60,7 @@ fit_one <- function(counts, dt, ...) {
   fit_sparse_joint(counts, dt = dt, beta = beta, min_cn = min_cn, max_cn = max_cn, ...)
 }
 
-# 1-3. Single-sample fits across the range of birth rates.
+# 1-3. Single-dataset fits across the range of birth rates.
 solo_path <- file.path(output_dir, "solo_fits.rds")
 solo <- if (file.exists(solo_path)) readRDS(solo_path) else {
   out <- run(names(samples), function(name) {
@@ -97,7 +97,7 @@ solo_table <- do.call(rbind, lapply(names(samples), function(name) {
         seconds = fit$seconds,
         # lowest Spearman correlation between the predictions at two rates
         rank_agreement = attr(prediction, "rank_agreement"),
-        # Pearson dispersion of the second sample's counts around the fit
+        # Pearson dispersion of the counts at the second time point around the fit
         dispersion_t1 = sum(((summary$count_t1 - summary$expected_t1)^2 / pmax(summary$expected_t1, 1e-8))[seen]) /
           sum(seen),
         # mean deficit of non-major karyotypes: highest over lowest rate, per day and per division
@@ -190,7 +190,7 @@ if (!isTRUE(option("skip-cohort", FALSE))) {
 }
 
 options(width = 200)
-cat("\n== single-sample fits ==\n")
+cat("\n== single-dataset fits ==\n")
 print(format(solo_table[-1L], digits = 3), row.names = FALSE)
 ok <- solo_table$status == "ok"
 cat(sprintf("\nfitted %d of %d; median seconds %.0f (max %.0f); median states %d (max %d)\n", sum(ok), nrow(solo_table),
@@ -200,19 +200,19 @@ quartiles <- function(x) paste(signif(stats::quantile(x, c(0.25, 0.5, 0.75), na.
 cat("rank agreement across birth rates (quartiles):", quartiles(solo_table$rank_agreement), "\n")
 cat("deficit of non-major karyotypes, highest over lowest rate: per day", quartiles(solo_table$deficit_ratio),
     "; per division", quartiles(solo_table$per_division_ratio), "\n")
-cat("dispersion of second-sample counts (1 = Poisson):", quartiles(solo_table$dispersion_t1), "\n")
+cat("dispersion of counts at the second time point (1 = Poisson):", quartiles(solo_table$dispersion_t1), "\n")
 if (!is.null(split_rows) && nrow(split_rows)) {
-  cat("\n== split halves:", length(unique(split_rows$sample)), "samples with at least", split_min_cells,
+  cat("\n== split halves:", length(unique(split_rows$sample)), "datasets with at least", split_min_cells,
       "cells at both timepoints ==\n")
   columns <- c("n", "spearman", "rms_difference", "within_reported", "within_model")
   print(format(stats::aggregate(split_rows[columns], split_rows["karyotypes"], stats::median), digits = 3), row.names = FALSE)
 }
 if (!is.null(cohort_table)) {
   d <- cohort$diagnostics
-  cat(sprintf("\n== cohort fit: %d samples, %d karyotypes (%d shared), %d states, %.0f s, convergence %d ==\n",
+  cat(sprintf("\n== cohort fit: %d datasets, %d karyotypes (%d shared), %d states, %.0f s, convergence %d ==\n",
               d$n_samples, d$n_nodes, d$shared_nodes, d$n_states, cohort$seconds, d$convergence))
   cat("scales:", paste(names(cohort$trend$scales), signif(cohort$trend$scales, 3), sep = "=", collapse = "  "), "\n")
-  cat("agreement of a sample's cohort estimate with its own fit, Spearman (quartiles):",
+  cat("agreement of a dataset's cohort estimate with its own fit, Spearman (quartiles):",
       quartiles(cohort_table$spearman_with_alone), "\n")
   cat("\nmost recurrent karyotypes of the shared landscape (chromosome:copies where not 2):\n")
   top <- utils::head(recurrent, 12L)

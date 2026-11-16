@@ -1,16 +1,17 @@
 #!/usr/bin/env Rscript
 # Tables of stage 2 (README.md), from results/<set>/metrics_*.csv written by
-# `run.R --stage=score`. A cell is one bottleneck, spacing, number of samples
-# and depth; landscapes are the unit, and paired ratios are taken landscape by
-# landscape.
+# `run.R --stage=score`. A cell is one bottleneck, spacing, number of time
+# points and depth; landscapes are the unit, and paired ratios are taken
+# landscape by landscape.
 #
 #   Rscript validation/sparse_joint/multi_timepoint/report.R [--set=series]
 #
-# Gates of the plan: in every cell the median ratio of the all-sample RMSE to
-# the first-and-last RMSE is at most 1.03 at distances 0, 1 and 2; the 95%
-# intervals of the all-sample fit cover at least 90% of karyotypes, otherwise
-# the cell is marked for recalibration or the drift model. Every multi-sample
-# arm present (`all`, `majors_any`, `majors1`, `majors`) is compared.
+# Gates of the plan: in every cell the median ratio of the RMSE on all time
+# points to the first-and-last RMSE is at most 1.03 at distances 0, 1 and 2;
+# the 95% intervals of the fit on all time points cover at least 90% of
+# karyotypes, otherwise the cell is marked for recalibration or the drift
+# model. Every multi-time-point arm present (`all`, `majors_any`, `majors1`,
+# `majors`) is compared.
 
 mt_script_dir <- local({
   file_arg <- grep("^--file=", commandArgs(FALSE), value = TRUE)
@@ -29,6 +30,8 @@ cells <- cells[do.call(order, cells), ]
 lines <- character()
 add <- function(...) lines <<- c(lines, ...)
 table_md <- function(x, digits = 2L) {
+  # The `samples` column counts time points; the header says so.
+  names(x)[names(x) == "samples"] <- "time points"
   x[] <- lapply(x, function(v) if (is.numeric(v) && any(v != round(v), na.rm = TRUE)) formatC(v, digits = digits, format = "f") else v)
   c(paste0("| ", paste(names(x), collapse = " | "), " |"),
     paste0("|", paste(rep(" --- ", ncol(x)), collapse = "|"), "|"),
@@ -64,7 +67,7 @@ add("## Fits", "", table_md(status, 0L), "")
 failed <- fits[fits$status != "ok", intersect(c("dataset_id", "method", "detail"), names(fits))]
 if (nrow(failed)) add("Failures:", "", table_md(utils::head(failed, 30)), "")
 
-# Every multi-sample arm against first and last (`ends`).
+# Every multi-time-point arm against first and last (`ends`).
 arms <- intersect(c("all", "majors_any", "majors1", "majors"), unique(fits$method))
 summary_rows <- list()
 for (arm in arms) {
@@ -82,7 +85,7 @@ for (arm in arms) {
   }, numeric(1))
   gate$coverage_min <- cover
   add(sprintf("## `%s` against first and last (`ends`): RMSE ratio", arm), "",
-      "Ratio below 1: the multi-sample fit is better. `better`: landscapes where it is better.",
+      "Ratio below 1: the multi-time-point fit is better. `better`: landscapes where it is better.",
       "`coverage_min`: the lowest median 95% coverage of the three distances.", "",
       table_md(gate, 3L), "",
       sprintf("Cells passing the RMSE gate: %d of %d; coverage at least 0.90 in %d.",
@@ -98,7 +101,7 @@ for (arm in arms) {
   }
 }
 summary_table <- do.call(rbind, summary_rows)
-lines <- append(lines, c("## Summary: multi-sample arms against `ends` by bottleneck", "",
+lines <- append(lines, c("## Summary: multi-time-point arms against `ends` by bottleneck", "",
                          "Median over cells of the median RMSE ratio; `worst`: the largest cell ratio.", "",
                          table_md(summary_table, 3L), ""), after = which(lines == "## Fits") - 1L)
 
@@ -130,15 +133,15 @@ if (any(distance$method == "alfakR")) {
     versus[[paste0(s, "_ratio")]] <- r[, "ratio"]
     versus[[paste0(s, "_better")]] <- sprintf("%d/%d", r[, "better"], r[, "n"])
   }
-  add("## alfak2 all samples against alfakR all samples: RMSE ratio", "", table_md(versus, 3L), "")
+  add("## alfak2 all time points against alfakR all time points: RMSE ratio", "", table_md(versus, 3L), "")
 }
 
-# Dispersion of the majors' later counts about the all-sample fit, against
+# Dispersion of the majors' later counts about the fit on all time points, against
 # the drift index K^2 N_s / (5 n0).
 all_fits <- fits[fits$method == "all" & fits$status == "ok", ]
 dispersion <- stats::aggregate(cbind(drift_index, dispersion) ~ bottleneck + spacing + samples + depth, all_fits,
                                stats::median)
-add("## Dispersion of the majors (all samples) and the drift index", "", table_md(dispersion, 2L), "",
+add("## Dispersion of the majors (all time points) and the drift index", "", table_md(dispersion, 2L), "",
     sprintf("Spearman correlation of dispersion and drift index over fits: %.2f.",
             stats::cor(all_fits$dispersion, all_fits$drift_index, method = "spearman", use = "complete.obs")), "")
 

@@ -1,19 +1,20 @@
 # Design of the sparse two-timepoint benchmark.
 #
-# The simulated data are meant to look like real two-timepoint tumour samples.
+# The simulated data are meant to look like real two-timepoint tumour datasets.
 # The reference is a set of 20 GBM inputs: 22 chromosomes, copy numbers 1-4,
 # 8-3889 cells per timepoint with often strongly unbalanced depths, intervals
 # of 180-3600 days, typically ~65 karyotypes of which a third are seen at both
 # timepoints, a largest clone of ~13%, and a total-variation distance of ~0.8
-# between the two samples.
+# between the two time points.
 #
 # Three choices follow from matching those observables (README, "Design"):
 # - 22 chromosomes. With 8 chromosomes the simulated population is trapped on a
-#   local peak within ~700 days and samples become 98% one karyotype.
-# - First sample at day 1440. Earlier, clones replace each other completely
-#   within a year; later, the smoother landscapes also freeze.
+#   local peak within ~700 days and the cells drawn at a time point are 98%
+#   one karyotype.
+# - First time point at day 1440. Earlier, clones replace each other
+#   completely within a year; later, the smoother landscapes also freeze.
 # - Wavelengths 0.4, 0.8, 1.2 and 1.6. The 0.4 class is the frozen,
-#   near-monoclonal regime that about one real sample in ten resembles; the
+#   near-monoclonal regime that about one real dataset in ten resembles; the
 #   others give ongoing adaptation with real-like diversity and turnover.
 
 stt_config <- function(output_dir = file.path("benchmark", "results", "sparse_two_timepoint")) {
@@ -36,7 +37,7 @@ stt_config <- function(output_dir = file.path("benchmark", "results", "sparse_tw
     )
   }
   # `shift` is the fraction of the landscape's waves redrawn at the first
-  # sample. Core scenarios make the acceptance verdict; stress scenarios are
+  # time point. Core scenarios make the acceptance verdict; stress scenarios are
   # reported beside it.
   scenario <- function(name, depth_t0, depth_t1, interval, bottleneck = 0, shift = 0, role = "core") {
     data.frame(scenario = name, depth_t0 = depth_t0, depth_t1 = depth_t1,
@@ -50,7 +51,7 @@ stt_config <- function(output_dir = file.path("benchmark", "results", "sparse_tw
          graph_hyperparameters = c(lambda_l = 1, lambda_e = 0.25, sigma_obs = 0.05),
          extrapolation_method = extrapolation_method)
   }
-  # What a cohort method needs to find the other samples of its cohort.
+  # What a cohort method needs to find the other datasets of its cohort.
   cohort_method <- function(members, ...) {
     list(type = "alfak2_sparse_joint_cohort", birth_rate = 1, min_cn = 1L, max_cn = 8L, members = members,
          dataset_dir = file.path(output_dir, "datasets"), landscapes = landscapes[c("landscape_id", "split")],
@@ -70,7 +71,7 @@ stt_config <- function(output_dir = file.path("benchmark", "results", "sparse_tw
     # and scored only once, for the final confirmation.
     landscapes = landscapes,
     patients_per_landscape = 8L,
-    # Patients fitted by every method for the single-sample scoreboard. One per
+    # Patients fitted by every method for the single-dataset scoreboard. One per
     # landscape keeps a full development round within a few CPU-hours on a
     # workstation; landscapes, not patients, are the independent unit.
     scoreboard_patients = 1L,
@@ -82,18 +83,18 @@ stt_config <- function(output_dir = file.path("benchmark", "results", "sparse_tw
       scenario("unbalanced_100_3000_360d", 100, 3000, 360),
       scenario("unbalanced_3000_100_360d", 3000, 100, 360),
       scenario("long_500_700_1080d", 500, 700, 1080),
-      # After the first sample only 200 cells survive and regrow.
+      # After the first time point only 200 cells survive and regrow.
       scenario("bottleneck_500_700_360d", 500, 700, 360, bottleneck = 200),
-      # Few generations between the samples: 27 and 54 at the simulated
+      # Few generations between the time points: 27 and 54 at the simulated
       # division rate, as for a slowly dividing tumour sampled months apart.
       scenario("short_500_700_30d", 500, 700, 30, role = "stress"),
       scenario("short_500_700_60d", 500, 700, 60, role = "stress"),
-      # The landscape changes at the first sample, as when treatment starts
+      # The landscape changes at the first time point, as when treatment starts
       # then: half of its waves are redrawn, which leaves fitness before and
       # after correlated. Truth is the landscape after.
       scenario("shift_500_700_360d", 500, 700, 360, shift = 0.5, role = "stress"),
       scenario("shift_3000_100_360d", 3000, 100, 360, shift = 0.5, role = "stress"),
-      # Worst case for anything read from the first sample: the landscape is
+      # Worst case for anything read from the first time point: the landscape is
       # turned about the dominant karyotype, so that which of its neighbours
       # is fit before says nothing about after.
       scenario("turned_500_700_360d", 500, 700, 360, shift = 1, role = "stress"),
@@ -108,7 +109,7 @@ stt_config <- function(output_dir = file.path("benchmark", "results", "sparse_tw
                       original = c("alfakR_minobs5", "alfakR_minobs20"),
                       candidates = c("alfak2_sparse_joint", "alfak2_sparse_joint_balance"),
                       # Cohort methods exist for the cohort scenario only and are
-                      # compared there with the single-sample model.
+                      # compared there with the single-dataset model.
                       cohort = c("alfak2_sparse_joint_cohort", "alfak2_sparse_joint_cohort_unrelated",
                                  "alfak2_sparse_joint_cohort_shared_trend",
                                  "alfak2_sparse_joint_cohort_unrelated_shared_trend",
@@ -148,7 +149,7 @@ stt_config <- function(output_dir = file.path("benchmark", "results", "sparse_tw
       alfak2_sparse_joint_fast = list(type = "alfak2_sparse_joint", birth_rate = 2, min_cn = 1L, max_cn = 8L,
                                       arguments = list(initial_state = "free")),
       # Initial abundances of non-major karyotypes tied to mutation-selection
-      # balance, which reads the first sample's levels as well.
+      # balance, which reads the levels at the first time point as well.
       alfak2_sparse_joint_balance = list(type = "alfak2_sparse_joint", birth_rate = 1, min_cn = 1L, max_cn = 8L,
                                          arguments = list(initial_state = "balance")),
       # Baseline birth rate known only within a factor of 16. The simulated
@@ -160,7 +161,7 @@ stt_config <- function(output_dir = file.path("benchmark", "results", "sparse_tw
       alfak2_sparse_joint_range_high = list(type = "alfak2_sparse_joint_rates", birth_rate_range = c(1, 16),
                                             min_cn = 1L, max_cn = 8L, arguments = list(initial_state = "free")),
       # Cohort fit of the eight patients of a landscape, scored on patient 1.
-      # The trend is shared or per sample, whichever has the higher marginal
+      # The trend is shared or per dataset, whichever has the higher marginal
       # likelihood.
       alfak2_sparse_joint_cohort = cohort_method("landscape", trend = "select"),
       # Control: the same patient with patients of seven other landscapes,

@@ -51,7 +51,7 @@ si_config <- function(output_dir = NULL, set = c("diagnosis", "heldout")) {
   config$patients_per_landscape <- 1L
   config$scoreboard_patients <- 1L
   # Day 120 is about the age of the paper's ABM populations at their windows;
-  # day 1440 is the first sample of the development benchmark. The two
+  # day 1440 is the first time point of the development benchmark. The two
   # separate a short interval from a young population. Intervals of 6, 18 and
   # 42 days match one, three and seven passages of the paper's ABM.
   config$abm$end_day <- 1440
@@ -64,10 +64,10 @@ si_config <- function(output_dir = NULL, set = c("diagnosis", "heldout")) {
     bottleneck = 0, shift = 0, role = "diagnosis", stringsAsFactors = FALSE
   )
   # Cross-validation as in as_alfakR(): frequent karyotypes have at least
-  # `minobs` cells over both samples.
+  # `minobs` cells over both time points.
   config$cv <- list(minobs = 10)
   # Arms. `build` names the alfak2 library (si_library()); `history = "age"`
-  # sets the history to the true age of the population at the first sample,
+  # sets the history to the true age of the population at the first time point,
   # which only a simulation knows; `history = "grid"` gives the candidates of
   # si_history_grid(). Build "si1" is 8327282 with the opt-in trend and
   # history options of this study; its defaults reproduce 8327282 exactly.
@@ -138,7 +138,7 @@ si_fit_path <- function(config, dataset_id, method_name) {
 si_index_path <- function(config) file.path(config$output_dir, "dataset_index.csv")
 
 # Count-weighted spread of true fitness times the interval: how much selection
-# the two samples can see (handoff, section 4.1).
+# the two time points can see (handoff, section 4.1).
 si_selection_signal <- function(dataset) {
   counts <- dataset$counts
   rate <- stt_true_growth_rate(rownames(counts), dataset$truth)

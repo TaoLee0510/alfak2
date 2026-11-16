@@ -20,7 +20,7 @@ as_alfakR(
 \item{fit}{An \code{alfak2_sparse_joint_fit}, or an
 \code{alfak2_sparse_joint_rate_fit}, whose point fit is then used.}
 
-\item{minobs}{Minimum number of cells, over all samples, of a frequent
+\item{minobs}{Minimum number of cells, over all time points, of a frequent
 karyotype.}
 
 \item{nboot}{Number of posterior draws, alfakR's bootstrap replicates.}
@@ -39,7 +39,7 @@ counterpart of alfakR's Kriging models: a list with elements \code{mean} and
 \code{median}, each an object whose \code{\link[=predict]{predict()}} method returns the fitness of
 any karyotypes on the same scale as \code{landscape}.}
 
-\item{first_time}{Time of the first sample on alfakR's time axis (the
+\item{first_time}{Time of the first time point on alfakR's time axis (the
 first passage time, or column name times \code{dt}); sets the time 0 of the
 reported frequencies.}
 }
@@ -57,9 +57,9 @@ layout, so that code written for alfakR results can read them.
 \code{\link[=alfak_compat]{alfak_compat()}} does both in one call with alfakR's arguments.
 }
 \details{
-Fits of two or more samples are converted alike. The karyotypes are
+Fits of two or more time points are converted alike. The karyotypes are
 chosen as alfakR chooses them. The frequent karyotypes
-(\code{fq}) have at least \code{minobs} cells over all samples; \code{nn} are their
+(\code{fq}) have at least \code{minobs} cells over all time points; \code{nn} are their
 one-step neighbours without nullisomy; the landscape covers both and the
 one-step neighbours of \code{nn}. \code{minobs} affects only this choice. The fit
 itself uses every cell, with its own major karyotypes.
@@ -77,16 +77,16 @@ separate first estimate.
 The frequencies of the frequent karyotypes follow alfakR's convention:
 they are the frequencies at time 0 of alfakR's time axis, from which
 alfakR projects to time \code{t} as \code{x0 * exp(f * t)}. The model estimates them
-at the first sample, so each draw is moved back from \code{first_time}, the
-time of the first sample on that axis, with the draw's \code{final_fitness};
+at the first time point, so each draw is moved back from \code{first_time}, the
+time of the first time point on that axis, with the draw's \code{final_fitness};
 projecting the reported frequencies to \code{first_time} in alfakR's way gives
-back the model's frequencies at the first sample. With \code{first_time = 0}
+back the model's frequencies at the first time point. With \code{first_time = 0}
 the two coincide.
 
 The scale is alfakR's. Fitness is the net growth rate per unit of time,
 shifted so that the count-weighted mean of the major karyotypes is
 \code{log(nb / n0) / dt}, the growth rate alfakR assigns to the population,
-with \code{dt} the first interval between samples, as in alfakR.
+with \code{dt} the first interval between time points, as in alfakR.
 alfakR weights by the estimated initial frequencies of the frequent
 karyotypes instead. With \code{n0 = NULL} and \code{nb = NULL} the model's own level
 at its assumed birth rate is kept. \code{correct_efflux = TRUE} divides by

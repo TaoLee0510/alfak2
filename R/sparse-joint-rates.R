@@ -1,7 +1,7 @@
 # The sparse joint model when the baseline birth rate is not known.
 #
-# The rate cannot be learned from two samples and has to be supplied; neither
-# a single sample's nor a cohort's marginal likelihood locates it. What it
+# The rate cannot be learned from two time points and has to be supplied; neither
+# a single dataset's nor a cohort's marginal likelihood locates it. What it
 # changes is known: the fitness difference between two well-sampled clones
 # comes from their frequency change and does not depend on it, while the
 # deficit of a rare or unobserved karyotype comes from its level under

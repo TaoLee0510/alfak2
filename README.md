@@ -8,7 +8,7 @@ construction, local hierarchical Bayesian inference, and a graph
 Gaussian-process posterior with ordered copy-number epistasis penalties.
 
 The default pipeline, `fit_alfak2()` or `fit_sparse_joint()`, is the sparse
-joint count model, described [below](#sparse-joint-model-for-two-sparse-samples).
+joint count model, described [below](#sparse-joint-model-for-sparse-counts-at-two-time-points).
 `alfak_compat()` runs it with the arguments of `alfakR::alfak()` and writes
 alfakR's output files, so that analyses built on alfakR read its results
 unchanged.
@@ -136,10 +136,10 @@ remain conditional assumptions; initial-abundance priors also depend on the
 observed support. Division summaries use lognormal moment and
 quantile approximations; they do not claim exact full posterior integration.
 
-## Sparse joint model for two sparse samples
+## Sparse joint model for sparse counts at two time points
 
 `fit_sparse_joint()`, the default pipeline of `fit_alfak2()`, is built for the
-case the package is meant for: two samples of a few hundred cells. It fits both samples with one
+case the package is meant for: a few hundred cells at each of two time points. It fits both time points with one
 count likelihood on the well-sampled karyotypes and all their one-step
 neighbours, observed or not. A rare karyotype is held at mutation-selection
 balance by the clone it descends from, so its level, not its change in
@@ -156,20 +156,20 @@ fit <- fit_alfak2(counts, dt = 180, beta = 0.00005,
                   sparse_joint_control = list(birth_rate = 0.5))
 ```
 
-Two samples identify fitness differences, not absolute fitness. Use
+Two time points identify fitness differences, not absolute fitness. Use
 `relative_fitness`, which is measured from the count-weighted mean of the
 major karyotypes, and `relative_sd`. `relative_sd` adds two terms of model
 error, fitted to simulated landscapes, to the model's own posterior standard
 deviation (`relative_sd_model`), which is too small on its own. The error grows
-with the predicted difference, and more for karyotypes seen in neither
-sample: how far below the clones they lie is not identified by zero counts.
+with the predicted difference, and more for karyotypes seen at neither
+time point: how far below the clones they lie is not identified by zero counts.
 Because `relative_sd` grows with the difference itself, its 95% intervals
 always contain zero. They are for coverage, not for testing whether a
 karyotype differs from the reference. On simulated neutral cultures, about
 5% of karyotypes had |`relative_fitness`| / `relative_sd_model` above 4.5
 ([series methods](validation/sparse_joint/series_methods/README.md)).
 
-The baseline birth rate has to be supplied; two samples do not identify it.
+The baseline birth rate has to be supplied; two time points do not identify it.
 Rankings hardly depend on it. Fitness differences between well-sampled clones
 do not depend on it either, but the deficit of a rare or unobserved karyotype
 is fixed per division, so per unit of time it is proportional to the assumed
@@ -184,12 +184,13 @@ predict(fit, karyotypes)   # relative fitness at the central rate, an interval
                            # covering the range, and fitness per division
 ```
 
-Several samples can be fitted together. Each keeps its own domain and initial
-abundances; a karyotype that is abundant in one sample and an unobserved
+Several datasets, such as several patients or cultures with two time points
+each, can be fitted together. Each keeps its own domain and initial
+abundances; a karyotype that is abundant in one dataset and an unobserved
 neighbour in another is informed by both, and its fitness may deviate between
-samples by an estimated amount. The trend is either shared by all samples or
-fitted per sample, whichever has the higher marginal likelihood, so that
-samples from different landscapes are not forced onto one trend:
+datasets by an estimated amount. The trend is either shared by all datasets or
+fitted per dataset, whichever has the higher marginal likelihood, so that
+datasets from different landscapes are not forced onto one trend:
 
 ```r
 cohort <- fit_sparse_joint_cohort(list(P1 = counts1, P2 = counts2),
@@ -200,36 +201,36 @@ predict(cohort, karyotypes, sample = "P1")
 
 By default (`initial_state = "balance"`) rare karyotypes start at
 mutation-selection balance with the clones next to them, so that their levels
-in the first sample inform their fitness as well. This takes fitness before
-the first sample to resemble fitness between the samples. On simulated
+at the first time point inform their fitness as well. This takes fitness before
+the first time point to resemble fitness between the time points. On simulated
 landscapes it was more accurate than `initial_state = "free"`, which uses the
-first sample only as a starting point, even when the landscape changed at the
-first sample. The time over which the balance built up (`history`) is chosen
-by marginal likelihood among the interval and longer spans. With samples only
+first time point only as a starting point, even when the landscape changed at the
+first time point. The time over which the balance built up (`history`) is chosen
+by marginal likelihood among the interval and longer spans. With time points only
 about 30 divisions apart, its errors were 4-10% larger than those of the free
 model, but it ranked karyotypes better; at about 60 divisions the two were
 equally accurate. Up to alfak2 8327282 the balance built up over the interval
 alone, and at about 30 divisions its errors were twice those of the free
 model.
 
-A fit needs cells of both samples within one step of a well-sampled
-karyotype. `fit$diagnostics$domain_coverage` gives, for each sample, how many
-of its cells lie inside the fitted domain. When one sample has none, typically
-because the two samples share no karyotype and all well-sampled ones come from
+A fit needs cells at both time points within one step of a well-sampled
+karyotype. `fit$diagnostics$domain_coverage` gives, for each time point, how many
+of its cells lie inside the fitted domain. When one time point has none, typically
+because the two time points share no karyotype and all well-sampled ones come from
 the other, the fit stops with an error of class
 `alfak2_domain_coverage_error`, which carries the same table.
 `check_sparse_joint_counts()` summarises a count matrix before fitting: the
 share of cells on repeated karyotypes and how far each cell lies from the
-nearest other cell of its sample.
+nearest other cell at its time point.
 
 ```r
 check_sparse_joint_counts(counts)
 fit$diagnostics$domain_coverage
 ```
 
-Patient samples, such as a primary and its recurrence, are not passages: the
-recurrence may grow from a few surviving cells, and only for part of the time
-between the samples. A few survivors cost little. Growth that started late
+Time points from a patient, such as a primary tumour and its recurrence, are not
+passages: the recurrence may grow from a few surviving cells, and only for part
+of the time between the two time points. A few survivors cost little. Growth that started late
 costs a great deal if the model is not told: the fitness differences are
 spread over the whole interval and come out too large per unit of time. Give
 the time the population actually grew, or `birth_rate` times the share of the
@@ -247,17 +248,17 @@ seen once). The fit itself is not changed by the check; on simulated data,
 refitting such fits until they were accepted did not change their accuracy
 ([convergence study](validation/sparse_joint/README.md)).
 
-### More than two samples
+### More than two time points
 
 `fit_sparse_joint()` also fits one population sampled more than twice: a count
-matrix with one column per sample and `times` (or `dt`, one interval per pair
-of consecutive samples). Every later sample is compared with the same
-dynamics started at the first sample, each with its own depth, and fitness is
+matrix with one column per time point and `times` (or `dt`, one interval per pair
+of consecutive time points). Every later time point is compared with the same
+dynamics started at the first time point, each with its own depth, and fitness is
 taken to be constant over the series. By default (`intermediate = "majors"`)
-the majors and the domain come from the first and the last sample, as for two
-samples, and the samples in between inform the majors only, with a weight
+the majors and the domain come from the first and the last time point, as for two
+time points, and the time points in between inform the majors only, with a weight
 that falls with the dispersion of their counts (`intermediate_weight`), so a
-population that drifts between samples, for instance through small passaging
+population that drifts between time points, for instance through small passaging
 bottlenecks, leans on the first and the last.
 
 ```r
@@ -265,27 +266,27 @@ fit <- fit_sparse_joint(counts, times = c(0, 6, 12, 18), beta = 0.00005, birth_r
 fit$diagnostics$intermediate_weight
 ```
 
-On simulated passaged cultures (12 landscapes; 4 or 8 samples 6 or 60 days
-apart; bottlenecks of 200, 2000 and 20000 cells; 200 or 1000 cells per sample)
-the default was as accurate as fitting the first and the last sample alone:
+On simulated passaged cultures (12 landscapes; 4 or 8 time points 6 or 60 days
+apart; bottlenecks of 200, 2000 and 20000 cells; 200 or 1000 cells per time point)
+the default was as accurate as fitting the first and the last time point alone:
 median RMSE ratios of 0.97-1.01, within 3% in 21 of 24 settings, with the
-same coverage. Under this model the samples in between add little. Using them for
+same coverage. Under this model the time points in between add little. Using them for
 every karyotype (`intermediate = "all"`) was 4-6% more accurate with little
 drift (bottleneck 20000) but up to 2.4 times less accurate with strong drift
-(bottleneck 200), where clones that rise and vanish between samples read as
+(bottleneck 200), where clones that rise and vanish between time points read as
 fit; it suits large populations passaged through large bottlenecks only. The
-default takes 2-4 times as long as two samples, `"all"` up to 20 times
+default takes 2-4 times as long as two time points, `"all"` up to 20 times
 ([stage 2](validation/sparse_joint/multi_timepoint/README.md)). Cohort fits
-and the two older pipelines take two samples.
+and the two older pipelines take two time points.
 
-`series` chooses how the samples are tied together. All three methods share
-one landscape, and with two samples all three give the same fit.
+`series` chooses how the time points are tied together. All three methods share
+one landscape, and with two time points all three give the same fit.
 
-| `series` | dynamics | majors and domain | samples in between |
+| `series` | dynamics | majors and domain | time points in between |
 | --- | --- | --- | --- |
-| `"anchored"` (default) | one trajectory from the first sample | from the first and the last sample | as above |
-| `"pairwise"` | each pair of consecutive samples from its earlier sample as observed | each pair's own | end of one pair, start of the next |
-| `"state_space"` | latent abundances at every sample, linked by the dynamics plus a drift whose scale is estimated (`fit$diagnostics$drift`) | each pair's own | each counted once |
+| `"anchored"` (default) | one trajectory from the first time point | from the first and the last time point | as above |
+| `"pairwise"` | each pair of consecutive time points from its earlier time point as observed | each pair's own | end of one pair, start of the next |
+| `"state_space"` | latent abundances at every time point, linked by the dynamics plus a drift whose scale is estimated (`fit$diagnostics$drift`) | each pair's own | each counted once |
 
 ```r
 fit <- fit_sparse_joint(counts, times = c(0, 120, 240, 360), beta = 0.00005, birth_rate = 0.9,
@@ -293,55 +294,55 @@ fit <- fit_sparse_joint(counts, times = c(0, 120, 240, 360), beta = 0.00005, bir
 ```
 
 The three were compared on passaged cultures (as above), on clonal sweeps
-(the first sample while clones still replace one another, samples 120 days
+(the first time point while clones still replace one another, time points 120 days
 apart) and on neutral cultures. Results are the median RMSE ratio to the
-first and last sample alone
+first and last time point alone
 ([series methods](validation/sparse_joint/series_methods/README.md)).
 - **Clonal sweeps**: `anchored` 0.89–0.94, `pairwise` 0.68–0.85,
   `state_space` 0.79–0.82.
 - **`pairwise` under drift**: up to 1.8 with bottlenecks of 200 cells, and
-  1.1–2.0 on neutral cultures. Each pair restarts from the observed sample,
-  so passaging drift within a pair reads as selection.
+  1.1–2.0 on neutral cultures. Each pair restarts from the counts observed at its
+  earlier time point, so passaging drift within a pair reads as selection.
 - **`state_space`**: 0.93–1.02 on the passaged cultures, but up to 1.2 at
   one and two steps on neutral cultures. It takes 3–12 times as long as
-  `anchored`; with 8 samples some fits take up to 18 hours and 16 GB.
+  `anchored`; with 8 time points some fits take up to 18 hours and 16 GB.
 
 `anchored` stays the default. The other two suit clonal sweeps through large
 bottlenecks.
 
-`series = "auto"` chooses among the three from the data (diagram in
-[doc/flowcharts](doc/flowcharts/flow_overview.pdf)):
-- `anchored` unless a sample in between has less than 30% of its cells on
-  the majors of the first and the last sample, which marks a clonal sweep;
-- in a sweep, `pairwise` if the anchored intermediate weight is at least 0.5
-  (little drift), otherwise `state_space`.
+An automatic choice among the three was tried and not adopted. It took
+`pairwise` or `state_space` when a time point in between had less than 30% of
+its cells on the majors of the first and the last time point (a clonal sweep),
+and `anchored` otherwise. Its thresholds were tuned on the simulated sets
+above. On the ALFA-K paper benchmark it was then less accurate than
+`anchored`:
+- on missegregation landscapes with 8 passages;
+- on Salehi forecasts.
 
-The choice and both measures are in `fit$diagnostics$series_choice`. On the
-simulated sets it keeps `anchored` on every passaged culture and on 95% of
-the neutral ones, and gives 0.81 on clonal sweeps (`anchored` 0.93). It is
-being checked on the ALFA-K paper benchmark; until then `anchored` stays the
-default.
+So the method is named in `series`
+([series methods](validation/sparse_joint/series_methods/README.md); the
+diagram of the whole fit is in [doc/flowcharts](doc/flowcharts/flow_overview.pdf)).
 
-The first and the last sample must each have a cell in the domain. Some
-samples in between have no cell on the states they count for: no cell on a
+The first and the last time point must each have a cell in the domain. Some
+time points in between have no cell on the states they count for: no cell on a
 major by default, or none in the domain with `"all"`. A clonal sweep can do
 this, when a passage in the middle lies two or more steps from both ends'
 majors.
-- Such a sample is left out with a warning, and the fit is the fit to the
-  other samples. Its depth is free, so under the model it carries no
+- Such a time point is left out with a warning, and the fit is the fit to the
+  other time points. Its depth is free, so under the model it carries no
   information.
-- `fit$diagnostics$dropped_samples` lists the samples left out.
-- `as_alfakR()` still picks its karyotypes from every sample, as alfakR
+- `fit$diagnostics$dropped_samples` lists the time points left out.
+- `as_alfakR()` still picks its karyotypes from every time point, as alfakR
   does.
-- With `"pairwise"` and `"state_space"`, both samples of each consecutive
-  pair need a cell in that pair's own domain. A sample in between without
+- With `"pairwise"` and `"state_space"`, both time points of each consecutive
+  pair need a cell in that pair's own domain. A time point in between without
   one is left out, and its neighbours become a pair. If the first or the last
-  sample has none, its neighbour is left out instead, so the series keeps its
-  span. At worst this gives the two-sample fit of the ends.
+  time point has none, its neighbour is left out instead, so the series keeps its
+  span. At worst this gives the two-time-point fit of the ends.
 - Results on the Salehi trajectories of the ALFA-K paper benchmark (187 with
   more than two passages that the default can fit):
-  - the default left out 103 samples in 53 trajectories;
-  - the pair rule left out one sample in each of 42;
+  - the default left out 103 time points in 53 trajectories;
+  - the pair rule left out one time point in each of 42;
   - no trajectory stops.
 
 ### Outputs in the format of alfakR
@@ -367,11 +368,11 @@ readRDS(file.path(outdir, "landscape.Rds"))   # k, mean, median, sd, fq, nn
 | `alfak2_fit.Rds` | The alfak2 fit itself |
 
 `yi$x` may have more than two columns, as in alfakR; they are fitted as
-described [above](#more-than-two-samples).
+described [above](#more-than-two-time-points).
 
 The scale is alfakR's: net growth rate per unit of time, with the
 count-weighted mean of the major karyotypes set to `log(nb / n0) / dt`, `dt`
-the first interval between samples as in alfakR.
+the first interval between time points as in alfakR.
 `correct_efflux = TRUE` reports birth rates. `minobs` only chooses which
 karyotypes are listed as frequent; the fit uses every cell. The
 cross-validation holds out each frequent karyotype with its neighbours, as in
@@ -381,7 +382,7 @@ R-squared measures how well alfak2 predicts a karyotype it has not seen.
 
 [`doc/alfak2_workflow.md`](doc/alfak2_workflow.md) follows the default pipeline
 step by step, and [`doc/alfak2_method.tex`](doc/alfak2_method.tex) gives the
-mathematics. Design, benchmark results and checks on real samples are recorded in
+mathematics. Design, benchmark results and checks on real data are recorded in
 [`validation/sparse_joint/README.md`](validation/sparse_joint/README.md); the
 benchmark is [`benchmark/sparse_two_timepoint`](benchmark/sparse_two_timepoint/README.md).
 

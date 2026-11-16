@@ -164,7 +164,7 @@ stt_make_dataset <- function(config, truth, scenario, t0, seed, force = FALSE) {
     depth_t0 = scenario$depth_t0, depth_t1 = scenario$depth_t1,
     bottleneck = scenario$bottleneck, shift = scenario$shift, seed = seed, beta = truth$beta,
     counts = counts,
-    # The landscape between the samples, which is what a method estimates.
+    # The landscape between the time points, which is what a method estimates.
     truth = list(centroids = centroids, wavelength = truth$wavelength,
                  abm_delta_t = truth$abm_delta_t,
                  frequency_t0 = population_t0 / sum(population_t0),

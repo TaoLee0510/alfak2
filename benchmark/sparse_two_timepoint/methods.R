@@ -63,7 +63,7 @@ stt_method_alfakR <- function(dataset, nodes, method, work_dir) {
 }
 
 # Current alfak2 two-layer pipeline, configured as in the June 22-chromosome
-# benchmark and the real-sample workflow: local fit on observed karyotypes,
+# benchmark and the real-data workflow: local fit on observed karyotypes,
 # graph Gaussian extrapolation with normalised edge weights. The global graph
 # is the observed karyotypes plus the scored nodes.
 #

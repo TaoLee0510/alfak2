@@ -4,12 +4,12 @@
 #                                                        [--unseal-heldout]
 #
 # For every scoreboard dataset whose simulated trajectory was recorded
-# `horizon` days after the second sample, the sparse joint model is fitted to
-# the two samples and its domain is run forward from the fitted composition
-# at the second sample. The predicted composition is compared, as
+# `horizon` days after the second time point, the sparse joint model is fitted
+# to the two time points and its domain is run forward from the fitted
+# composition at the second time point. The predicted composition is compared, as
 # total-variation distance over the domain, with the true population at that
 # later day. Four forecasts are compared:
-#   no change        the fitted composition at the second sample, unchanged;
+#   no change        the fitted composition at the second time point, unchanged;
 #   no selection     run forward with every karyotype at the baseline rate;
 #   fitted           run forward with the fitted birth rates;
 #   true fitness     run forward with the true rates: the best this forward
@@ -44,7 +44,7 @@ forecast <- function(dataset_id) {
   dataset <- readRDS(stt_dataset_path(config, dataset_id))
   trajectory <- readRDS(stt_truth_path(config, dataset$landscape_id, dataset$patient))
   later <- trajectory$snapshots[[as.character(dataset$t0 + dataset$interval + horizon)]]
-  # The bottleneck scenario leaves the recorded trajectory at the first sample.
+  # The bottleneck scenario leaves the recorded trajectory at the first time point.
   if (is.null(later) || dataset$bottleneck > 0) return(NULL)
   counts <- dataset$counts
   storage.mode(counts) <- "integer"
@@ -98,7 +98,7 @@ names(wide) <- sub("distance.", "", names(wide), fixed = TRUE)
 context <- table[table$forecast == "fitted", c("scenario", "true_change", "domain_mass_later")]
 wide <- merge(wide, context)
 options(width = 200)
-cat(sprintf("Total-variation distance to the true composition %g days after the second sample (%s landscapes, %d datasets)\n",
+cat(sprintf("Total-variation distance to the true composition %g days after the second time point (%s landscapes, %d datasets)\n",
             horizon, split, length(unique(rows$dataset_id))))
 print(format(wide[c("scenario", "no_change", "no_selection", "fitted", "true_fitness", "true_change", "domain_mass_later")],
              digits = 3), row.names = FALSE)

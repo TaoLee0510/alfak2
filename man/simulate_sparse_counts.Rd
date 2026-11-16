@@ -45,7 +45,7 @@ local population.}
 multinomial.}
 
 \item{initial_population}{Number of cells in the simulated population before
-the first sample. Defaults to \code{5 * max(n0, n1)}.}
+the first time point. Defaults to \code{5 * max(n0, n1)}.}
 
 \item{initial_shell_depth}{Initial population support around the founder in
 one-missegregation steps.}

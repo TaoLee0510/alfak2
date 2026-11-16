@@ -16,7 +16,7 @@
   citecolor=blue
 }
 
-\title{\texttt{alfak2}: Inference of Karyotype Fitness Landscapes from Two Sparse Samples}
+\title{\texttt{alfak2}: Inference of Karyotype Fitness Landscapes from Sparse Counts at Two Time Points}
 \author{}
 \date{\today}
 
@@ -32,9 +32,10 @@
 \maketitle
 
 \begin{abstract}
-\texttt{alfak2} estimates fitness landscapes of aneuploid karyotypes from two
-sparse single-cell samples of a cell population. Its default model, the sparse
-joint count model, describes both samples with a single count likelihood
+\texttt{alfak2} estimates fitness landscapes of aneuploid karyotypes from sparse
+single-cell karyotype counts of a cell population at two time points. Its
+default model, the sparse joint count model, describes both time points with
+a single count likelihood
 defined on the abundant karyotypes and all of their one-step neighbours,
 whether observed or not, and integrates cell division and chromosome
 missegregation in closed form. Fitness is inferred from changes in clone
@@ -62,8 +63,8 @@ the human autosomes). The observations are the counts
   y_{0v},\ y_{1v}\qquad (v\in\mathcal{O}),
   \qquad N_0=\sum_v y_{0v},\quad N_1=\sum_v y_{1v},
 \]
-of the observed karyotypes $\mathcal{O}$ in the two samples. Typical samples
-comprise several hundred to several thousand cells. Most observed karyotypes
+of the observed karyotypes $\mathcal{O}$ at the two time points. Typically
+several hundred to several thousand cells are drawn at each time point. Most observed karyotypes
 are represented by one or two cells, and most karyotypes that differ from an
 abundant clone by a single copy-number change, which are the principal targets
 of inference, are not observed at all. The method is designed for this
@@ -90,8 +91,8 @@ $j$, so that $dn/dt=(\operatorname{diag}(d)+M)\,n$.
 
 \subsection{Identifiability}
 
-Each sample is a draw from the composition of the population rather than from
-its absolute size. Consequently, two samples identify differences in fitness
+The cells drawn at each time point reflect the composition of the population
+rather than its absolute size. Consequently, two time points identify differences in fitness
 but not its absolute level: adding a constant to every $d_i$ alters the
 population size but leaves its composition unchanged. Fitness is therefore
 reported relative to the major karyotypes (Section~\ref{sec:sj-relative}).
@@ -106,16 +107,16 @@ and is specified rather than estimated (Section~\ref{sec:sj-rate}).
 Symbol & Definition \\
 \midrule
 $x_i$ & Copy-number vector of karyotype $i$ \\
-$y_{0i},y_{1i}$; $N_0,N_1$ & Counts in the two samples; sample sizes \\
-$T$ & Time between the samples \\
+$y_{0i},y_{1i}$; $N_0,N_1$ & Counts at the two time points; numbers of cells \\
+$T$ & Time between the two time points \\
 $\beta$ & Missegregation probability per chromosome copy and division \\
 $P_{ij}$ & Probability that a daughter of $i$ has karyotype $j$ \\
 $b_i=e^{g_i}$ & Birth (division) rate; $g_i$ its logarithm \\
 $d_i$ & Net growth rate (fitness) \\
 $M_{ji}$ & Mutational flux from $i$ to $j$ \\
 $\mathcal{M}$, $\mathcal{D}$ & Set of major karyotypes; model domain \\
-$\zeta_i$ & Log expected count of $i$ in the first sample \\
-$\theta_1$ & Log ratio of sample depths and common growth \\
+$\zeta_i$ & Log expected count of $i$ at the first time point \\
+$\theta_1$ & Log ratio of the depths at the two time points and common growth \\
 $z_i$, $\gamma$ & Trend covariates and coefficients \\
 $\sigma_d,\sigma_c,\sigma_r$ & Dosage, curvature and residual scales \\
 $h$, $\sigma_\zeta$ & History length and spread of the balance prior \\
@@ -129,24 +130,23 @@ $\rho_i$, $\tilde s_i$ & Relative fitness and its calibrated standard deviation 
 \label{sec:sparse-joint}
 
 Figure~\ref{fig:flow-overview} gives the path of a fit as a flowchart and
-Figure~\ref{fig:flow-core} the steps of the two-sample fit; Section~\ref{sec:procedure}
+Figure~\ref{fig:flow-core} the steps of the two-time-point fit; Section~\ref{sec:procedure}
 lists the steps in order.
 
 \begin{figure}[p]
 \centering
 \includegraphics[width=\textwidth,height=0.86\textheight,keepaspectratio]{flowcharts/flow_overview.pdf}
 \caption{Path of \texttt{fit\_sparse\_joint()}; yellow nodes are the
-decisions of the code. \texttt{series = "auto"} is drawn as the entry point
-for more than two samples; a method named in \texttt{series} skips the choice
-(dashed tags), and \texttt{"anchored"} is the default of the current code.
-Every path ends in the common core (Figure~\ref{fig:flow-core}).}
+decisions of the code. With more than two time points, \texttt{series} names
+the method; \texttt{"anchored"} is the default. Every path ends in the common
+core (Figure~\ref{fig:flow-core}).}
 \label{fig:flow-overview}
 \end{figure}
 
 \begin{figure}[p]
 \centering
 \includegraphics[width=\textwidth,height=0.86\textheight,keepaspectratio]{flowcharts/flow_core.pdf}
-\caption{The two-sample fit (template \texttt{pair}). Steps 4--7 are
+\caption{The two-time-point fit (template \texttt{pair}). Steps 4--7 are
 repeated for every candidate history $h$, and the candidate with the lowest
 objective is kept. The anchored, pairwise and state-space methods replace the
 domain, the priors and the likelihood
@@ -160,7 +160,7 @@ other steps.}
 
 \paragraph{Design goals.}
 The input is fixed: counts at two time points, sparse in the sense described
-below; the method does not require further samples. Within this setting the
+below; the method does not require further time points. Within this setting the
 estimates are required to be accurate in two respects. \emph{Numerical
 accuracy}: the estimated relative fitness of each karyotype, observed or not,
 should be close to its true value. \emph{Direction accuracy}: for two
@@ -174,12 +174,12 @@ Section~\ref{sec:validation}, together with the overall similarity of
 estimated and true fitness.
 
 \paragraph{Sources of information.}
-Two cross-sectional samples provide three sources of information about
+Counts at two time points provide three sources of information about
 fitness.
 
 \begin{enumerate}
 \item \textbf{Frequency change of abundant clones.} A clone observed in many
-cells in both samples changes its frequency by a factor
+cells at both time points changes its frequency by a factor
 $\exp\{(d_i-\bar d)T\}$, which determines its fitness relative to the other
 clones.
 
@@ -192,42 +192,42 @@ approaches
   \label{eq:balance-limit}
 \end{equation}
 the mutation--selection balance. At balance, the frequency of $j$ tracks that
-of $p$, so that its change between the samples is uninformative about $d_j$,
+of $p$, so that its change between the two time points is uninformative about $d_j$,
 whereas its level is informative.
 
 \item \textbf{Absence of neighbouring karyotypes.} A neighbour of an abundant
-clone that is not observed in a sample of several hundred cells has an
+clone that is not observed among several hundred cells drawn has an
 abundance, and hence a fitness deficit, that is constrained by
 (\ref{eq:balance-limit}). Zero counts therefore constitute evidence.
 \end{enumerate}
 
 The model is constructed to use all three sources. A single count likelihood
-covers both samples, so that each zero count is weighted according to the size
-of its sample. The domain includes every one-step neighbour of an abundant
+covers both time points, so that each zero count is weighted according to the
+number of cells drawn at its time point. The domain includes every one-step neighbour of an abundant
 clone, whether observed or not, so that absences enter the likelihood.
 Mutational influx is integrated over the entire interval rather than applied
 once after growth, which links the abundance of a rare karyotype to its
 fitness. The domain is restricted to the abundant clones and their
 neighbours, which keeps the Hessian of the latent variables sparse for
 domains of several thousand states. Fitness is reported relative to the
-abundant clones, which is the quantity that two samples identify.
+abundant clones, which is the quantity that two time points identify.
 
 \paragraph{Terminology.}
-The model is sparse in two respects. It is designed for sparse data: two
-samples of a few hundred to a few thousand cells in a karyotype space in which
+The model is sparse in two respects. It is designed for sparse data: a few
+hundred to a few thousand cells at each of two time points, in a karyotype space in which
 each clone has $2p=44$ one-step and $2p^2=968$ two-step neighbours, so that
 most karyotypes whose fitness is sought are not observed, even when the
 observed karyotypes themselves are well sampled. Its structure is sparse as
 well: the likelihood is restricted to the major karyotypes and their one-step
 neighbours, and the first-order dynamics couple each state only to its
 neighbours, so that the Hessian of the latent variables is sparse. The model
-is joint in that a single likelihood covers both samples and all states, and
+is joint in that a single likelihood covers both time points and all states, and
 it models counts rather than frequencies.
 
 \subsection{Major Karyotypes and Model Domain}
 \label{sec:sj-domain}
 
-The share of karyotype $v$ is its larger frequency over the two samples,
+The share of karyotype $v$ is its larger frequency over the two time points,
 \begin{equation}
   \phi_v=\max\Bigl(\frac{y_{0v}}{N_0},\frac{y_{1v}}{N_1}\Bigr).
   \label{eq:share}
@@ -238,10 +238,10 @@ A karyotype is classified as \emph{major} if
   \qquad \phi_{\min}=0.01,\ c_{\min}=3 .
   \label{eq:major}
 \end{equation}
-The share criterion adapts the classification to the sample size, since a
-single cell in a sample of 3000 may belong to the mutational cloud of a clone.
-The count criterion is also required: if a single cell sufficed, every cell of
-a small sample would lie on a major karyotype, and every unobserved neighbour
+The share criterion adapts the classification to the number of cells, since a
+single cell among 3000 may belong to the mutational cloud of a clone.
+The count criterion is also required: if a single cell sufficed and few cells
+were drawn, every cell would lie on a major karyotype, and every unobserved neighbour
 would appear strongly deleterious. If no karyotype satisfies
 (\ref{eq:major}), the most abundant karyotype is designated major. The model
 domain is
@@ -305,7 +305,7 @@ and its one-step neighbours, the Hessian of the latent variables is sparse.
 \subsection{Observation Model}
 \label{sec:sj-obs}
 
-With $n_i(0)=e^{\zeta_i}$ the expected count in the first sample, the counts
+With $n_i(0)=e^{\zeta_i}$ the expected count at the first time point, the counts
 are modelled as
 \begin{equation}
   y_{0i}\sim\operatorname{Poisson}\bigl(e^{\zeta_i}\bigr),
@@ -317,10 +317,10 @@ are modelled as
   \label{eq:poisson}
 \end{equation}
 where $r$ is the most abundant karyotype and $\theta_1$ absorbs the ratio of
-sample sizes and the common growth of the population. Conditional on the two
-sample totals, independent Poisson counts are multinomially distributed with
+the numbers of cells and the common growth of the population. Conditional on the
+totals at the two time points, independent Poisson counts are multinomially distributed with
 probabilities proportional to the intensities; (\ref{eq:poisson}) is therefore
-the Poisson representation of two multinomial samples. It is preferred
+the Poisson representation of two multinomial draws. It is preferred
 because a multinomial normalisation over the domain would couple every pair
 of states. The likelihood is formulated in counts rather than frequencies:
 frequencies of $1/500$ and $10/5000$ are equal, but the latter carries ten
@@ -345,12 +345,12 @@ prior,
   \label{eq:free-prior}
 \end{equation}
 with $f_0=10^{-5}$ and $\sigma_0=3$. The prior is essentially uninformative
-for karyotypes observed in the first sample, centred on the later frequency
-for karyotypes observed only in the second sample, and concentrated at low
+for karyotypes observed at the first time point, centred on the later frequency
+for karyotypes observed only at the second time point, and concentrated at low
 frequency for karyotypes not observed. It is specified on the frequency scale
 rather than the count scale, because a prior on counts would assign the
 several thousand unobserved karyotypes of a domain a substantial share of a
-small sample.
+few hundred cells.
 
 \paragraph{Mutation--selection balance (default).}
 With \texttt{initial\_state = "balance"}, the major karyotypes retain the
@@ -372,7 +372,7 @@ and the prior
 \end{equation}
 For a long history and a less fit neighbour,
 $e^{-d_ph}\varphi_1(d_j,d_p;h)\to1/(d_p-d_j)$, and (\ref{eq:balance-start})
-reduces to (\ref{eq:balance-limit}). The count of $j$ in the first sample
+reduces to (\ref{eq:balance-limit}). The count of $j$ at the first time point
 thereby also informs $d_j$. By default the history $h$ is chosen among $T$ and
 30, 100, 300, 1000 and 3000 divisions at $b_0$ that are longer than $T$: the
 model is fitted at each, and the fit with the highest Laplace marginal
@@ -381,11 +381,11 @@ default $\sigma_\zeta=1$ permits departures from balance by a factor of
 approximately $e$; results were insensitive to this choice (values of 0.3, 0.5
 and 1 yielded errors within 0.003 of one another).
 
-This prior assumes that fitness before the first sample was similar to
-fitness between the samples. In simulations in which the landscape changed at
-the first sample, as under the onset of treatment, it nevertheless remained
+This prior assumes that fitness before the first time point was similar to
+fitness between the time points. In simulations in which the landscape changed at
+the first time point, as under the onset of treatment, it nevertheless remained
 more accurate than independent initial abundances. With $h=T$, the default up
-to alfak2 8327282, it was less accurate when the samples were separated by
+to alfak2 8327282, it was less accurate when the time points were separated by
 approximately 30 divisions or by a few weeks, because the mutational cloud
 then has too little time to form and the neighbours of the majors are held far
 below their observed abundance; the candidate histories address this case
@@ -453,8 +453,8 @@ become degenerate outside them. If the outer optimisation fails, the
 prior-centred values of $\psi$ are used and the failure is recorded.
 
 The outer optimisation does not by itself establish an optimum. Where a
-karyotype has very few cells, the inner problem can be nearly flat: a count in
-the second sample may be explained almost equally well by the karyotype having
+karyotype has very few cells, the inner problem can be nearly flat: a count at
+the second time point may be explained almost equally well by the karyotype having
 been present and unsampled or by its neighbours having produced it during the
 interval. $H(\psi)$ is then nearly singular, $\tfrac12\log\det H$ becomes
 large and negative without any support in the data, the inner mode depends on
@@ -537,7 +537,7 @@ benchmark; an additional multiplicative factor on $s_i$ was estimated to be
 close to zero and omitted. On landscapes not used for estimation, the nominal
 95\% intervals covered between 89\% and 100\% of true values, depending on
 wavelength and distance (Section~\ref{sec:validation}). Both $\tilde s_i$ and
-$s_i$ are returned. For karyotypes seen in neither sample, $\kappa$ is 1.1:
+$s_i$ are returned. For karyotypes seen at neither time point, $\kappa$ is 1.1:
 zero counts do not identify how far below the majors they lie.
 
 Since $\tilde s_i\ge\kappa|\rho_i|$, $|\rho_i|/\tilde s_i\le1/\kappa$, which is
@@ -576,7 +576,7 @@ karyotypes than an unobserved karyotype at the same distance. The calibration
 \label{sec:sj-rate}
 
 The birth rate enters (\ref{eq:ode}) through $M$, independently of fitness
-differences, but is only weakly identified by two samples; when estimated
+differences, but is only weakly identified by two time points; when estimated
 freely, it drifts upwards and inflates all fitness differences. It is
 therefore specified as $b_0$ in (\ref{eq:coef-prior}). Its effect can be
 characterised. The fitness difference between two well-sampled clones is
@@ -593,17 +593,18 @@ unaffected. In simulations, a rate four to ten times too low still yielded
 more accurate predictions than the null predictor that assumes no fitness
 differences (Section~\ref{sec:validation}), whereas a rate four times too high
 yielded less accurate ones. Neither the marginal
-likelihood of a single sample nor that of a cohort identified the rate.
+likelihood of a single dataset nor that of a cohort identified the rate.
 Accordingly, \texttt{fit\_sparse\_joint\_rates()} fits the model at several
 rates across a plausible range and reports relative fitness at the
 \emph{lowest} rate, an interval covering all fitted rates, and fitness per
 division, $\rho_i/b_0$, over the range.
 
-\subsection{Joint Analysis of Multiple Samples}
+\subsection{Joint Analysis of Multiple Datasets}
 \label{sec:sj-cohort}
 
-\texttt{fit\_sparse\_joint\_cohort()} analyses several samples jointly. Each
-sample $s$ retains its own domain $\mathcal{D}_s$, initial abundances, depth
+\texttt{fit\_sparse\_joint\_cohort()} analyses several datasets jointly, for
+instance one per patient or culture, each with two time points. Each
+dataset $s$ retains its own domain $\mathcal{D}_s$, initial abundances, depth
 ratio and observation model. A karyotype $v$ present in any domain has a
 shared log birth rate,
 \begin{equation}
@@ -612,24 +613,24 @@ shared log birth rate,
   g_{sv}\sim\Normal\bigl(m_v,\ \tau^2\bigr),\quad v\in\mathcal{D}_s,
   \label{eq:cohort}
 \end{equation}
-where $S_v$ is the set of samples whose domain contains $v$, and the
-between-sample scale $\tau$ is estimated together with the other scales
+where $S_v$ is the set of datasets whose domain contains $v$, and the
+between-dataset scale $\tau$ is estimated together with the other scales
 (\texttt{sharing = "partial"}); alternatively, $g_{sv}=m_v$
-(\texttt{sharing = "full"}). A karyotype that is abundant in one sample and an
-unobserved neighbour in another is thus informed by both. With one sample and
-full sharing, the model reduces to the single-sample model.
+(\texttt{sharing = "full"}). A karyotype that is abundant in one dataset and an
+unobserved neighbour in another is thus informed by both. With one dataset and
+full sharing, the model reduces to the single-dataset model.
 
-The trend is specified either per sample or jointly. In the per-sample
-specification, $z_{sv}$ is centred on the mean karyotype of sample $s$, its
-distance term is measured to the major karyotypes of that sample, and each
+The trend is specified either per dataset or jointly. In the per-dataset
+specification, $z_{sv}$ is centred on the mean karyotype of dataset $s$, its
+distance term is measured to the major karyotypes of that dataset, and each
 $\gamma_s$ has prior (\ref{eq:coef-prior}). In the joint specification,
-$\gamma_s=\gamma$ for all samples, with covariates centred on the average of
-the sample means and distances measured to the major karyotypes of all
-samples. Both specifications share the same hyperparameters, and by default
+$\gamma_s=\gamma$ for all datasets, with covariates centred on the average of
+the dataset means and distances measured to the major karyotypes of all
+datasets. Both specifications share the same hyperparameters, and by default
 the one with the higher Laplace marginal likelihood is selected. In simulated
-cohorts, a joint trend improved estimates for samples from a common landscape
-but substantially degraded them for samples from different landscapes; the
-marginal likelihood selected per-sample trends for 11 of 12 cohorts drawn
+cohorts, a joint trend improved estimates for datasets from a common landscape
+but substantially degraded them for datasets from different landscapes; the
+marginal likelihood selected per-dataset trends for 11 of 12 cohorts drawn
 from different landscapes. Cohorts use independent initial abundances by
 default. Under the balance prior, the outer optimisation failed at the
 prior-centred hyperparameters for 2 of 12 simulated development cohorts,
@@ -637,12 +638,12 @@ leaving no marginal likelihood by which to select the trend; for the
 remaining 10, it reduced the error at distances 1 and 2 relative to
 independent initial abundances.
 
-\subsection{More Than Two Samples}
+\subsection{More Than Two Time Points}
 \label{sec:sj-series}
 
 One population sampled at times $0=t_0<t_1<\dots<t_K$ is fitted with the same
 latent variables and (\ref{eq:forward}) evaluated at every $t_k$, started at
-the first sample:
+the first time point:
 \begin{equation}
   y_{ki}\sim\operatorname{Poisson}\bigl(\lambda_{ki}\bigr),
   \qquad
@@ -650,43 +651,43 @@ the first sample:
   \qquad k=1,\dots,K,
   \label{eq:series}
 \end{equation}
-with one depth offset $\theta_k$ per later sample. Fitness is constant over
-the series, the dynamics are not restarted at intermediate samples, and the
+with one depth offset $\theta_k$ per later time point. Fitness is constant over
+the series, the dynamics are not restarted at intermediate time points, and the
 history of the balance prior is at least $t_K$. The initial-abundance prior of
-a karyotype not seen in the first sample is centred on its frequency at the
-earliest sample in which it is seen. With two samples the model is
+a karyotype not seen at the first time point is centred on its frequency at the
+earliest time point at which it is seen. With two time points the model is
 (\ref{eq:poisson}).
 
-The samples between the first and the last are used, by default, for the
+The time points between the first and the last are used, by default, for the
 major karyotypes only, and the majors and the domain are chosen from the first
-and the last sample. Their terms in (\ref{eq:series}) carry the weight
+and the last time point. Their terms in (\ref{eq:series}) carry the weight
 $\omega=1/\max(1,\hat\phi)$, where $\hat\phi$ is the mean Pearson statistic
 of the majors' intermediate counts about a first fit at $\omega=1$ (shortest
-history), with expectations scaled to each sample's total over the majors. Two
-effects motivate this. A clone that arises between samples, grows by chance
-and is lost again, or is thinned by a passage, is seen in several
-intermediate samples; the deterministic model reads each of these counts as
-independent evidence of high fitness. Choosing majors from every sample also
+history), with expectations scaled to the total over the majors at each time point. Two
+effects motivate this. A clone that arises between time points, grows by chance
+and is lost again, or is thinned by a passage, is seen at several
+intermediate time points; the deterministic model reads each of these counts as
+independent evidence of high fitness. Choosing majors from every time point also
 makes such transient clones majors and widens the domain around them. The
 weight $\omega$ is the quasi-likelihood weight of an overdispersed count: with
-little drift $\hat\phi\approx1$, with strong drift the intermediate samples
+little drift $\hat\phi\approx1$, with strong drift the intermediate time points
 contribute little. On simulated passaged cultures (12 landscapes, bottlenecks
-$2\times10^2$, $2\times10^3$ and $2\times10^4$ cells, 4 or 8 samples 6 or 60
+$2\times10^2$, $2\times10^3$ and $2\times10^4$ cells, 4 or 8 time points 6 or 60
 days apart, 200 or 1000 cells each) this was as accurate as the first and the
-last sample alone (median RMSE ratios 0.97--1.01; within 3\% in 21 of 24
-settings); using every sample for every karyotype gained 4--6\% at the
+last time point alone (median RMSE ratios 0.97--1.01; within 3\% in 21 of 24
+settings); using every time point for every karyotype gained 4--6\% at the
 largest bottleneck and lost up to a factor of 2.4 at the smallest.
 
-The offsets $\theta_k$ have a flat prior. An intermediate sample $k$ with no
+The offsets $\theta_k$ have a flat prior. An intermediate time point $k$ with no
 count on the states it is used for (the majors by default; the domain when
-every sample is used for every karyotype) contributes
+every time point is used for every karyotype) contributes
 $-\mathrm{e}^{\theta_k}\sum_i n_i(t_k)\,\mathrm{e}^{-d_rt_k}$ to the
 log-likelihood. This is largest as $\theta_k\to-\infty$, where the term
-vanishes, and its integral over $\theta_k$ diverges. Such a sample carries no
+vanishes, and its integral over $\theta_k$ diverges. Such a time point carries no
 information about the landscape. It is left out, which is that limit, and
-the fit is the fit to the other samples. A clonal sweep produces such a
-sample when the population in the middle lies two or more steps from the
-majors of both ends. The first and the last sample must each have a count in
+the fit is the fit to the other time points. A clonal sweep produces such a
+time point when the population in the middle lies two or more steps from the
+majors of both ends. The first and the last time point must each have a count in
 the domain. Figure~\ref{fig:flow-anchored} shows the steps of this method.
 
 \begin{figure}[htbp]
@@ -694,34 +695,34 @@ the domain. Figure~\ref{fig:flow-anchored} shows the steps of this method.
 \includegraphics[width=\textwidth,height=0.8\textheight,keepaspectratio]{flowcharts/flow_anchored.pdf}
 \caption{The anchored method (\texttt{series = "anchored"}, the default of the
 current code). The majors and the domain come from the first and the last
-sample; a sample in between with no cell on the majors is left out; the
-samples in between count for the majors only, with the weight $\omega$ from a
-first fit; one trajectory runs from the first sample to every later one
+time point; a time point in between with no cell on the majors is left out; the
+time points in between count for the majors only, with the weight $\omega$ from a
+first fit; one trajectory runs from the first time point to every later one
 (\ref{eq:series}). The remaining steps are those of
 Figure~\ref{fig:flow-core}.}
 \label{fig:flow-anchored}
 \end{figure}
 
-\paragraph{Pairs of consecutive samples.}
-That such a sample carries no information follows from the design, not from
-the data. Two further methods model every pair of consecutive samples
+\paragraph{Pairs of consecutive time points.}
+That such a time point carries no information follows from the design, not from
+the data. Two further methods model every pair of consecutive time points
 $(t_{k-1},t_k)$, $k=1,\dots,K$, with its own majors $\mathcal{M}_k$ and domain
-$\mathcal{D}_k$, chosen from those two samples by (\ref{eq:share})--(\ref{eq:domain}).
+$\mathcal{D}_k$, chosen from those two time points by (\ref{eq:share})--(\ref{eq:domain}).
 The states are $\bigcup_k\mathcal{D}_k$. The landscape, i.e.\ the birth rates
 and the trend, is the same for all pairs, and the trend is centred on the
-count-weighted mean karyotype over all samples. Write $\Delta_k=t_k-t_{k-1}$, and
+count-weighted mean karyotype over all time points. Write $\Delta_k=t_k-t_{k-1}$, and
 $n^{(k)}(\Delta;z)$ for (\ref{eq:forward}) over $\Delta$ within $\mathcal{D}_k$ from
 initial log abundances $z$. With $K=1$ both methods are (\ref{eq:poisson}).
 
-Both samples of a pair need a count in $\mathcal{D}_k$. Without one, the
-pair's depth offset, or the initial abundances of its domain, are unbounded
-by that sample, for the reason given above. A sample in between without a
-count is left out, and its neighbours become a pair. If the first or the last
-sample has none, its neighbour is left out instead. This repeats until every
-pair is covered. The first and the last sample define the span, as in the
+Both time points of a pair need a count in $\mathcal{D}_k$. Without one, the
+pair's depth offset, or the initial abundances of its domain, are not bounded
+by the data at that time point, for the reason given above. A time point in
+between without a count is left out, and its neighbours become a pair. If the
+first or the last time point has none, its neighbour is left out instead. This
+repeats until every pair is covered. The first and the last time point define the span, as in the
 anchored model. At worst they remain alone, which is (\ref{eq:poisson}).
 
-In the \emph{pairwise} method each pair is fitted as two samples are, with
+In the \emph{pairwise} method each pair is fitted as two time points are, with
 initial abundances $\zeta_{k}$ of its own:
 \begin{equation}
   y_{k-1,i}\sim\operatorname{Poisson}\bigl(e^{\zeta_{ki}}\bigr),
@@ -732,7 +733,7 @@ initial abundances $\zeta_{k}$ of its own:
 \end{equation}
 The non-majors of $\mathcal{D}_k$ have the balance prior
 (\ref{eq:balance-prior}), fed by the pair's majors, over the history plus the
-population's age $t_{k-1}$ at the pair's first sample. A sample in between is
+population's age $t_{k-1}$ at the pair's first time point. A time point in between is
 the end of one pair and the start of the next, so it counts twice. Given the
 centre of the cohort's trend, this is the cohort model
 (Section~\ref{sec:sj-cohort}) of the pairs with every birth rate and the trend
@@ -742,18 +743,18 @@ shows the steps of this method.
 \begin{figure}[htbp]
 \centering
 \includegraphics[width=\textwidth,height=0.7\textheight,keepaspectratio]{flowcharts/flow_pairwise.pdf}
-\caption{Method A, pairwise (\texttt{series = "pairwise"}). Samples are left
-out until both samples of every pair of consecutive samples have a cell in
-that pair's domain; each pair is then fitted as two samples are
+\caption{Method A, pairwise (\texttt{series = "pairwise"}). Time points are left
+out until both time points of every pair of consecutive time points have a cell in
+that pair's domain; each pair is then fitted as two time points are
 (\ref{eq:pairwise}), with its own initial abundances and depth, and all pairs
 share one landscape. The remaining steps are those of
 Figure~\ref{fig:flow-core}.}
 \label{fig:flow-pairwise}
 \end{figure}
 
-In the \emph{state-space} method every sample has latent log intensities
-$z_k$, with $z_0=\zeta$. Each sample is observed once,
-$y_{ki}\sim\operatorname{Poisson}(e^{z_{ki}})$. From one sample to the next,
+In the \emph{state-space} method every time point has latent log intensities
+$z_k$, with $z_0=\zeta$. Each time point is observed once,
+$y_{ki}\sim\operatorname{Poisson}(e^{z_{ki}})$. From one time point to the next,
 \begin{equation}
   z_{ki}\sim\mathcal{N}\Bigl(\log n^{(k)}_i(\Delta_k;z_{k-1})-d_r\Delta_k+\theta_k,\;
   \frac{c\,v_{ki}}{c+v_{ki}}\Bigr),
@@ -763,13 +764,13 @@ $y_{ki}\sim\operatorname{Poisson}(e^{z_{ki}})$. From one sample to the next,
   \label{eq:state-space}
 \end{equation}
 where $f_{ki}=\tfrac12\bigl(y_{k-1,i}/N_{k-1}+y_{ki}/N_k\bigr)+1/(N_{k-1}+N_k)$ is the state's
-mean share at the two samples plus half a cell. The variance is that of
+mean share at the two time points plus half a cell. The variance is that of
 neutral drift in frequency, on the log scale, and it is capped smoothly. The
 drift $\sigma^2_{\mathrm{drift}}$ is a fifth scale of the outer optimisation.
 Its prior is log-normal with median $10^{-4}$ per day and standard deviation
 $2.5$ on the log scale, and its bounds are $10^{-9}$ and $1$. As
 $\sigma^2_{\mathrm{drift}}\to0$ the method becomes the anchored model with
-every sample used for every karyotype, except that the closed form composed
+every time point used for every karyotype, except that the closed form composed
 over the intervals keeps part of the second order in $M$. At
 $\sigma^2_{\mathrm{drift}}=10^{-8}$ the two fits correlate at $0.997$. The
 expected information (\ref{eq:laplace}) is taken with the transitions'
@@ -780,8 +781,8 @@ steps of this method.
 \centering
 \includegraphics[width=\textwidth,height=0.75\textheight,keepaspectratio]{flowcharts/flow_state_space.pdf}
 \caption{Method B, state space (\texttt{series = "state\_space"}). The pairs'
-domains and the samples left out are those of the pairwise method; every
-sample has latent log abundances, linked from one sample to the next by the
+domains and the time points left out are those of the pairwise method; every
+time point has latent log abundances, linked from one time point to the next by the
 dynamics plus drift (\ref{eq:state-space}), and is observed once. The drift is
 a fifth scale. The remaining steps are those of Figure~\ref{fig:flow-core}.}
 \label{fig:flow-state-space}
@@ -789,9 +790,9 @@ a fifth scale. The remaining steps are those of Figure~\ref{fig:flow-core}.}
 
 On the simulations of the anchored model, and on clonal sweeps and neutral
 cultures (validation/sparse\_joint/series\_methods), the pairwise method was
-up to 1.8 times less accurate than the first and the last sample alone with
+up to 1.8 times less accurate than the first and the last time point alone with
 bottlenecks of 200 cells, and 1.1--2.0 times on neutral cultures. Restarting
-from the observed sample at every pair reads passaging drift within a pair as
+from the observed counts at every pair reads passaging drift within a pair as
 selection. The state-space method was within 0.93--1.02 on passaged cultures
 and up to 1.2 times less accurate one and two steps from the observed
 karyotypes of neutral cultures. In clonal sweeps both were more accurate
@@ -799,30 +800,30 @@ than the anchored model, with median RMSE ratios of 0.68--0.85 and 0.79--0.82,
 against 0.89--0.94. The state-space method takes 3--12 times as long as the
 anchored model. The anchored model is the default.
 
-\paragraph{Automatic choice.}
-With \texttt{series = "auto"} the method is chosen from the data
-(Figure~\ref{fig:flow-overview}). Let $s$ be the smallest share, over the
-samples between the first and the last, of a sample's cells that lie on the
-majors of the first and the last sample. A clonal sweep leaves such a sample
-off the majors of both ends, and the anchored model then misses the population
-in between. If $s\ge0.3$, the anchored model is fitted. Otherwise the
-intermediate weight $\omega$ of the anchored model is computed as above, or
-taken from \texttt{intermediate\_weight}. The pairwise method is fitted if
-$\omega\ge0.5$, i.e.\ with little passaging drift, or if no sample in between
-is left to measure it; the state-space method is fitted otherwise. The choice
-and both measures are returned in \texttt{diagnostics\$series\_choice}. With
-two samples every method gives the two-sample fit. The thresholds were chosen
-on the simulated sets of validation/sparse\_joint/series\_methods
-(\texttt{auto\_eval.R}) by a criterion fixed before any rule was scored: pass
-the gate on passaged cultures, add at most 0.01 to the anchored model's ratio
-on neutral cultures, and among those rules give the lowest ratio on clonal
-sweeps. The rule kept the anchored model on every passaged culture and on 95\%
-of the neutral ones, and gave a median ratio of 0.81 on clonal sweeps (anchored
-0.93; the best fitted method for each dataset, 0.74). A share threshold above
-0.3 left the anchored model on neutral cultures and added errors there. The
-weight threshold is less certain: 0.8 gave 0.82. The rule is being checked on
-the ALFA-K paper benchmark; until that check, \texttt{"anchored"} remains the
-default and the automatic choice must be requested.
+\paragraph{An automatic choice, tried and not adopted.}
+A rule that chose the method from the data was tuned on the simulated sets
+(\texttt{auto\_eval.R}). Let $s$ be the smallest share, over the time points
+between the first and the last, of the cells at a time point that lie on the
+majors of the first and the last time point. A clonal sweep lowers $s$. The
+rule fitted the anchored model if $s\ge0.3$. Otherwise it fitted the pairwise
+method if the anchored intermediate weight was $\omega\ge0.5$, and the
+state-space method if not. The thresholds were chosen by a criterion fixed
+before any rule was scored. On the simulated sets the rule kept the anchored
+model on every passaged culture and on 95\% of the neutral ones, and gave a
+median RMSE ratio of 0.81 on clonal sweeps, against 0.93 for the anchored
+model. The ALFA-K paper benchmark was the held-out check, with margins also
+fixed in advance, and there the rule was less accurate than the anchored
+model in three of 13 tests:
+\begin{itemize}
+\item on missegregation landscapes with windows of eight passages, the
+  correlation with the true fitness was 0.804 against 0.815;
+\item on Salehi forecasts the Wasserstein score was 0.506 against 0.541;
+\item on Salehi forecasts after a sweep the Euclidean score was 0.417 against
+  0.438, which is one pair of 48.
+\end{itemize}
+Both other methods forecast the Salehi data less well than the anchored model.
+The rule is therefore not part of the package: the method is named in
+\texttt{series}, and \texttt{"anchored"} is the default.
 
 \subsection{Export in the \texttt{alfakR} Output Format}
 \label{sec:sj-alfakR}
@@ -852,7 +853,7 @@ numbers at least one, in the order used by \texttt{alfakR}. The value of
 where $N_0^{\mathrm{pop}}$ and $N_b$ are the population sizes \texttt{n0} and
 \texttt{nb} of \texttt{alfakR}; the mean fitness of the major karyotypes is
 thereby set to the population growth rate assumed by \texttt{alfakR}. With
-more than two samples $T$ is the first interval $t_1$, as in \texttt{alfakR}.
+more than two time points $T$ is the first interval $t_1$, as in \texttt{alfakR}.
 
 \paragraph{Posterior draws.}
 In place of bootstrap replicates, $B$ draws are generated for every
@@ -918,7 +919,7 @@ Kriging interpolates first-stage estimates.
 estimates the landscape in four stages.
 
 \paragraph{Frequent karyotypes.}
-Karyotypes with at least \texttt{minobs} cells across all samples, $F$, evolve
+Karyotypes with at least \texttt{minobs} cells across all time points, $F$, evolve
 under selection without mutation among themselves,
 \begin{equation}
   x_i(t)=\frac{x_{0i}e^{f_it}}{\sum_{k\in F}x_{0k}e^{f_kt}},\qquad
@@ -1031,19 +1032,19 @@ provided in \texttt{doc/alfak2\_workflow.md}.
 
 Figure~\ref{fig:flow-overview} shows how \texttt{fit\_sparse\_joint()}
 proceeds from the input to the fit object, and how it chooses between the
-two-sample fit and the three methods for more than two samples
+two-time-point fit and the three methods for more than two time points
 (Section~\ref{sec:sj-series}): at each decision node it states the rule the
-code applies. Figure~\ref{fig:flow-core} details the two-sample fit, whose
+code applies. Figure~\ref{fig:flow-core} details the two-time-point fit, whose
 steps every path shares, and Figures~\ref{fig:flow-anchored},
 \ref{fig:flow-pairwise} and~\ref{fig:flow-state-space} detail the anchored,
 pairwise and state-space methods. The sources of the charts are in
 \texttt{doc/flowcharts} (\texttt{build.sh} rebuilds them). The steps below are
-those of the two-sample fit.
+those of the two-time-point fit.
 
 \paragraph{Model fitting.}
 \begin{enumerate}
 \item \textbf{Input.} A matrix of integer counts indexed by karyotype, with
-one column per sample (two, or more in time order;
+one column per time point (two, or more in time order;
 Section~\ref{sec:sj-series}); rows without cells are removed.
 $T=\texttt{dt}$ and $\beta=\texttt{beta}$; copy numbers must lie within
 $[c_{\min},c_{\max}]$.
@@ -1085,7 +1086,7 @@ performed.
 \item \textbf{Scale}, (\ref{eq:alfakR-scale}).
 \item \textbf{Posterior draws} in place of bootstrap replicates
 (Section~\ref{sec:sj-alfakR}).
-\item \textbf{Output objects}: the posterior samples
+\item \textbf{Output objects}: the posterior draws
 (\texttt{landscape\_posterior\_samples.Rds}), the landscape summary
 (\texttt{landscape.Rds}) and the replicate estimates
 (\texttt{bootstrap\_res.Rds}).
@@ -1118,10 +1119,10 @@ Argument & Default & Definition \\
 history lengths $h$; the one of highest marginal likelihood is kept \\
 \texttt{balance\_sd} & 1 & $\sigma_\zeta$ \\
 \texttt{calibration} & $a=0.009$, $\kappa=0.6$ (1.1 unobserved) & Constants in (\ref{eq:calibration}) \\
-\texttt{series} & \texttt{"anchored"} & Method for more than two samples:
-\texttt{"anchored"}, \texttt{"pairwise"}, \texttt{"state\_space"} or
-\texttt{"auto"} (Figure~\ref{fig:flow-overview}) \\
-\texttt{intermediate} & \texttt{"majors"} & Use of the samples in between
+\texttt{series} & \texttt{"anchored"} & Method for more than two time points:
+\texttt{"anchored"}, \texttt{"pairwise"} or \texttt{"state\_space"}
+(Figure~\ref{fig:flow-overview}) \\
+\texttt{intermediate} & \texttt{"majors"} & Use of the time points in between
 by the anchored model \\
 \texttt{intermediate\_weight} & from a first fit & $\omega$; Section~\ref{sec:sj-series} \\
 \bottomrule
@@ -1150,7 +1151,7 @@ Pipeline & Stages & Computation \\
 \texttt{sparse\_joint} (default) & A single count model on the major
 karyotypes and their neighbours, with trend-based prediction beyond them
 (Section~\ref{sec:sparse-joint}) & TMB model \texttt{sparse\_joint};
-\texttt{sparse\_joint\_cohort} for multiple samples \\
+\texttt{sparse\_joint\_cohort} for multiple datasets \\
 \texttt{two\_layer} & A local hierarchical count model followed by one of nine
 second-layer methods (Supplement~\ref{sec:s-two-layer}) & Local layer: TMB
 model \texttt{local\_model}; second layer: R and RcppEigen \\
@@ -1178,11 +1179,11 @@ separately in Rcpp.
 \begin{sloppypar}
 \texttt{fit\_sparse\_joint\_rates()} fits the model across a range of birth
 rates (Section~\ref{sec:sj-rate}), and \texttt{fit\_sparse\_joint\_cohort()}
-analyses multiple samples jointly (Section~\ref{sec:sj-cohort}). A simulated
-sample with 22 chromosomes required between a few seconds and approximately
-four minutes; a GBM sample fitted at three birth rates required a median of
+analyses multiple datasets jointly (Section~\ref{sec:sj-cohort}). A simulated
+dataset with 22 chromosomes required between a few seconds and approximately
+four minutes; a GBM dataset fitted at three birth rates required a median of
 149 seconds; and \texttt{alfak\_compat()} with cross-validation required
-approximately eight minutes for a GBM sample with 226 karyotypes.
+approximately eight minutes for a GBM dataset with 226 karyotypes.
 \end{sloppypar}
 
 \section{Validation}
@@ -1206,13 +1207,13 @@ evolve from the diploid founder in an agent-based model with time step
 $\Delta t=0.1$ days: in each step a cell divides with probability
 $f(x)\Delta t$, each chromosome copy missegregates with probability $\beta$,
 daughters with a copy number outside $[1,8]$ are inviable, and populations
-reaching $2\times10^6$ cells are reduced to 1\% at random. Two samples are
-drawn from each population under eight scenarios, with 50 to 3000 cells per
-sample and intervals of 180 to 1080 days, including unbalanced sample sizes
-and a bottleneck. The first sample is drawn on day 1440. Each sampled cell
+reaching $2\times10^6$ cells are reduced to 1\% at random. Cells are
+drawn from each population at two time points under eight scenarios, with 50
+to 3000 cells per time point and intervals of 180 to 1080 days, including
+unbalanced numbers of cells at the two time points and a bottleneck. The first time point is day 1440. Each sampled cell
 contributes one karyotype, without calling error, and the input to every
 method is the resulting two-column count matrix. The number of distinct
-karyotypes observed in the two samples together increases with sample size
+karyotypes observed at the two time points together increases with the number of cells
 and with landscape smoothness, because populations on smooth landscapes are
 more diverse. Each row of the following table is one sampling design
 (scenario); values are medians and ranges over the six landscapes of each
@@ -1224,7 +1225,7 @@ wavelength, development and held-out:
 \toprule
 Cells, first / second & Days & \multicolumn{4}{c}{Observed karyotypes, median (range)} \\
 \cmidrule(lr){3-6}
-sample & apart & $\lambda=0.4$ & $\lambda=0.8$ & $\lambda=1.2$ & $\lambda=1.6$ \\
+time point & apart & $\lambda=0.4$ & $\lambda=0.8$ & $\lambda=1.2$ & $\lambda=1.6$ \\
 \midrule
 50 / 50 & 180 & 5 (3--7) & 20 (9--35) & 38 (35--57) & 66 (59--75) \\
 200 / 200 & 180 & 14 (10--17) & 56 (40--92) & 100 (95--144) & 188 (156--242) \\
@@ -1239,16 +1240,16 @@ sample & apart & $\lambda=0.4$ & $\lambda=0.8$ & $\lambda=1.2$ & $\lambda=1.6$ \
 \end{center}
 
 \noindent{\footnotesize $^{a}$ Regrown from 200 cells surviving a bottleneck at
-the first sample.}
+the first time point.}
 
 \noindent Across all datasets, 59\% of observed karyotypes (median) were seen
-in a single cell, and 12\% were seen in both samples. Twenty-four
+in a single cell, and 12\% were seen at both time points. Twenty-four
 landscapes with independently drawn centroids, six per wavelength, were
 divided into twelve development landscapes, used for model construction, and
 twelve held-out landscapes, which were evaluated once after the method had
 been fixed. On each landscape one population trajectory is simulated and
 sampled under each of the eight scenarios (the bottleneck scenario regrows
-from the first sample), giving 96 datasets per set; results are averaged
+from the first time point), giving 96 datasets per set; results are averaged
 within landscape and scenario and then over landscapes with equal weight.
 
 \paragraph{Reference values and scoring.}
@@ -1260,11 +1261,11 @@ simulated counts follow,
   \label{eq:true-rate}
 \end{equation}
 which removes the bias of the discrete time step. Each dataset is scored on
-all observed karyotypes and on random samples of up to 2000 one-step and 2000
+all observed karyotypes and on random subsets of up to 2000 one-step and 2000
 two-step neighbours, selected from the counts alone and common to all
 methods. Reference values and predictions $\hat f$ are centred on the same
 set of reference karyotypes, the observed karyotypes with at least five cells
-over both samples, weighted by their counts:
+over both time points, weighted by their counts:
 \begin{equation}
   \rho^{\mathrm{true}}_x=r(x)-\sum_{v\in\mathcal{R}}w_vr(v),\qquad
   \rho^{\mathrm{pred}}_x=\hat f(x)-\sum_{v\in\mathcal{R}}w_v\hat f(v),\qquad
@@ -1272,7 +1273,7 @@ over both samples, weighted by their counts:
   \label{eq:scoring-centre}
 \end{equation}
 The reference set depends only on the counts. Centring removes the absolute
-level, which two samples do not identify, and places all methods on a common
+level, which two time points do not identify, and places all methods on a common
 origin irrespective of their internal reference. A method that provides no
 prediction for a reference karyotype is scored as the null predictor on that
 dataset.
@@ -1298,10 +1299,10 @@ landscapes,
 \end{equation}
 and the other measures defined below likewise. Each value is thus the
 equally weighted mean of 24 datasets, three landscapes by eight sampling
-designs, so that every design counts equally irrespective of its sample size
+designs, so that every design counts equally irrespective of its number of cells
 or number of karyotypes. Landscapes are the independent units: the scenarios of a landscape are drawn from one simulated trajectory.
 Comparisons between methods are therefore paired by landscape, and confidence
-intervals are obtained by resampling landscapes. For patient samples no
+intervals are obtained by resampling landscapes. For patient data no
 reference values exist, and the assessments described below are indirect.
 
 \paragraph{Measures of accuracy.}
@@ -1505,7 +1506,7 @@ For each wavelength and distance they show the error relative to the null
 predictor, the direction accuracy and the rank correlation of the sparse
 joint model, with and without the balance prior, of the two-layer pipeline
 and of \texttt{alfakR}; points are means over the three landscapes of a
-wavelength and bars the range over those landscapes. Designs are ordered by sample size at fixed
+wavelength and bars the range over those landscapes. Designs are ordered by the number of cells at fixed
 interval (50/50 cells at 180 days, 200/200 at 180 and 360 days, 500/700 at 360
 days), followed by a longer interval, a bottleneck and the two unbalanced
 designs. Because the errors of \texttt{alfakR} reach about 300 times those of
@@ -1513,7 +1514,7 @@ the null predictor, error ratios above 8 are drawn at the upper edge of
 Figure~\ref{fig:design-error} and labelled with their value; all values are
 given in Supplement~\ref{sec:s-designs}.
 
-Sparsity depends on the landscape as well as on the sample size. The number
+Sparsity depends on the landscape as well as on the number of cells. The number
 of cells per observed karyotype, a direct measure of sparsity, ranged from
 1.4 to 76; for the sparsest design it was 20 on the most rugged and 1.4 on the
 smoothest landscapes:
@@ -1529,8 +1530,8 @@ karyotypes; the dashed line marks the null predictor. Points are the mean
 error over the three landscapes of a wavelength divided by that of the null
 predictor, and bars the range of this ratio over the landscapes. Ratios of
 \texttt{alfakR} above 8 are drawn at the upper edge, with bars truncated
-there, and labelled with their value. Vertical lines separate the sample-size
-series, the longer interval, the bottleneck and the unbalanced designs.}
+there, and labelled with their value. Vertical lines separate the series in the number
+of cells, the longer interval, the bottleneck and the unbalanced designs.}
 \label{fig:design-error}
 \end{figure}
 
@@ -1557,16 +1558,16 @@ the null predictor in 95 of the 96 combinations of wavelength, design and
 distance. The exception is the sparsest design on the most rugged landscapes
 at distance 0, where only three to seven karyotypes are observed and one
 landscape with three observed karyotypes had twice the error of the null
-predictor. In the sparsest design (50 cells per sample) the ratio was
+predictor. In the sparsest design (50 cells per time point) the ratio was
 otherwise 0.53 to 0.84, a reduction of the error by one sixth to one half;
 in all other designs it was 0.41 to 0.83. The largest gain occurred between
-50 and 200 cells per sample; larger samples improved the error little
+50 and 200 cells per time point; more cells improved the error little
 further, consistent with accuracy being limited by the information in two
 time points (Section~\ref{sec:val-additional}). A threefold longer interval
 did not improve accuracy and reduced it on landscapes of intermediate
 ruggedness ($\lambda=0.8$ and 1.2, ratios of 0.62 to 0.75 against 0.49 to 0.61
-at 360 days). Of the unbalanced designs, a deep first and shallow second
-sample gave the weakest result on the smoothest landscapes (0.83 at distance
+at 360 days). Of the unbalanced designs, 3000 cells at the first and 100 at the second
+time point gave the weakest result on the smoothest landscapes (0.83 at distance
 1). The two-layer pipeline attained 0.85 to 1.08 times the error of the null
 predictor in every design. \texttt{alfakR} exceeded the error of the null
 predictor in 92 of the 96 combinations, by more than a factor of eight in 10
@@ -1578,16 +1579,16 @@ model was below the null predictor in all 96 combinations (ratios 0.39 to
 Direction accuracy of the sparse joint model exceeded one half in all 96
 combinations of wavelength, design and distance (0.55 to 1.00;
 Figure~\ref{fig:design-direction}). At distance 1 it was 0.76 to 0.90 in
-every design, so that even 50 cells per sample identified the direction of
+every design, so that even 50 cells per time point identified the direction of
 most changes between neighbouring karyotypes; unlike the error, it changed
-little with sample size. The two-layer pipeline exceeded one half in 62 and
+little with the number of cells. The two-layer pipeline exceeded one half in 62 and
 \texttt{alfakR} in 28 of the 96 combinations (0.33 to 0.72 and 0.12 to 0.72).
 On the development landscapes the sparse joint model exceeded one half in all
 96 combinations (0.60 to 1.00).
 
 Rank correlations of the sparse joint model at distances 1 and 2 increased
-with sample size on smooth landscapes ($\lambda=1.6$, distance 1: 0.28 at 50
-cells per sample against 0.55 to 0.62 at 500/700) but remained between 0.12
+with the number of cells on smooth landscapes ($\lambda=1.6$, distance 1: 0.28 at 50
+cells per time point against 0.55 to 0.62 at 500/700) but remained between 0.12
 and 0.33 on the most rugged landscapes in every design. The two-layer
 pipeline ranked observed karyotypes better in 7 of the 8 designs at
 $\lambda=1.6$ and in 2 of 8 at $\lambda=1.2$, for the reason given in
@@ -1598,7 +1599,7 @@ a ranking; the exceptions were observed karyotypes in four designs at
 $\lambda=1.6$ and two small differences at $\lambda=0.4$. Coverage of the
 sparse joint model ranged from 0.77 to 1.00;
 it fell below 0.90 mainly at distance 2 and mainly for the longer interval
-(0.81 to 0.83 at $\lambda\le0.8$) and for a shallow first sample (100/3000;
+(0.81 to 0.83 at $\lambda\le0.8$) and for few cells at the first time point (100/3000;
 0.77 to 0.86 at $\lambda\le0.8$), and was conservative on smooth landscapes.
 
 \subsection{Extrapolation to Distances 3 and 4}
@@ -1698,8 +1699,8 @@ and its rank correlation ranged from 0.01 to 0.25.
 The development landscapes gave the same results: ratios of 0.42 to 0.59,
 direction accuracy of 0.76 to 0.81 and rank correlations of 0.14 to 0.49 for
 the sparse joint model at distances 3 and 4 (Supplement~\ref{sec:s-far}). One qualification applies to the
-comparison across distances. The scoreboard samples distances 1 and 2
-uniformly within each shell, whereas distances 3 and 4 are sampled by random
+comparison across distances. The scoreboard draws distances 1 and 2
+uniformly within each shell, whereas distances 3 and 4 are drawn by random
 walks, which are not uniform within a shell. Differences between distances 2
 and 3 therefore partly reflect the sampling; the rank correlation of the graph
 Gaussian layer at $\lambda=1.6$, which rose from 0.19 at distance 2 to 0.28
@@ -1713,14 +1714,14 @@ landscapes.
 \subsection{Additional Assessments}
 \label{sec:val-additional}
 
-Predicted compositions 180 days after the second sample were closer to the
+Predicted compositions 180 days after the second time point were closer to the
 simulated compositions than the assumption of no change (total variation
-distance 0.251 versus 0.290). Increasing the sample size to 20\,000 cells per
-sample reduced the error by only 14--21\%, to the level of an oracle that
+distance 0.251 versus 0.290). Increasing the number of cells to 20\,000 per
+time point reduced the error by only 14--21\%, to the level of an oracle that
 predicts the true mean of each distance stratum; accuracy is therefore limited
-by the information contained in two time points rather than by sample size.
-All 20 GBM samples were fitted at three birth rates, and random halves of
-each sample yielded rankings with a Spearman correlation of 0.88 for
+by the information contained in two time points rather than by the number of cells.
+All 20 GBM datasets were fitted at three birth rates, and random halves of
+the cells of each dataset yielded rankings with a Spearman correlation of 0.88 for
 karyotypes with at least ten cells. Detailed results are reported in
 \texttt{validation/sparse\_joint/README.md}.
 
@@ -1735,15 +1736,15 @@ landscapes of other structure, such as predominantly additive landscapes or
 landscapes with strong local epistasis. The simulations include neither
 karyotype-calling errors nor spatial sampling bias, and treatment is
 represented only by a bottleneck and by changes of the landscape at the first
-sample. The summary statistics of the simulated samples overlap with those of
-20 glioblastoma samples, although the simulated samples contain more
+time point. The summary statistics of the simulated datasets overlap with those of
+20 glioblastoma datasets, although the simulated datasets contain more
 karyotypes observed in a single cell. Beyond one step from the major
 karyotypes the sparse joint model predicts from its trend alone; at distances
 3 and 4 this reduced the error of the null predictor by 41 to 56\% but ranked
 karyotypes only weakly on rugged landscapes (Spearman correlation 0.14 to
 0.19 at $\lambda=0.4$ and 0.8; Section~\ref{sec:val-far}), and the fitness of
 distant karyotypes was overestimated. The benchmark is thus a necessary test
-of the method, not evidence of its accuracy on patient samples, for which no
+of the method, not evidence of its accuracy on patient data, for which no
 reference values exist.
 
 \section{Summary}
@@ -1792,7 +1793,7 @@ second-layer method predicts fitness on a larger bounded graph:
 &\longrightarrow\text{second-layer method}\longrightarrow\text{global landscape}.
 \end{aligned}
 \]
-The second layer does not use the counts. On the sparse two-sample benchmark,
+The second layer does not use the counts. On the sparse two-time-point benchmark,
 the pipeline with its default second layer was not more accurate than the
 null predictor that assumes no fitness differences
 (Section~\ref{sec:validation}).
@@ -2911,7 +2912,7 @@ left \texttt{out\_of\_scope}. This method is useful when the goal is accurate
 direct and near-neighbor shape preservation without allowing far-field graph
 states to influence the near-field posterior.
 
-\subsection{Comparison on the Sparse Two-Sample Benchmark}
+\subsection{Comparison on the Sparse Two-Time-Point Benchmark}
 \label{sec:s-extrapolation-results}
 
 The eight second-layer methods that run without additional software were
@@ -2998,7 +2999,7 @@ No second-layer method improved materially on the null predictor: their
 errors were 0.89 to 1.00 times its value, and 0.89 to 1.19 times for
 \texttt{delta\_tree\_ensemble}, compared with 0.44 to 0.75 times for the
 sparse joint model. All second-layer methods interpolate the same first-layer
-anchors, which in sparse samples carry little information beyond the abundant
+anchors, which in sparse data carry little information beyond the abundant
 clones, so the choice of second layer has little effect on accuracy. On the
 smoothest landscapes, the second-layer methods ranked observed karyotypes
 better than the sparse joint model ($\lambda=1.6$, $d=0$: 0.48--0.54 versus
@@ -3030,7 +3031,7 @@ process, refined by step halving until the changes in frequencies and in log
 growth fall below a tolerance. In contrast to the sparse joint model, this
 pipeline has no balance prior, no domain constructed around abundant clones
 and no calibration of uncertainty, and it was not evaluated on the sparse
-two-sample benchmark.
+two-time-point benchmark.
 
 \section{Results by Sampling Design}
 \label{sec:s-designs}

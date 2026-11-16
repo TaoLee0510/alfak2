@@ -114,7 +114,7 @@ stt_fit_path <- function(config, dataset_id, method_name) {
 }
 
 # Scored nodes of a dataset. Enumerating the two-step shell of a 22-chromosome
-# sample is slow and memory-hungry, so it is done once and cached on disk.
+# dataset is slow and memory-hungry, so it is done once and cached on disk.
 stt_dataset_nodes <- function(config, dataset) {
   path <- file.path(config$output_dir, "nodes", paste0(dataset$dataset_id, ".rds"))
   if (file.exists(path)) return(readRDS(path))

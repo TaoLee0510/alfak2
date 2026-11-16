@@ -63,7 +63,7 @@ si_devbench_config <- function(split = "dev") {
   config$methods$default_new <- sparse("si4")
   # Cohort fit of the eight patients of a landscape with the balance prior
   # (the benchmark's alfak2_sparse_joint_cohort_balance), scored on patient 1:
-  # history = interval (8327282) and each sample's chosen history (si4).
+  # history = interval (8327282) and each dataset's chosen history (si4).
   cohort <- function(build) {
     list(type = "alfak2_sparse_joint_cohort", build = build, birth_rate = 1, min_cn = 1L, max_cn = 8L,
          members = "landscape", dataset_dir = file.path(output_dir, "datasets"),

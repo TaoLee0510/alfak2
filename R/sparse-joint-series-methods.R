@@ -1,13 +1,13 @@
-# The two multi-sample methods of fit_sparse_joint() beside the anchored one
+# The two multi-time-point methods of fit_sparse_joint() beside the anchored one
 # (`series = "pairwise"` and `"state_space"`). Both give every pair of
-# consecutive samples its own majors and domain, as two samples would have;
+# consecutive time points its own majors and domain, as two time points would have;
 # their states are the union of the pairs' domains, majors first. The
 # templates are src/sparse_joint_pairwise_model.h and
 # src/sparse_joint_state_space_model.h.
 
 sparse_joint_series_methods <- c("anchored", "pairwise", "state_space")
 
-# Domains of the pairs of consecutive samples and their union. `member` and
+# Domains of the pairs of consecutive time points and their union. `member` and
 # `pair_major` have one column per pair: whether each state is in that pair's
 # domain, and whether it is one of the pair's majors. The other fields are
 # those of sparse_joint_domain(), for the union.
@@ -34,8 +34,8 @@ sparse_joint_pair_domains <- function(counts, major_frequency, major_count, max_
        member = matrix(member, nrow = length(labels)), pair_major = matrix(pair_major, nrow = length(labels)))
 }
 
-# Coverage of each pair's own domain: one row per pair and sample, as
-# sparse_joint_domain_coverage() gives for two samples, with a `pair` column.
+# Coverage of each pair's own domain: one row per pair and time point, as
+# sparse_joint_domain_coverage() gives for two time points, with a `pair` column.
 sparse_joint_pair_coverage <- function(counts, major_frequency, major_count, max_states, min_cn, max_cn) {
   rows <- lapply(seq_len(ncol(counts) - 1L), function(k) {
     y <- counts[, c(k, k + 1L), drop = FALSE]
@@ -70,8 +70,8 @@ sparse_joint_series_method_base <- function(data, settings) {
        interval = diff(times), tmb_data = tmb_data)
 }
 
-# Pairwise: each pair as two samples, sharing the landscape. A pair starts at
-# balance over `settings$history` plus the time since the first sample (the
+# Pairwise: each pair as two time points, sharing the landscape. A pair starts at
+# balance over `settings$history` plus the time since the first time point (the
 # population's age), unless `settings$pair_history` is "same".
 sparse_joint_pairwise_problem <- function(data, settings) {
   base <- sparse_joint_series_method_base(data, settings)
@@ -115,8 +115,8 @@ sparse_joint_pairwise_problem <- function(data, settings) {
        random = c("zeta", "g", "coef", "theta"))
 }
 
-# State space: a latent abundance per state and sample, linked from sample
-# to sample by the closed form plus drift. The drift is a fifth scale with a
+# State space: a latent abundance per state and time point, linked from time point
+# to time point by the closed form plus drift. The drift is a fifth scale with a
 # prior centred on 1e-4 per day (a bottleneck of about 2000 cells every 5
 # days), or fixed at `settings$drift`.
 sparse_joint_state_space_problem <- function(data, settings) {
@@ -130,7 +130,7 @@ sparse_joint_state_space_problem <- function(data, settings) {
   prior_mean <- ifelse(seen_first, log(pmax(y[, 1L], 1)), log(depth[[1L]]) + settings$initial_frequency[[1L]])
   prior_sd <- ifelse(seen_first, 10, settings$initial_frequency[[2L]])
   # Frequency of each state about each interval: the mean of its share at
-  # the two samples, plus half a cell of the two.
+  # the two time points, plus half a cell of the two.
   share <- sweep(y, 2L, depth, "/")
   frequency <- (share[, -n_time, drop = FALSE] + share[, -1L, drop = FALSE]) / 2
   frequency <- sweep(frequency, 2L, 1 / (depth[-n_time] + depth[-1L]), "+")
@@ -168,7 +168,7 @@ sparse_joint_state_space_problem <- function(data, settings) {
        random = c("zeta", "zeta_later", "g", "coef", "theta"))
 }
 
-# Expected counts of the fitted model, one column per sample, and the data
+# Expected counts of the fitted model, one column per time point, and the data
 # with the counts replaced by them (and the prior residuals that are not
 # log-linear set to zero), for the expected information.
 sparse_joint_series_method_expected <- function(tmb_data, parameters, map, mode, report) {
@@ -186,7 +186,7 @@ sparse_joint_series_method_expected <- function(tmb_data, parameters, map, mode,
     expected$y_start <- start
     expected$y_end <- end
     expected$balance_offset <- report$balance_residual
-    # A sample's expectation: from the pair that starts there (the first),
+    # A time point's expectation: from the pair that starts there (the first),
     # else from the pair that ends there.
     counts <- cbind(start[, 1L], end)
     counts[tmb_data$member[, 1L] == 0, 1L] <- NA
@@ -217,7 +217,7 @@ sparse_joint_fill_latent <- function(parameters, map, mode, mode_names, names) {
 }
 
 # Position among the latent variables of each state's log abundance at the
-# first sample (NA where a state has none): `zeta` of the anchored and
+# first time point (NA where a state has none): `zeta` of the anchored and
 # state-space models, the first pair's column for the pairwise one.
 sparse_joint_first_sample_latent <- function(fit, solver) {
   zeta_index <- which(solver$names == "zeta")
@@ -231,55 +231,30 @@ sparse_joint_first_sample_latent <- function(fit, solver) {
 }
 
 # Coverage for the pairwise and state-space methods: each pair's own domain
-# must hold a cell of each of its two samples. An error of class
+# must hold a cell at each of its two time points. An error of class
 # alfak2_domain_coverage_error names the pair otherwise.
 sparse_joint_check_pair_coverage <- function(counts, major_frequency, major_count, max_states, min_cn, max_cn) {
   coverage <- sparse_joint_pair_coverage(counts, major_frequency, major_count, max_states, min_cn, max_cn)
   if (any(coverage$cells_in_domain <= 0)) {
     named <- coverage
-    named$sample <- paste0("pair ", coverage$pair)
-    sparse_joint_coverage_error(named, "A timepoint has no cell inside the model domain.", by_sample = TRUE)
+    named$sample <- coverage$pair
+    sparse_joint_coverage_error(named, "A timepoint has no cell inside the model domain.", by_sample = TRUE,
+                                unit = "Pair")
   }
   coverage
 }
 
-# Automatic choice of the series method (`series = "auto"`), from
-# validation/sparse_joint/series_methods/auto_eval.R:
-# - A sample in between with less than `ends_major` of its cells on the
-#   first and last samples' majors points to a clonal sweep, which the
-#   anchored design misses.
-# - With a sweep, the pairwise method when the anchored intermediate weight
-#   (1 / dispersion of the majors) is at least `weight`, i.e. little drift;
-#   otherwise the state-space method. With no sample in between left to
-#   measure the dispersion, the pairwise method.
-# - The anchored method otherwise.
-sparse_joint_auto_thresholds <- c(ends_major = 0.3, weight = 0.5)
-
-# Least share, over the samples in between, of a sample's cells on the
-# majors of the first and the last sample.
-sparse_joint_ends_major_share <- function(counts, major_frequency, major_count, max_states, min_cn, max_cn) {
-  n_time <- ncol(counts)
-  domain <- sparse_joint_domain(counts, major_frequency, major_count, max_states, min_cn, max_cn, c(1L, n_time))
-  on_major <- rownames(counts) %in% domain$labels[seq_len(domain$n_major)]
-  min(vapply(seq(2L, n_time - 1L), function(k) sum(counts[on_major, k]) / sum(counts[, k]), numeric(1)))
-}
-
-sparse_joint_auto_series <- function(share, weight, thresholds = sparse_joint_auto_thresholds) {
-  if (share >= thresholds[["ends_major"]]) return("anchored")
-  if (is.na(weight) || weight >= thresholds[["weight"]]) "pairwise" else "state_space"
-}
-
-# Samples that the pairwise and state-space methods leave out. Each pair of
-# consecutive samples has its own domain. A sample of a pair with no cell in
+# Time points that the pairwise and state-space methods leave out. Each pair of
+# consecutive time points has its own domain. A time point of a pair with no cell in
 # that domain carries no information about it: its depth offset is free, as
-# for an anchored sample in between (sparse_joint_uncounted_samples()).
-# - Such a sample in between is left out, and its neighbours become a pair.
-# - The first and the last sample are kept, as in the anchored method, where
+# for an anchored time point in between (sparse_joint_uncounted_samples()).
+# - Such a time point in between is left out, and its neighbours become a pair.
+# - The first and the last time point are kept, as in the anchored method, where
 #   they define the domain. If one of them has no cell in its pair's domain,
 #   its neighbour in between is left out instead, so that it pairs with a
-#   sample further in.
+#   time point further in.
 # This repeats, from the first uncovered pair on, until every pair is
-# covered. At worst the first and the last sample remain: the two-sample fit,
+# covered. At worst the first and the last time point remain: the two-time-point fit,
 # which checks its own coverage. Returns the positions left out (in order)
 # and, for each, the timepoint it was left out for.
 sparse_joint_pair_left_out <- function(counts, major_frequency, major_count, max_states, min_cn, max_cn) {
@@ -290,7 +265,7 @@ sparse_joint_pair_left_out <- function(counts, major_frequency, major_count, max
   while (length(kept) > 2L) {
     coverage <- sparse_joint_pair_coverage(counts[, kept, drop = FALSE], major_frequency, major_count, max_states,
                                            min_cn, max_cn)
-    # Two rows per pair, its earlier and its later sample; position in `kept`.
+    # Two rows per pair, its earlier and its later time point; position in `kept`.
     position <- coverage$pair + rep(c(0L, 1L), length.out = nrow(coverage))
     empty <- which(coverage$cells_in_domain <= 0)
     if (!length(empty)) break
@@ -323,7 +298,7 @@ sparse_joint_latent_states <- function(problem, names) {
   out
 }
 
-# Each state's fitted log abundance at the first sample, as stored in the
+# Each state's fitted log abundance at the first time point, as stored in the
 # fit (NA where a state has none).
 sparse_joint_first_sample_zeta <- function(fit) {
   if (!identical(fit$settings$series, "pairwise")) return(fit$posterior$zeta)

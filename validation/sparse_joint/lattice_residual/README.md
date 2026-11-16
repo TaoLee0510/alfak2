@@ -23,9 +23,9 @@ paper's sizes 3.5, with a largest clone of 0.79 (paper: three to four, about
   ids `lr_L..`. The four last wavelength-0.2 landscapes (L25-L28) were added
   after the first eight, half of which had one or two frequent karyotypes;
   the twelve have 1, 1, 4, 4, 4, 2, 3, 1, 1, 1, 4 and 2 (at least 10 cells
-  over both samples).
-- First sample at day 120; intervals of 6, 18 and 42 days; 1000 cells at
-  each sample. 84 datasets.
+  over both time points).
+- First time point at day 120; intervals of 6, 18 and 42 days; 1000 cells at
+  each time point. 84 datasets.
 - Fitted with the package as committed (af362af) at its defaults (`base`).
 
 A held-out set (seed base 96000, ids `lh_L..`) is defined for a final
@@ -104,13 +104,13 @@ Change C, in any form that draws on the fitted model, changes the error of
 unobserved karyotypes by less than 2% in either direction; it was not
 implemented. The second weakness has two parts, neither of which C
 addresses: the cross-validation's selection of frequent karyotypes, and, at
-wavelength 0.2, the absence of information about unobserved karyotypes in
-two samples, which the model reports as flat predictions with full coverage.
+wavelength 0.2, the absence of information about unobserved karyotypes at
+two time points, which the model reports as flat predictions with full coverage.
 
 A finding outside C: at wavelength 0.4 in these young populations the model
 overestimates unobserved karyotypes (bias +0.06 at distance one, +0.11 at
 two) and its intervals undercover (0.87 and 0.82; 0.83 and 0.73 at 6-day
-intervals). On the development benchmark (first sample at day 1440) coverage
+intervals). On the development benchmark (first time point at day 1440) coverage
 at wavelength 0.4 was 94-98%.
 
 ## Running
