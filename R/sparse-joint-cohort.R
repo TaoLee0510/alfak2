@@ -39,9 +39,6 @@
 #'   or of `alfak2_data` objects. Names identify the datasets.
 #' @param dt Time between the two time points: one value, or one per dataset.
 #'   Used for count matrices only.
-#' @param beta Missegregation rate per chromosome copy and division, one value
-#'   for every dataset of the cohort (it is not chosen per dataset here; see
-#'   [fit_sparse_joint()] for that).
 #' @param sharing `"partial"` or `"full"`; see above.
 #' @param trend `"select"`, `"sample"` or `"shared"`; see above.
 #' @param initial_state `"free"` or `"balance"`; see [fit_sparse_joint()].
@@ -148,10 +145,6 @@ fit_sparse_joint_cohort <- function(samples,
       stop("`dt` must give one interval, or one per dataset.", call. = FALSE)
     }
     dt <- rep_len(dt, n_sample)
-  }
-  if (!is.numeric(beta) || length(beta) != 1L) {
-    stop("A cohort is fitted at one missegregation rate; several rates or `beta = \"auto\"` are for fit_sparse_joint().",
-         call. = FALSE)
   }
   data <- lapply(seq_len(n_sample), function(s) {
     if (is_data[[s]]) samples[[s]] else prepare_alfak2_data(samples[[s]], dt = dt[[s]], beta = beta)

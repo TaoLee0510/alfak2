@@ -5,6 +5,7 @@
 #   Rscript $R --stage=datasets --set=e2|e3 [--workers=6]
 #   Rscript $R --stage=sweeps   --set=e2 --build=BUILD     (e2's gate)
 #   Rscript $R --stage=fit      --set=SET --build=BUILD --methods=ends,anchored [--datasets=REGEX] [--workers=6]
+#   Rscript $R --stage=compose  --set=SET --build=BUILD   (ends_auto, anchored_auto)
 #   Rscript $R --stage=score    --set=SET --build=BUILD [--workers=6]
 #
 # This file only dispatches, so it can stay unchanged while a run is in
@@ -48,7 +49,8 @@ sm_main <- function() {
     },
     fit = sm_stage_fit(config, workers, method_names, args$datasets),
     score = sm_stage_score(config, workers),
-    stop("--stage must be datasets, sweeps, fit or score.", call. = FALSE)
+    compose = sm_stage_compose(config),
+    stop("--stage must be datasets, sweeps, fit, compose or score.", call. = FALSE)
   )
 }
 

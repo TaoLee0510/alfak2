@@ -35,9 +35,8 @@ or of \code{alfak2_data} objects. Names identify the datasets.}
 \item{dt}{Time between the two time points: one value, or one per dataset.
 Used for count matrices only.}
 
-\item{beta}{Missegregation rate per chromosome copy and division, one value
-for every dataset of the cohort (it is not chosen per dataset here; see
-\code{\link[=fit_sparse_joint]{fit_sparse_joint()}} for that).}
+\item{beta}{Missegregation rate per chromosome copy and division, if
+\code{counts} is a matrix.}
 
 \item{birth_rate}{Assumed baseline birth (division) rate per unit of \code{dt}.}
 

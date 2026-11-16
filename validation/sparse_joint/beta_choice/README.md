@@ -7,7 +7,8 @@ alfak2 infers a neighbour's fitness partly from how many cells
 missegregation should have put there, so the rate matters for karyotypes
 that are rare or unseen. The Fig. 4d check (`../fig4d_check`) found that
 the paper's Salehi PDX trajectories prefer a rate 4–16 times higher than
-the in vitro ones.
+the in vitro ones. Step 2 below shows that part of this can be a bias at
+short intervals.
 
 The plan is to let alfak2 pick β per dataset by marginal likelihood, the
 same way it picks the history:
@@ -79,24 +80,77 @@ Picks, as multiples of 5e-5, over all three windows:
   pick's r is 0.31, against 0.49 at the truth. At 4e-4 it is 0.55 against
   0.61.
 
-## Step 1: the option (`fit_sparse_joint(beta = ...)`)
+## Step 1: the option (commit ac36fd1, removed again)
 
-- **One value** fixes the rate, as before; the fit is bit for bit the same.
-- **Several values, or `"auto"`** (5e-5 × 1/16, 1/4, 1, 4, 16, 64), are
-  candidates. Each is fitted, with the history chosen inside it, and the fit
-  of lowest objective is kept.
-- **Diagnostics:** `diagnostics$beta_profile` lists the candidates.
-- **Pairwise and state space** take the rate the anchored model chooses.
-- **Cohorts** still take one rate.
-- **alfakR interface:** `alfak_compat(pm = "auto")` passes it through.
-- **Default:** the rate stays fixed at 5e-5 until the paper benchmark
-  (step 3) has been weighed.
-- **Tests:** `tests/testthat/test-sparse-joint-beta.R`.
+ac36fd1 let `fit_sparse_joint(beta = ...)` take several values, or `"auto"`
+(5e-5 × 1/16, 1/4, 1, 4, 16, 64). Each candidate was fitted and the fit of
+lowest objective kept, and `diagnostics$beta_profile` listed them. The
+default stayed fixed. After step 2 the option was removed (below); the code
+is in ac36fd1.
+
+## Step 2: the simulated sets must not regress (`analyse_series.R`)
+
+These are the sets of `../series_methods` (build cv10), whose true rate is
+the default 5e-5:
+- e1: passaged cultures;
+- e2: clonal sweeps;
+- e3: neutral cultures.
+
+`ends` and `anchored` were fitted at each other multiple of the grid, one
+fit per HPC task: 7680 fits. `run.R --stage=compose` then kept, per dataset,
+the candidate of lowest objective (`ends_auto`, `anchored_auto`), which is
+what `beta = "auto"` returns.
+
+**Criterion**, fixed before scoring, with the RMSE ratio auto / fixed paired
+by dataset:
+- e1: at least 18 of 24 cells within 1.03 at every distance, and the median
+  over cells at most 1.02;
+- e2 and e3: the median at most 1.03.
+
+**Result: fails.**
+
+| | e1 cells within 1.03 | e1 median ratio, distances 0/1/2 | e2 | e3 |
+| --- | --- | --- | --- | --- |
+| `ends_auto` against `ends` | 6 / 24 | 1.23 / 1.43 / 1.46 | 1.03 / 1.11 / 1.17 | 1.00 |
+| `anchored_auto` against `anchored` | 7 / 24 | 1.27 / 1.46 / 1.44 | 1.02 / 1.08 / 1.10 | 1.00 |
+
+The loss is concentrated at short intervals. In e1 (`ends_auto`, median
+ratio):
+
+| bottleneck | 6 days apart | 60 days apart |
+| --- | --- | --- |
+| 200 | 3.20 | 1.00 |
+| 2000 | 1.78 | 1.00 |
+| 20000 | 1.77 | 1.32 |
+
+The rates chosen are biased high when time points are close. In e1 the
+truth is ×1 for every dataset; `ends_auto` picks, as multiples of 5e-5:
+
+| | 1/16 | 1/4 | 1 | 4 | 16 |
+| --- | --- | --- | --- | --- | --- |
+| 6 days apart (144) | 10 | 19 | 38 | 66 | 11 |
+| 60 days apart (144) | 5 | 46 | 68 | 21 | 4 |
+
+Step 0's simulations had 7 to 54 days between their two time points, which
+is why the bias did not show there.
+
+## Decision
+
+The gate failed, so step 3 (the paper benchmark round) was not run. Only
+the alfak2 build for it had been made. The option was removed, and the rate
+stays fixed.
+
+This also qualifies the Fig. 4d check. There the PDX trajectories preferred
+4–16× the default and the in vitro ones the default, but the PDX
+trajectories have shorter intervals. Part of their preference may be this
+bias rather than higher chromosomal instability.
 
 ## Files
 
-- **Tracked:** `sim_fit.R` (one fit per task) and `analyse_sim.R` (the
-  verdict).
+- **Tracked:**
+  - `sim_fit.R` (one fit per task) and `analyse_sim.R` (the step 0 verdict);
+  - `analyse_series.R` (the step 2 verdict). The candidate and composed
+    methods are in `../series_methods/setup.R`.
 - **Untracked:** the HPC wrapper `run_hpc.sh` and `tasks.tsv`.
 - **HPC folder:** `/share/lab_crd/taoli/Project/alfak2-multi-timepoint/beta_choice`.
   `fits_collided/` there holds the first run's outputs. The ABM wavelength
