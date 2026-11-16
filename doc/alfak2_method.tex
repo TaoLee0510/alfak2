@@ -128,6 +128,33 @@ $\rho_i$, $\tilde s_i$ & Relative fitness and its calibrated standard deviation 
 \section{The Sparse Joint Count Model}
 \label{sec:sparse-joint}
 
+Figure~\ref{fig:flow-overview} gives the path of a fit as a flowchart and
+Figure~\ref{fig:flow-core} the steps of the two-sample fit; Section~\ref{sec:procedure}
+lists the steps in order.
+
+\begin{figure}[p]
+\centering
+\includegraphics[width=\textwidth,height=0.86\textheight,keepaspectratio]{flowcharts/flow_overview.pdf}
+\caption{Path of \texttt{fit\_sparse\_joint()}; yellow nodes are the
+decisions of the code. \texttt{series = "auto"} is drawn as the entry point
+for more than two samples; a method named in \texttt{series} skips the choice
+(dashed tags), and \texttt{"anchored"} is the default of the current code.
+Every path ends in the common core (Figure~\ref{fig:flow-core}).}
+\label{fig:flow-overview}
+\end{figure}
+
+\begin{figure}[p]
+\centering
+\includegraphics[width=\textwidth,height=0.86\textheight,keepaspectratio]{flowcharts/flow_core.pdf}
+\caption{The two-sample fit (template \texttt{pair}). Steps 4--7 are
+repeated for every candidate history $h$, and the candidate with the lowest
+objective is kept. The anchored, pairwise and state-space methods replace the
+domain, the priors and the likelihood
+(Figures~\ref{fig:flow-anchored}--\ref{fig:flow-state-space}) and share the
+other steps.}
+\label{fig:flow-core}
+\end{figure}
+
 \subsection{Model Rationale}
 \label{sec:sj-design}
 
@@ -346,18 +373,23 @@ and the prior
 For a long history and a less fit neighbour,
 $e^{-d_ph}\varphi_1(d_j,d_p;h)\to1/(d_p-d_j)$, and (\ref{eq:balance-start})
 reduces to (\ref{eq:balance-limit}). The count of $j$ in the first sample
-thereby also informs $d_j$. The defaults are $h=T$ and $\sigma_\zeta=1$, which
-permits departures from balance by a factor of approximately $e$; results
-were insensitive to this choice (values of 0.3, 0.5 and 1 yielded errors
-within 0.003 of one another).
+thereby also informs $d_j$. By default the history $h$ is chosen among $T$ and
+30, 100, 300, 1000 and 3000 divisions at $b_0$ that are longer than $T$: the
+model is fitted at each, and the fit with the highest Laplace marginal
+likelihood (\ref{eq:laplace}) is kept (Figure~\ref{fig:flow-core}). The
+default $\sigma_\zeta=1$ permits departures from balance by a factor of
+approximately $e$; results were insensitive to this choice (values of 0.3, 0.5
+and 1 yielded errors within 0.003 of one another).
 
 This prior assumes that fitness before the first sample was similar to
 fitness between the samples. In simulations in which the landscape changed at
 the first sample, as under the onset of treatment, it nevertheless remained
-more accurate than independent initial abundances. When the samples were
-separated by approximately 30 divisions it was less accurate, because the
-default $h=T$ is then too short for the mutational cloud to have formed; a
-longer, explicitly specified $h$ addresses this case.
+more accurate than independent initial abundances. With $h=T$, the default up
+to alfak2 8327282, it was less accurate when the samples were separated by
+approximately 30 divisions or by a few weeks, because the mutational cloud
+then has too little time to form and the neighbours of the majors are held far
+below their observed abundance; the candidate histories address this case
+(validation/sparse\_joint/short\_interval).
 
 \subsection{Prior on the Fitness Landscape}
 \label{sec:sj-prior}
@@ -655,7 +687,20 @@ information about the landscape. It is left out, which is that limit, and
 the fit is the fit to the other samples. A clonal sweep produces such a
 sample when the population in the middle lies two or more steps from the
 majors of both ends. The first and the last sample must each have a count in
-the domain.
+the domain. Figure~\ref{fig:flow-anchored} shows the steps of this method.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth,height=0.8\textheight,keepaspectratio]{flowcharts/flow_anchored.pdf}
+\caption{The anchored method (\texttt{series = "anchored"}, the default of the
+current code). The majors and the domain come from the first and the last
+sample; a sample in between with no cell on the majors is left out; the
+samples in between count for the majors only, with the weight $\omega$ from a
+first fit; one trajectory runs from the first sample to every later one
+(\ref{eq:series}). The remaining steps are those of
+Figure~\ref{fig:flow-core}.}
+\label{fig:flow-anchored}
+\end{figure}
 
 \paragraph{Pairs of consecutive samples.}
 That such a sample carries no information follows from the design, not from
@@ -691,7 +736,20 @@ population's age $t_{k-1}$ at the pair's first sample. A sample in between is
 the end of one pair and the start of the next, so it counts twice. Given the
 centre of the cohort's trend, this is the cohort model
 (Section~\ref{sec:sj-cohort}) of the pairs with every birth rate and the trend
-shared, and the fits agree to $10^{-14}$.
+shared, and the fits agree to $10^{-14}$. Figure~\ref{fig:flow-pairwise}
+shows the steps of this method.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth,height=0.7\textheight,keepaspectratio]{flowcharts/flow_pairwise.pdf}
+\caption{Method A, pairwise (\texttt{series = "pairwise"}). Samples are left
+out until both samples of every pair of consecutive samples have a cell in
+that pair's domain; each pair is then fitted as two samples are
+(\ref{eq:pairwise}), with its own initial abundances and depth, and all pairs
+share one landscape. The remaining steps are those of
+Figure~\ref{fig:flow-core}.}
+\label{fig:flow-pairwise}
+\end{figure}
 
 In the \emph{state-space} method every sample has latent log intensities
 $z_k$, with $z_0=\zeta$. Each sample is observed once,
@@ -715,19 +773,56 @@ every sample used for every karyotype, except that the closed form composed
 over the intervals keeps part of the second order in $M$. At
 $\sigma^2_{\mathrm{drift}}=10^{-8}$ the two fits correlate at $0.997$. The
 expected information (\ref{eq:laplace}) is taken with the transitions'
-residuals at their fitted values.
+residuals at their fitted values. Figure~\ref{fig:flow-state-space} shows the
+steps of this method.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\textwidth,height=0.75\textheight,keepaspectratio]{flowcharts/flow_state_space.pdf}
+\caption{Method B, state space (\texttt{series = "state\_space"}). The pairs'
+domains and the samples left out are those of the pairwise method; every
+sample has latent log abundances, linked from one sample to the next by the
+dynamics plus drift (\ref{eq:state-space}), and is observed once. The drift is
+a fifth scale. The remaining steps are those of Figure~\ref{fig:flow-core}.}
+\label{fig:flow-state-space}
+\end{figure}
 
 On the simulations of the anchored model, and on clonal sweeps and neutral
 cultures (validation/sparse\_joint/series\_methods), the pairwise method was
 up to 1.8 times less accurate than the first and the last sample alone with
 bottlenecks of 200 cells, and 1.1--2.0 times on neutral cultures. Restarting
 from the observed sample at every pair reads passaging drift within a pair as
-selection. The state-space method was within 0.93--1.03 on passaged cultures
-and up to 1.3 times less accurate one and two steps from the observed
+selection. The state-space method was within 0.93--1.02 on passaged cultures
+and up to 1.2 times less accurate one and two steps from the observed
 karyotypes of neutral cultures. In clonal sweeps both were more accurate
 than the anchored model, with median RMSE ratios of 0.68--0.85 and 0.79--0.82,
-against 0.89--0.94. The state-space method takes 3--11 times as long as the
+against 0.89--0.94. The state-space method takes 3--12 times as long as the
 anchored model. The anchored model is the default.
+
+\paragraph{Automatic choice.}
+With \texttt{series = "auto"} the method is chosen from the data
+(Figure~\ref{fig:flow-overview}). Let $s$ be the smallest share, over the
+samples between the first and the last, of a sample's cells that lie on the
+majors of the first and the last sample. A clonal sweep leaves such a sample
+off the majors of both ends, and the anchored model then misses the population
+in between. If $s\ge0.3$, the anchored model is fitted. Otherwise the
+intermediate weight $\omega$ of the anchored model is computed as above, or
+taken from \texttt{intermediate\_weight}. The pairwise method is fitted if
+$\omega\ge0.5$, i.e.\ with little passaging drift, or if no sample in between
+is left to measure it; the state-space method is fitted otherwise. The choice
+and both measures are returned in \texttt{diagnostics\$series\_choice}. With
+two samples every method gives the two-sample fit. The thresholds were chosen
+on the simulated sets of validation/sparse\_joint/series\_methods
+(\texttt{auto\_eval.R}) by a criterion fixed before any rule was scored: pass
+the gate on passaged cultures, add at most 0.01 to the anchored model's ratio
+on neutral cultures, and among those rules give the lowest ratio on clonal
+sweeps. The rule kept the anchored model on every passaged culture and on 95\%
+of the neutral ones, and gave a median ratio of 0.81 on clonal sweeps (anchored
+0.93; the best fitted method for each dataset, 0.74). A share threshold above
+0.3 left the anchored model on neutral cultures and added errors there. The
+weight threshold is less certain: 0.8 gave 0.82. The rule is being checked on
+the ALFA-K paper benchmark; until that check, \texttt{"anchored"} remains the
+default and the automatic choice must be requested.
 
 \subsection{Export in the \texttt{alfakR} Output Format}
 \label{sec:sj-alfakR}
@@ -932,12 +1027,26 @@ corresponding pipeline is specified. A plain-text version of this section is
 provided in \texttt{doc/alfak2\_workflow.md}.
 
 \subsection{Procedure}
+\label{sec:procedure}
+
+Figure~\ref{fig:flow-overview} shows how \texttt{fit\_sparse\_joint()}
+proceeds from the input to the fit object, and how it chooses between the
+two-sample fit and the three methods for more than two samples
+(Section~\ref{sec:sj-series}): at each decision node it states the rule the
+code applies. Figure~\ref{fig:flow-core} details the two-sample fit, whose
+steps every path shares, and Figures~\ref{fig:flow-anchored},
+\ref{fig:flow-pairwise} and~\ref{fig:flow-state-space} detail the anchored,
+pairwise and state-space methods. The sources of the charts are in
+\texttt{doc/flowcharts} (\texttt{build.sh} rebuilds them). The steps below are
+those of the two-sample fit.
 
 \paragraph{Model fitting.}
 \begin{enumerate}
-\item \textbf{Input.} A two-column matrix of integer counts indexed by
-karyotype; rows without cells are removed. $T=\texttt{dt}$ and
-$\beta=\texttt{beta}$; copy numbers must lie within $[c_{\min},c_{\max}]$.
+\item \textbf{Input.} A matrix of integer counts indexed by karyotype, with
+one column per sample (two, or more in time order;
+Section~\ref{sec:sj-series}); rows without cells are removed.
+$T=\texttt{dt}$ and $\beta=\texttt{beta}$; copy numbers must lie within
+$[c_{\min},c_{\max}]$.
 \item \textbf{Domain construction}, (\ref{eq:share})--(\ref{eq:domain});
 observed karyotypes outside the domain are set aside with their cells.
 \item \textbf{Missegregation kernel}, (\ref{eq:pij})--(\ref{eq:Pij}), for
@@ -949,7 +1058,8 @@ karyotypes and, by default, (\ref{eq:balance-prior}) for all other states.
 (\ref{eq:poisson}) and (\ref{eq:trend})--(\ref{eq:scale-prior}), compiled as a
 single TMB objective function.
 \item \textbf{Hyperparameter estimation} by (\ref{eq:laplace}), with
-prior-centred values if the optimisation fails.
+prior-centred values if the optimisation fails, at every candidate history;
+the candidate with the lowest objective is kept.
 \item \textbf{Posterior approximation}: mode $\hat u$ and expected information
 $H_E$, factorised once.
 \item \textbf{Relative fitness}, (\ref{eq:relative})--(\ref{eq:relative-var}),
@@ -1004,9 +1114,16 @@ Argument & Default & Definition \\
 \texttt{shell\_sd} & 0.5 & Prior standard deviation of $\gamma_{\mathrm{dist}}$ \\
 \texttt{initial\_frequency} & $\log10^{-5}$, 3 & $\log f_0$ and $\sigma_0$ in (\ref{eq:free-prior}) \\
 \texttt{initial\_state} & \texttt{"balance"} & Prior (\ref{eq:balance-prior}) for non-major states \\
-\texttt{history} & $T$ & History length $h$ \\
+\texttt{history} & $T$ and 30--3000 divisions longer than $T$ & Candidate
+history lengths $h$; the one of highest marginal likelihood is kept \\
 \texttt{balance\_sd} & 1 & $\sigma_\zeta$ \\
-\texttt{calibration} & $a=0.009$, $\kappa=0.6$ & Constants in (\ref{eq:calibration}) \\
+\texttt{calibration} & $a=0.009$, $\kappa=0.6$ (1.1 unobserved) & Constants in (\ref{eq:calibration}) \\
+\texttt{series} & \texttt{"anchored"} & Method for more than two samples:
+\texttt{"anchored"}, \texttt{"pairwise"}, \texttt{"state\_space"} or
+\texttt{"auto"} (Figure~\ref{fig:flow-overview}) \\
+\texttt{intermediate} & \texttt{"majors"} & Use of the samples in between
+by the anchored model \\
+\texttt{intermediate\_weight} & from a first fit & $\omega$; Section~\ref{sec:sj-series} \\
 \bottomrule
 \end{tabular}
 \end{center}

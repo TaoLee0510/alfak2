@@ -1,0 +1,73 @@
+% alfak2 sparse joint model, more than two samples: method B, state space
+% (series = "state_space"). Mirrors sparse_joint_pair_left_out(),
+% sparse_joint_pair_domains() and sparse_joint_state_space_problem() in
+% R/sparse-joint-series-methods.R. Build: pdflatex flow_state_space.tex
+\documentclass[tikz,border=4pt]{standalone}
+\input{flowstyle}
+\begin{document}
+\begin{tikzpicture}
+
+\node[box=cState, w=9.4cm] (in) at (0,0) {%
+  \textbf{B: state space} (\code{series = "state\_space"}, or chosen by \code{"auto"} for a sweep with
+  drift: $s<\autoshare$ and $\omega<\autoweight$)\\
+  samples $t_0<t_1<\dots<t_K$, $K\ge2$};
+
+\node[box, w=9.4cm, below=0.45cm of in] (pairs) {%
+  \textbf{1 Pair domains and coverage}, as in A: every pair $(t_{k-1},t_k)$ has its own majors
+  $\mathcal M_k$ and domain $\mathcal D_k$; a sample with no cell in its pair's $\mathcal D_k$ is left
+  out (for an uncovered $t_0$ or $t_K$, its neighbour in between), until every pair is covered.};
+\node[dec, below=0.45cm of pairs] (two) {More than two samples left?};
+\node[box=cTwo, w=3.2cm, font=\footnotesize, right=0.6cm of two] (twofit) {%
+  \textbf{Two-sample fit} of $t_0$ and $t_K$ (core chart)};
+\draw[arr] (in) -- (pairs);
+\draw[arr] (pairs) -- (two);
+\draw[arr, draw=cTwoB] (two) -- node[lab, above] {no} (twofit);
+
+\node[box, w=9.4cm, below=0.55cm of two] (states) {%
+  \textbf{2 States}\quad $\bigcup_k\mathcal D_k$, the majors of every pair first.};
+\draw[arr] (two) -- node[lab, right] {yes} (states);
+
+\node[box, w=9.4cm, below=0.4cm of states] (latent) {%
+  \textbf{3 Latent log abundances at every sample}\quad $z_0=\zeta$ with the initial prior and the
+  balance prior over $h$ (core chart step 4); $z_1,\dots,z_K$ follow from the transitions.};
+\node[box, w=9.4cm, below=0.4cm of latent] (trans) {%
+  \textbf{4 Transition} $t_{k-1}\to t_k$:
+  \[z_{ki}\sim\mathcal N\Bigl(\log n^{(k)}_i(\Delta_k;z_{k-1})-d_r\Delta_k+\theta_k,\ \frac{c\,v_{ki}}{c+v_{ki}}\Bigr),\]
+  $v_{ki}=\sigma^2_{\mathrm{drift}}\Delta_k/f_{ki}$, $c=4$: neutral drift of a state with mean share
+  $f_{ki}$ at the two samples (plus half a cell), capped smoothly.};
+\node[box, w=9.4cm, below=0.4cm of trans] (obs) {%
+  \textbf{5 Observation}\quad each sample once: $y_{ki}\sim\mathrm{Poisson}(e^{z_{ki}})$.};
+\node[box, w=9.4cm, below=0.4cm of obs] (scales) {%
+  \textbf{6 Scales}\quad $\sigma_d$, $\sigma_c$, $\sigma_r$ in $[10^{-4},0.5]$ and the drift
+  $\sigma^2_{\mathrm{drift}}$ in $[10^{-9},1]$, prior median $10^{-4}$ per unit time, log-sd 2.5
+  (\code{diagnostics\$drift}). One landscape for the whole series. TMB template
+  \code{sparse\_joint\_state\_space}. As $\sigma^2_{\mathrm{drift}}\to0$: the anchored fit with every
+  sample for every state.};
+\draw[arr] (states) -- (latent);
+\draw[arr] (latent) -- (trans);
+\draw[arr] (trans) -- (obs);
+\draw[arr] (obs) -- (scales);
+
+\node[box=cCore, w=9.4cm, below=0.45cm of scales] (core) {%
+  \textbf{Core chart steps 3 and 6--11}\quad kernel and trend, Laplace fit at every history, posterior
+  (expected information with the transitions' residuals at their fitted values), relative fitness,
+  output.};
+\draw[arr] (scales) -- (core);
+
+% ---- schematic --------------------------------------------------------------
+\begin{scope}[shift={($(trans.east)+(2.6,0.1)$)}]
+  \node[font=\footnotesize\bfseries, anchor=west] at (-1.35,1.25) {How the samples are used};
+  \foreach \k/\x in {0/-1.0, 1/0.0, 2/1.0, 3/2.0} {
+    \node[circle, draw=cStateB, fill=cState, minimum size=5.5mm, inner sep=0pt, font=\scriptsize] (z\k) at (\x,0.35) {$z_\k$};
+    \node[rectangle, draw=cStateB, fill=white, minimum size=4.5mm, inner sep=0pt, font=\scriptsize] (y\k) at (\x,-0.75) {$y_\k$};
+    \draw[->, cStateB, line width=0.7pt] (z\k) -- (y\k);
+  }
+  \foreach \a/\b in {z0/z1, z1/z2, z2/z3} {
+    \draw[->, cStateB, line width=0.8pt] (\a) -- (\b);
+  }
+  \node[font=\scriptsize, align=center] at (0.5,-1.55) {latent $z_k$: dynamics plus drift;\\
+    each $y_k$ observed once};
+\end{scope}
+
+\end{tikzpicture}
+\end{document}

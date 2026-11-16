@@ -3,7 +3,7 @@ test_that("two samples give the two-sample fit with every series method", {
   pair <- sim$counts[, c(1L, 4L)]
   pair <- pair[rowSums(pair) > 0, ]
   base <- fit_sparse_joint(pair, dt = 60, beta = sim$beta, max_cn = 4, history = 60)
-  for (method in c("pairwise", "state_space")) {
+  for (method in c("pairwise", "state_space", "auto")) {
     fit <- fit_sparse_joint(pair, dt = 60, beta = sim$beta, max_cn = 4, history = 60, series = method)
     expect_identical(fit$summary, base$summary)
     expect_identical(fit$diagnostics$objective, base$diagnostics$objective)
@@ -150,6 +150,42 @@ test_that("a sample in between with no cell in its pair's domain is left out", {
     expect_identical(fit$diagnostics$dropped_samples$uncovered, "t2")
     expect_equal(fit$input$counts, counts)
   }
+})
+
+test_that("the automatic choice keeps the anchored fit without a sweep", {
+  sim <- simulate_series_counts()
+  expect_identical(sparse_joint_auto_series(0.5, NA), "anchored")
+  expect_identical(sparse_joint_auto_series(0.1, 0.9), "pairwise")
+  expect_identical(sparse_joint_auto_series(0.1, 0.5), "pairwise")
+  expect_identical(sparse_joint_auto_series(0.1, 0.3), "state_space")
+  expect_identical(sparse_joint_auto_series(0.1, NA), "pairwise")
+  auto <- fit_sparse_joint(sim$counts, times = sim$times, beta = sim$beta, max_cn = 4, history = 60, series = "auto")
+  anchored <- fit_sparse_joint(sim$counts, times = sim$times, beta = sim$beta, max_cn = 4, history = 60)
+  choice <- auto$diagnostics$series_choice
+  expect_identical(choice$series, "anchored")
+  expect_gte(choice$ends_major, sparse_joint_auto_thresholds[["ends_major"]])
+  expect_true(is.na(choice$weight))
+  expect_identical(auto$summary, anchored$summary)
+  expect_error(fit_sparse_joint(sim$counts, times = sim$times, beta = sim$beta, max_cn = 4, series = "auto",
+                                intermediate = "all"), "intermediate")
+})
+
+test_that("the automatic choice fits a sweep with the method it picks", {
+  sim <- simulate_series_counts()
+  # t2 has swept to a far clone: no cell on the first and last samples'
+  # majors, so the anchored method leaves it out and auto looks at drift.
+  counts <- replace_series_sample(sim, 3L, c("4.4.4.4" = 300, "4.4.4.3" = 20))
+  fit_with <- function(series) {
+    suppressWarnings(fit_sparse_joint(counts, times = sim$times, beta = sim$beta, max_cn = 4, history = 60,
+                                      series = series))
+  }
+  auto <- fit_with("auto")
+  choice <- auto$diagnostics$series_choice
+  expect_identical(choice$ends_major, 0)
+  # Its weight is the anchored fit's own.
+  expect_identical(choice$weight, fit_with("anchored")$diagnostics$intermediate_weight)
+  expect_identical(choice$series, sparse_joint_auto_series(choice$ends_major, choice$weight))
+  expect_identical(auto$summary, fit_with(choice$series)$summary)
 })
 
 test_that("a last sample with no cell in its pair's domain pairs with a sample further in", {

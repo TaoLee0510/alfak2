@@ -25,7 +25,7 @@ fit_sparse_joint(
   control = list(eval.max = 200, iter.max = 100),
   inner_control = list(maxit = 200, tol = 1e-10),
   times = NULL,
-  series = c("anchored", "pairwise", "state_space"),
+  series = c("anchored", "pairwise", "state_space", "auto"),
   intermediate = c("majors", "all"),
   intermediate_weight = NULL
 )
@@ -121,8 +121,20 @@ fitted as two samples are, with its own majors, domain, initial
 abundances and depth, and all pairs share one landscape. \code{"state_space"}:
 every sample has latent abundances, linked from one sample to the next
 by the same dynamics plus a drift whose scale is estimated
-(\code{diagnostics$drift}); the pairs' domains are joined. Two samples give
-the same fit with all three. The three are compared in
+(\code{diagnostics$drift}); the pairs' domains are joined. \code{"auto"}: one of
+the three, chosen from the data:
+\itemize{
+\item the anchored method when every sample in between has at least 30\% of
+its cells on the first and last samples' majors;
+\item otherwise (a clonal sweep) the pairwise method when the anchored
+intermediate weight is at least 0.5 (little drift), or when no sample
+in between remains to measure it;
+\item else the state-space method.
+}
+
+The fit is that method's fit, and \code{diagnostics$series_choice} gives the
+choice and the two measures. Two samples give the same fit with all
+methods. The methods and the choice are compared in
 validation/sparse_joint/series_methods.}
 
 \item{intermediate}{With more than two samples, how the samples between

@@ -302,13 +302,25 @@ first and last sample alone
 - **`pairwise` under drift**: up to 1.8 with bottlenecks of 200 cells, and
   1.1–2.0 on neutral cultures. Each pair restarts from the observed sample,
   so passaging drift within a pair reads as selection.
-- **`state_space`**: 0.93–1.03 on the passaged cultures, but up to 1.3 at
-  one and two steps on neutral cultures. It takes 3–11 times as long as
-  `anchored`; with 8 samples some fits take more than 6 hours and up to
-  10 GB.
+- **`state_space`**: 0.93–1.02 on the passaged cultures, but up to 1.2 at
+  one and two steps on neutral cultures. It takes 3–12 times as long as
+  `anchored`; with 8 samples some fits take up to 18 hours and 16 GB.
 
 `anchored` stays the default. The other two suit clonal sweeps through large
 bottlenecks.
+
+`series = "auto"` chooses among the three from the data (diagram in
+[doc/flowcharts](doc/flowcharts/flow_overview.pdf)):
+- `anchored` unless a sample in between has less than 30% of its cells on
+  the majors of the first and the last sample, which marks a clonal sweep;
+- in a sweep, `pairwise` if the anchored intermediate weight is at least 0.5
+  (little drift), otherwise `state_space`.
+
+The choice and both measures are in `fit$diagnostics$series_choice`. On the
+simulated sets it keeps `anchored` on every passaged culture and on 95% of
+the neutral ones, and gives 0.81 on clonal sweeps (`anchored` 0.93). It is
+being checked on the ALFA-K paper benchmark; until then `anchored` stays the
+default.
 
 The first and the last sample must each have a cell in the domain. Some
 samples in between have no cell on the states they count for: no cell on a

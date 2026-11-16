@@ -759,8 +759,18 @@ sparse_joint_rebuild <- function(fit, weight = NULL, zeta_prior_mean = NULL, zet
 #'   abundances and depth, and all pairs share one landscape. `"state_space"`:
 #'   every sample has latent abundances, linked from one sample to the next
 #'   by the same dynamics plus a drift whose scale is estimated
-#'   (`diagnostics$drift`); the pairs' domains are joined. Two samples give
-#'   the same fit with all three. The three are compared in
+#'   (`diagnostics$drift`); the pairs' domains are joined. `"auto"`: one of
+#'   the three, chosen from the data:
+#'   - the anchored method when every sample in between has at least 30% of
+#'     its cells on the first and last samples' majors;
+#'   - otherwise (a clonal sweep) the pairwise method when the anchored
+#'     intermediate weight is at least 0.5 (little drift), or when no sample
+#'     in between remains to measure it;
+#'   - else the state-space method.
+#'
+#'   The fit is that method's fit, and `diagnostics$series_choice` gives the
+#'   choice and the two measures. Two samples give the same fit with all
+#'   methods. The methods and the choice are compared in
 #'   validation/sparse_joint/series_methods.
 #' @param intermediate With more than two samples, how the samples between
 #'   the first and the last are used. `"majors"`, the default: the majors and
@@ -816,7 +826,7 @@ fit_sparse_joint <- function(counts,
                              control = list(eval.max = 200, iter.max = 100),
                              inner_control = list(maxit = 200, tol = 1e-10),
                              times = NULL,
-                             series = c("anchored", "pairwise", "state_space"),
+                             series = c("anchored", "pairwise", "state_space", "auto"),
                              intermediate = c("majors", "all"),
                              intermediate_weight = NULL) {
   data <- if (inherits(counts, "alfak2_data")) {
@@ -864,6 +874,48 @@ fit_sparse_joint <- function(counts,
   # Checked once, before any candidate history is fitted: a first or last
   # sample with no cell next to a major karyotype leaves nothing to fit.
   n_input <- ncol(counts)
+  # Automatic choice of the series method (sparse_joint_auto_series()). Two
+  # samples give the two-sample fit with every method.
+  if (series == "auto" && n_input <= 2L) series <- "anchored"
+  if (series == "auto") {
+    if (intermediate != "majors") {
+      stop("`series = \"auto\"` chooses with `intermediate = \"majors\"`.", call. = FALSE)
+    }
+    share <- sparse_joint_ends_major_share(counts, major_frequency, major_count, max_states,
+                                           as.integer(min_cn), as.integer(max_cn))
+    weight <- NA_real_
+    if (share < sparse_joint_auto_thresholds[["ends_major"]]) {
+      weight <- if (!is.null(intermediate_weight)) intermediate_weight else {
+        # The anchored fit's own weight: from a first fit at the shortest
+        # history, on the samples the anchored method keeps.
+        coverage <- sparse_joint_check_coverage(counts, major_frequency, major_count, max_states,
+                                                as.integer(min_cn), as.integer(max_cn),
+                                                sparse_joint_major_columns(data, list(intermediate = "majors")),
+                                                required = c(1L, n_input))
+        left_out <- sparse_joint_uncounted_samples(coverage, "majors")
+        kept <- if (length(left_out)) sparse_joint_keep_samples(data, setdiff(seq_len(n_input), left_out)) else data
+        if (ncol(kept$counts) <= 2L) NA_real_ else {
+          arguments <- mget(names(formals(sys.function())), envir = environment())
+          arguments$counts <- kept
+          arguments$series <- "anchored"
+          arguments$history <- history[[1L]]
+          arguments$intermediate_weight <- 1
+          first <- withCallingHandlers(do.call(fit_sparse_joint, arguments),
+                                       alfak2_convergence_warning = function(w) invokeRestart("muffleWarning"))
+          dispersion <- sparse_joint_intermediate_dispersion(first)
+          if (is.finite(dispersion)) 1 / max(1, dispersion) else 1
+        }
+      }
+    }
+    chosen <- sparse_joint_auto_series(share, weight)
+    arguments <- mget(names(formals(sys.function())), envir = environment())
+    arguments$counts <- data
+    arguments$series <- chosen
+    fit <- do.call(fit_sparse_joint, arguments)
+    fit$diagnostics$series_choice <- list(requested = "auto", series = chosen, ends_major = share, weight = weight,
+                                          thresholds = sparse_joint_auto_thresholds)
+    return(fit)
+  }
   # The pairwise and state-space methods: every pair of consecutive samples
   # with its own domain, each sample with a cell in it. Samples are left out
   # until that holds (sparse_joint_pair_left_out()).

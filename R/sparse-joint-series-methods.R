@@ -243,6 +243,32 @@ sparse_joint_check_pair_coverage <- function(counts, major_frequency, major_coun
   coverage
 }
 
+# Automatic choice of the series method (`series = "auto"`), from
+# validation/sparse_joint/series_methods/auto_eval.R:
+# - A sample in between with less than `ends_major` of its cells on the
+#   first and last samples' majors points to a clonal sweep, which the
+#   anchored design misses.
+# - With a sweep, the pairwise method when the anchored intermediate weight
+#   (1 / dispersion of the majors) is at least `weight`, i.e. little drift;
+#   otherwise the state-space method. With no sample in between left to
+#   measure the dispersion, the pairwise method.
+# - The anchored method otherwise.
+sparse_joint_auto_thresholds <- c(ends_major = 0.3, weight = 0.5)
+
+# Least share, over the samples in between, of a sample's cells on the
+# majors of the first and the last sample.
+sparse_joint_ends_major_share <- function(counts, major_frequency, major_count, max_states, min_cn, max_cn) {
+  n_time <- ncol(counts)
+  domain <- sparse_joint_domain(counts, major_frequency, major_count, max_states, min_cn, max_cn, c(1L, n_time))
+  on_major <- rownames(counts) %in% domain$labels[seq_len(domain$n_major)]
+  min(vapply(seq(2L, n_time - 1L), function(k) sum(counts[on_major, k]) / sum(counts[, k]), numeric(1)))
+}
+
+sparse_joint_auto_series <- function(share, weight, thresholds = sparse_joint_auto_thresholds) {
+  if (share >= thresholds[["ends_major"]]) return("anchored")
+  if (is.na(weight) || weight >= thresholds[["weight"]]) "pairwise" else "state_space"
+}
+
 # Samples that the pairwise and state-space methods leave out. Each pair of
 # consecutive samples has its own domain. A sample of a pair with no cell in
 # that domain carries no information about it: its depth offset is free, as
