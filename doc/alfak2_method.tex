@@ -664,6 +664,15 @@ rule moved, a move was about as often worse as better. With few cells,
 short intervals or strong drift, two time points do not separate a higher
 missegregation rate from drift and sampling noise.
 
+A drift term was not added for this. With two time points each karyotype
+changes once, and selection, influx and drift each explain that change.
+Where more time points allow it, a drift estimated from the counts
+(\texttt{series = "state\_space"}, Section~\ref{sec:sj-series}) read drift as
+selection on neutral cultures. A drift fixed from the passaging bottlenecks
+could at best make the likelihood flat in $\beta$, which leaves the default.
+Information on $\beta$ has to come from outside the counts, such as a
+measured rate.
+
 \texttt{fit\_sparse\_joint\_rates(beta\_range = )} therefore fits the model
 over a range of $\beta$ at a fixed $b_0$, as it does for $b_0$. The
 asymmetry of the birth rate holds here too:

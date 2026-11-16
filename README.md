@@ -197,6 +197,11 @@ Choosing it per dataset by marginal likelihood was tried and not adopted
   accuracy where the default was right and still found a higher rate. With
   few cells, short intervals or strong drift, two time points do not
   separate a higher rate from drift and sampling noise.
+- A drift term would not help. With two time points, selection, influx and
+  drift each explain the one change seen. With more time points, an estimated
+  drift (`series = "state_space"`, below) read drift as selection on neutral
+  cultures. The rate has to come from outside the counts, for instance from a
+  measurement.
 
 When the rate is uncertain, fit across a range of rates, with the most likely
 rate at the lowest end. Too high a rate costs more than too low a rate:

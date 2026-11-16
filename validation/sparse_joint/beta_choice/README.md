@@ -156,7 +156,8 @@ still finds a rate that really is higher. Its steps were:
 - step 3: test rules offline;
 - step 4: re-add the option if a rule passes.
 
-A model change (a drift term) was outside the plan.
+A model change (a drift term) was outside the plan. Why it is not pursued is
+under Decision.
 
 ## Step 1: what drives the high picks (`mechanism.R`)
 
@@ -342,6 +343,30 @@ rate is uncertain, fit over a range of rates:
 
 The Fig. 4d qualification stands. The PDX preference for 4–16× cannot be
 told apart from the short-interval bias.
+
+**A drift term is not pursued** (decided 2026-11-16):
+- **Two time points.** Each karyotype changes once between them, and
+  selection, missegregation influx and drift each explain that change. A
+  drift estimated from the counts adds a third unknown to two that are
+  already confounded.
+- **More time points.** An estimated drift was tried there:
+  `series = "state_space"` ([series methods](../series_methods/README.md)).
+  - It passed 16 of 24 e1 cells.
+  - On neutral cultures, where every fitted difference is drift read as
+    selection, its error at one and two steps was up to 1.2 times that of
+    the first and last time point alone.
+  - Its sd was too small at a controlled false-positive rate.
+
+  With two time points it is not used.
+- **A drift fixed from the passaging bottlenecks** (not estimated) is
+  untested. At best it would remove the preference for a high rate and
+  leave the likelihood flat in β, which is the fixed default again. It also
+  needs the bottleneck at every passage.
+
+Information on β has to come from outside the counts:
+- a measured rate, given as `beta` or `beta_range`;
+- perhaps replicate cultures from one start. Drift differs between
+  replicates; selection and influx do not. This is untested.
 
 ## Files
 
