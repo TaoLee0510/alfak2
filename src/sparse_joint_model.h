@@ -55,12 +55,15 @@ Type sparse_joint_model(objective_function<Type>* obj) {
   DATA_SCALAR(balance_sd);            // log-scale spread around it
   DATA_VECTOR(balance_offset);        // zero, except to evaluate the expected information
   DATA_VECTOR(weight);                // 1: a state's counts enter the likelihood; 0: held out
+  DATA_INTEGER(level_free);           // 1: the level of the balance is estimated (balance_level)
+  DATA_SCALAR(level_sd);              // prior spread of its log
 
   PARAMETER_VECTOR(zeta);             // log expected count at the first timepoint
   PARAMETER_VECTOR(g);                // log birth rate
   PARAMETER_VECTOR(coef);             // trend coefficients
   PARAMETER(theta1);                  // log depth ratio, centred on the reference state
   PARAMETER_VECTOR(log_scale);
+  PARAMETER(balance_level);           // log factor between the fed abundances and the balance
 
   int n = y0.size();
   Type nll = 0;
@@ -96,6 +99,13 @@ Type sparse_joint_model(objective_function<Type>* obj) {
   vector<Type> balance_residual(n);
   balance_residual.setZero();
   if (balance == 1) {
+    // The level of the balance: with `level_free`, all fed states share one
+    // log factor over what the majors would have fed them, so that only the
+    // differences between them inform fitness. The size of the whole cloud
+    // also depends on the missegregation rate and on how long and how
+    // steadily the population has grown, which the counts do not tell apart
+    // from fitness.
+    if (level_free == 1) nll -= dnorm(balance_level, Type(0), level_sd, true);
     vector<Type> log_start(n);
     vector<int> fed(n);
     fed.setZero();
@@ -109,7 +119,7 @@ Type sparse_joint_model(objective_function<Type>* obj) {
     }
     for (int i = 0; i < n; ++i) {
       if (fed(i)) {
-        balance_residual(i) = zeta(i) - log_start(i);
+        balance_residual(i) = zeta(i) - log_start(i) - balance_level;
         nll -= dnorm(balance_residual(i) - balance_offset(i), Type(0), balance_sd, true);
       } else {
         nll -= dnorm(zeta(i), zeta_prior_mean(i), zeta_prior_sd(i), true);

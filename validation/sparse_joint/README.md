@@ -204,7 +204,7 @@ karyotypes within it besides. What two timepoints say about individual
 unobserved karyotypes is limited by the mean dynamics and by which clones
 happened to establish, not by sampling.
 
-## Initial abundances at balance (the default)
+## Initial abundances at balance
 
 `initial_state = "balance"` starts every non-major karyotype at
 mutation-selection balance with the majors next to it, so that the levels
@@ -268,6 +268,37 @@ diagnosis; its README the numbers.
   RMSE ratio 0.99 on development, 1.01 on held-out cohorts). The cohort fit
   takes 2.4–3.7 times as long. `initial_state = "free"` gives the earlier model; the
 benchmark entries without "balance" in their name use it.
+
+## Choice between balance and free initial abundances (default since 2026-11-16)
+
+`initial_state = "auto"`, the default for two time points, first fits the
+balance prior with the history at the interval and one free log factor for
+the level of all non-major karyotypes (`balance_level = "free"`). If that
+level exceeds 1 (`auto_level`), the cloud is more than about e times what the
+balance at the assumed missegregation rate allows, and the fit is `"free"`;
+otherwise it is `"balance"` with its candidate histories.
+`diagnostics$initial_state_check` keeps the level and the choice. With more
+than two time points `"auto"` is `"balance"`.
+
+- Why: on simulated populations as diverse as the Salehi passages, where the
+  true rate was 2-8 times the assumed one or 1-2% of chromosomes were called
+  a copy off, the balance prior ranked one-copy neighbours worse than chance
+  (0.17-0.48); the free model reached 0.48-0.71. Where the balance prior's
+  assumptions hold it was about a fifth more accurate than the free model.
+- A free level alone, and choosing between the balance and a free level by
+  marginal likelihood, cost 4-24% on the development landscapes: the level
+  and the neighbours' mean fitness move all non-major abundances alike.
+- The rule was fixed on one set of simulations and confirmed on new
+  landscapes (seed bases 101000-103000): development scenarios all kept the
+  balance prior (unchanged); short intervals switched 23% with errors
+  unchanged (0.99-1.00); the diverse populations all switched, errors 0.73-0.81
+  of the balance prior's and direction at distance one 0.37 to 0.66; stress
+  scenarios 1.02-1.03 (6% switched).
+- Cost: one extra fit at the interval.
+- On the Salehi passages half the trajectories switch. Their Fig. 2d ranking
+  is dominated by sampling noise (two random halves of one passage rank the
+  observed change at 0.62-0.77), so it neither supports nor refutes the rule.
+- `validation/sparse_joint/cloud_level/` has the study.
 
 ## Development scoreboard
 
@@ -772,6 +803,10 @@ protects at a cost when there was no delay. Fitting 8 patients together does
 not help.
 
 ## Open
+
+- `initial_state = "auto"` is checked on two time points only; with more it
+  is `"balance"`. Whether the cloud's level should decide there too is
+  untested.
 
 - The free model misses the information at a deep first time point (the failing
   safety cell); balance reads it, with a history now chosen by marginal

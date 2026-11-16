@@ -18,9 +18,12 @@ fit_sparse_joint(
   shell_power = 0.85,
   shell_sd = 0.5,
   initial_frequency = c(mean = log(1e-05), sd = 3),
-  initial_state = c("balance", "free"),
+  initial_state = c("auto", "balance", "free"),
+  auto_level = 1,
   history = NULL,
   balance_sd = 1,
+  balance_level = c("fixed", "free"),
+  balance_level_sd = 3,
   calibration = sparse_joint_default_calibration,
   control = list(eval.max = 200, iter.max = 100),
   inner_control = list(maxit = 200, tol = 1e-10),
@@ -73,14 +76,32 @@ the earliest timepoint it was seen, with the same standard deviation:
 absent other evidence its frequency is taken not to have changed.}
 
 \item{initial_state}{How abundances at the first timepoint are treated.
-\code{"balance"}, the default, starts every karyotype that is not major at
+\code{"balance"} starts every karyotype that is not major at
 mutation-selection balance with the major karyotypes next to it, so that
 its count at the first time point also informs its fitness. \code{"free"}
 estimates one for every karyotype and so uses the first time point only as a
 starting point. Balance takes fitness before the first time point to have
 resembled fitness between the time points. On simulated landscapes it was
 still more accurate than \code{"free"} when the landscape changed at the first
-time point, as under a new treatment.}
+time point, as under a new treatment. \code{"auto"}, the default, chooses
+between the two: a first fit with the balance prior, its level free
+(\code{balance_level = "free"}) and the history at the interval measures how
+much larger the cloud of non-major karyotypes is than the balance at the
+assumed missegregation rate allows; if the log of that factor exceeds
+\code{auto_level}, the fit is \code{"free"}, otherwise \code{"balance"}.
+\code{diagnostics$initial_state_check} records the level, its standard
+deviation and the choice, and \code{diagnostics$initial_state} the state
+fitted. A cloud that large comes from a true missegregation rate above
+\code{beta}, from cells called a copy off, or from a population far from
+balance; there the balance prior ranked neighbours worse than chance on
+simulated data, while \code{"free"} was about a fifth less accurate where the
+balance prior's assumptions hold (validation/sparse_joint/cloud_level).
+With more than two time points \code{"auto"} is \code{"balance"}: the choice has
+been checked on two time points only. Up to alfak2 bf86c85 the default
+was \code{"balance"}.}
+
+\item{auto_level}{With \code{initial_state = "auto"}, the log factor of the
+cloud over the balance above which the fit is \code{"free"}.}
 
 \item{history}{Time, in units of \code{dt}, over which the balance built up
 before the first time point. By default it is chosen among the interval
@@ -97,6 +118,16 @@ their fitness is overestimated (validation/sparse_joint/short_interval).}
 
 \item{balance_sd}{Spread, on the log scale, of initial abundances around
 the balance.}
+
+\item{balance_level}{With the balance prior and two time points, whether
+the balance sets the level of the non-major karyotypes' initial
+abundances (\code{"fixed"}, the default) or only their differences
+(\code{"free"}: one log factor for all, estimated). Used by
+\code{initial_state = "auto"}; on its own \code{"free"} gives up what the cloud's
+size says about the neighbours' fitness and was about a fifth less
+accurate on the development landscapes.}
+
+\item{balance_level_sd}{Prior standard deviation of that log factor.}
 
 \item{calibration}{Constants \code{floor}, \code{deficit} and \code{deficit_unobserved}
 that turn the model's posterior standard deviation of relative fitness

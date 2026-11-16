@@ -45,7 +45,9 @@ test_that("the series template gives the two-timepoint objective for two timepoi
   at_series <- at_pair[c("zeta", "g", "coef")]
   at_series$theta <- 0.2
   at_series$log_scale <- at_pair$log_scale
-  a <- TMB::MakeADFun(pair$tmb_data, at_pair, DLL = "alfak2", silent = TRUE)
+  # The level of the balance prior, which only the two-time-point template has,
+  # stays fixed as in a fit.
+  a <- TMB::MakeADFun(pair$tmb_data, at_pair, map = list(balance_level = factor(NA)), DLL = "alfak2", silent = TRUE)
   b <- TMB::MakeADFun(series$tmb_data, at_series, DLL = "alfak2", silent = TRUE)
   expect_equal(b$fn(), a$fn(), tolerance = 1e-12)
   expect_equal(b$gr(), a$gr(), tolerance = 1e-10)
@@ -55,7 +57,7 @@ test_that("the series template gives the two-timepoint objective for two timepoi
 test_that("two-timepoint fits are the same with either template", {
   sim <- simulate_sparse_joint_counts()
   fit <- function() fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, major_frequency = 0.05, max_cn = 4,
-                                     history = 100)
+                                     initial_state = "balance", history = 100)
   pair <- fit()
   old <- options(alfak2.sparse_joint_template = "series")
   series <- tryCatch(fit(), finally = options(old))
