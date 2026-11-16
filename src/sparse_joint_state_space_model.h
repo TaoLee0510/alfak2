@@ -4,25 +4,25 @@
 // Sparse joint count model for one population sampled three or more times,
 // as a state-space model (`series = "state_space"`).
 //
-// Every state has a latent log expected count at every sample. From one
-// sample to the next the population follows the first-order closed form of
+// Every state has a latent log expected count at every time point. From one
+// time point to the next the population follows the first-order closed form of
 // `sparse_joint_model.h` over the interval, started from the latent
-// abundances at the earlier sample, plus a Gaussian deviation on the log
+// abundances at the earlier time point, plus a Gaussian deviation on the log
 // scale: drift through passaging bottlenecks and whatever else the dynamics
 // leave out. Its variance is drift * interval / frequency, with the
 // frequency of the state about that interval taken from the counts, and
-// rises to at most `max_drift_var`. The drift is one scale parameter. Each
-// sample's counts enter once, and the landscape (birth rates and trend) is
+// rises to at most `max_drift_var`. The drift is one scale parameter. The
+// counts at each time point enter once, and the landscape (birth rates and trend) is
 // shared. With no drift the latent abundances follow the closed form from
-// sample to sample; with a lot, each interval is fitted on its own.
+// time point to time point; with a lot, each interval is fitted on its own.
 
 #undef TMB_OBJECTIVE_PTR
 #define TMB_OBJECTIVE_PTR obj
 
 template<class Type>
 Type sparse_joint_state_space_model(objective_function<Type>* obj) {
-  DATA_MATRIX(y);                     // counts, states x samples, first sample first
-  DATA_VECTOR(interval);              // time from each sample to the next
+  DATA_MATRIX(y);                     // counts, states x time points, first time point first
+  DATA_VECTOR(interval);              // time from each time point to the next
   DATA_IVECTOR(edge_from);            // one-step edges inside the domain
   DATA_IVECTOR(edge_to);
   DATA_VECTOR(edge_log_prob);         // log P_ij of the single-daughter kernel
@@ -30,7 +30,7 @@ Type sparse_joint_state_space_model(objective_function<Type>* obj) {
   DATA_MATRIX(design);                // trend design; first column is the intercept
   DATA_IVECTOR(coef_group);           // 0 intercept, 1 dosage, 2 curvature, 3 interaction, 4 shell
   DATA_INTEGER(reference);            // state whose net rate centres theta
-  DATA_VECTOR(zeta_prior_mean);       // first sample
+  DATA_VECTOR(zeta_prior_mean);       // first time point
   DATA_VECTOR(zeta_prior_sd);
   DATA_SCALAR(intercept_mean);
   DATA_SCALAR(intercept_sd);
@@ -47,8 +47,8 @@ Type sparse_joint_state_space_model(objective_function<Type>* obj) {
   DATA_SCALAR(max_drift_var);         // largest variance of a deviation
   DATA_MATRIX(transition_offset);     // zero, except to evaluate the expected information
 
-  PARAMETER_VECTOR(zeta);             // log expected count at the first sample
-  PARAMETER_MATRIX(zeta_later);       // log expected count at each later sample
+  PARAMETER_VECTOR(zeta);             // log expected count at the first time point
+  PARAMETER_MATRIX(zeta_later);       // log expected count at each later time point
   PARAMETER_VECTOR(g);                // log birth rate
   PARAMETER_VECTOR(coef);             // trend coefficients
   PARAMETER_VECTOR(theta);            // per interval: log depth ratio, centred on the reference state
@@ -73,7 +73,7 @@ Type sparse_joint_state_space_model(objective_function<Type>* obj) {
   vector<Type> net(n);
   for (int i = 0; i < n; ++i) net(i) = (Type(2) * exp(log_self(i)) - Type(1)) * exp(g(i));
 
-  // Initial abundances at the first sample, as in sparse_joint_model.h.
+  // Initial abundances at the first time point, as in sparse_joint_model.h.
   vector<Type> balance_residual(n);
   balance_residual.setZero();
   if (balance == 1) {
@@ -103,7 +103,7 @@ Type sparse_joint_state_space_model(objective_function<Type>* obj) {
     if (weight(i) != Type(0)) nll -= weight(i) * dpois(y(i, 0), exp(zeta(i)), true);
   }
 
-  // From each sample to the next.
+  // From each time point to the next.
   matrix<Type> transition_residual(n, n_interval);
   for (int k = 0; k < n_interval; ++k) {
     vector<Type> from(n);

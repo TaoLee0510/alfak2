@@ -1,15 +1,15 @@
-# Three methods for more than two samples
+# Three methods for more than two time points
 
 The user approved this plan on 2026-11-14. It follows the multi-timepoint
 work in `../multi_timepoint`.
 
 The method of 21aedca/8512694 (`series = "anchored"`) takes the majors and
-the domain from the first and the last sample. In the Salehi trajectories of
+the domain from the first and the last time point. In the Salehi trajectories of
 the ALFA-K paper benchmark, clonal sweeps put intermediate passages two or
-more steps from those majors. Such a sample carries no information under
+more steps from those majors. Such a time point carries no information under
 that design and is left out. This is a limit of the design, not of the data.
 
-Two further methods model every pair of consecutive samples on its own, with
+Two further methods model every pair of consecutive time points on its own, with
 its own majors, domain and start. Evolution is continuous: one landscape for
 all pairs. All three methods are kept. The default is chosen after the
 evaluation below and the paper benchmark.
@@ -18,52 +18,52 @@ evaluation below and the paper benchmark.
 
 | | `anchored` | `pairwise` (A) | `state_space` (B) |
 | --- | --- | --- | --- |
-| dynamics | one trajectory from the first sample | each pair from its earlier sample as observed | latent abundances at every sample, linked by the dynamics plus drift |
-| majors, domain | first and last sample | each pair's own; states are their union | each pair's own; states are their union |
-| samples in between | majors only, weighted by 1/dispersion | end of one pair and start of the next | each counted once |
-| drift | none (down-weighting) | none (restart at each sample) | estimated scale |
+| dynamics | one trajectory from the first time point | each pair from its earlier time point as observed | latent abundances at every time point, linked by the dynamics plus drift |
+| majors, domain | first and last time point | each pair's own; states are their union | each pair's own; states are their union |
+| time points in between | majors only, weighted by 1/dispersion | end of one pair and start of the next | each counted once |
+| drift | none (down-weighting) | none (restart at each time point) | estimated scale |
 | template | `sparse_joint_series_model.h` | `sparse_joint_pairwise_model.h` | `sparse_joint_state_space_model.h` |
 
-With two samples all three give the two-sample fit, bit for bit.
+With two time points all three give the two-time-point fit, bit for bit.
 
-**Pairs without coverage.** For `pairwise` and `state_space`, both samples of
-each pair need a cell in that pair's domain. In c7f809c a pair without one
+**Pairs without coverage.** For `pairwise` and `state_space`, both time points
+of each pair need a cell in that pair's domain. In c7f809c a pair without one
 stopped the fit. The `benchmark` session found that this stopped 42 of the
 187 Salehi trajectories with more than two passages that `anchored` can fit,
 all of them sweep families. These are the trajectories the two methods are
 for.
 
-Such a sample carries no information about its pair, as an anchored sample
-in between with no count carries none. So it is now left out
+Such a time point carries no information about its pair, as an anchored time
+point in between with no count carries none. So it is now left out
 (`sparse_joint_pair_left_out()`, from the counts alone):
-- A sample in between with no cell in its pair's domain is left out, and its
+- A time point in between with no cell in its pair's domain is left out, and its
   neighbours become a pair.
-- If the first or the last sample has none, its neighbour is left out instead.
-- This repeats until every pair is covered; at worst the two-sample fit of the
-  ends remains.
+- If the first or the last time point has none, its neighbour is left out instead.
+- This repeats until every pair is covered; at worst the two-time-point fit of
+  the ends remains.
 
 On the Salehi inputs (default settings, `min_cn = 0`):
 - none of the 187 stops;
-- 42 leave out one sample each, the uncovered sample itself;
-- 4 of those 42 have three passages and become two-sample fits.
+- 42 leave out one time point each, the uncovered time point itself;
+- 4 of those 42 have three passages and become two-time-point fits.
 
-For comparison, `anchored` left out 103 samples in 53 of them. Fits in which
+For comparison, `anchored` left out 103 time points in 53 of them. Fits in which
 every pair is covered are unchanged.
 
 ### Pairwise (A)
 
-Each pair is modelled as two samples are (`sparse_joint_model.h`):
-- its initial abundances at the earlier sample, with balance for the pair's
+Each pair is modelled as two time points are (`sparse_joint_model.h`):
+- its initial abundances at the earlier time point, with balance for the pair's
   non-majors;
 - the first-order closed form over the interval;
 - its own depth.
 
 All pairs share the birth rates and the trend. A pair starts at balance over
-the history plus the population's age at its first sample (`"age"`, the
+the history plus the population's age at its first time point (`"age"`, the
 default). The alternative `"same"` uses the history alone; it is an internal
 option, `alfak2.pair_history`, compared as `pairwise_same`.
 
-The trend is centred on the count-weighted mean karyotype over all samples.
+The trend is centred on the count-weighted mean karyotype over all time points.
 
 Check: given the cohort's centre instead (the mean of the pairs' centres),
 the method equals `fit_sparse_joint_cohort()` on the pairs, with full sharing,
@@ -72,27 +72,27 @@ fitness agrees to 6e-15.
 
 ### State space (B)
 
-Latent log abundances at every sample. From one sample to the next they
-follow the closed form from the earlier sample's latent abundances, plus a
-Gaussian deviation.
+Latent log abundances at every time point. From one time point to the next
+they follow the closed form from the latent abundances at the earlier time
+point, plus a Gaussian deviation.
 - The deviation's variance is drift × interval / frequency, capped smoothly
   at 4.
-- The frequency is the mean share of the state at the two samples plus half a
-  cell.
+- The frequency is the mean share of the state at the two time points plus
+  half a cell.
 - The drift is a fifth scale. Its prior is log-normal around 1e-4 per day
   (sd 2.5), and its bounds are 1e-9 to 1.
 
-Each sample's counts enter once.
+The counts at each time point enter once.
 
 With the drift fixed at 1e-8, the fit follows the anchored model with every
-sample used for every karyotype: correlation 0.997, majors within 1e-4.
+time point used for every karyotype: correlation 0.997, majors within 1e-4.
 They differ by the second-order terms of the mutational flux, which the
 closed form composed over intervals keeps.
 
 ### Checks on a small example (`hmc_check.R`, build cv10)
 
-The example is `simulate_series_counts()` of the package tests: 4 samples,
-21 states. The joint posterior was sampled by HMC at the fitted scales and
+The example is `simulate_series_counts()` of the package tests: 4 time
+points, 21 states. The joint posterior was sampled by HMC at the fitted scales and
 compared with what each fit reports (mode, and sd from the expected
 information).
 
@@ -108,22 +108,22 @@ All three sets use the development simulator and the landscapes of
 `../multi_timepoint` (seed base 97000; held-out 98000 sealed).
 
 - **e1**: the stage-2 passaged cultures, linked, not copied. 288 datasets:
-  - first sample at day 1440;
-  - 4 or 8 samples, 6 or 60 days apart;
+  - first time point at day 1440;
+  - 4 or 8 time points, 6 or 60 days apart;
   - bottlenecks of 200, 2000 or 20000 cells;
-  - 200 or 1000 cells per sample.
+  - 200 or 1000 cells per time point.
 - **e2**: clonal sweeps. 192 datasets:
-  - first sample at day 240 or 480, when clones still replace one another;
-  - samples 120 days apart;
+  - first time point at day 240 or 480, when clones still replace one another;
+  - time points 120 days apart;
   - bottlenecks of 2000 or 20000 cells;
   - otherwise as e1.
 
-  Gate: does it reproduce what the Salehi trajectories show? With 8 samples,
-  42–62% of datasets have a sample in between with no cell on the ends'
+  Gate: does it reproduce what the Salehi trajectories show? With 8 time
+  points, 42–62% of datasets have a time point in between with no cell on the ends'
   majors, and 4–38% one with no cell in the anchored domain. For comparison,
-  53 of 205 Salehi trajectories had such a sample. With 4 samples (360 days)
+  53 of 205 Salehi trajectories had such a time point. With 4 time points (360 days)
   there are none.
-- **e3**: neutral. The e1 design, but from the first sample on every viable
+- **e3**: neutral. The e1 design, but from the first time point on every viable
   karyotype divides at the start population's mean rate. This uses
   `abm_constant.cpp`, a copy of the simulator with that one switch.
   Every fitness difference a method reports is a false positive. 288
@@ -134,7 +134,7 @@ All three sets use the development simulator and the landscapes of
 Every method is scored on the karyotypes of stage 2: observed ones, and one
 and two steps away. The reference is the same for every method.
 - **Accuracy**: RMSE of relative fitness against the truth, as a ratio to
-  `ends` (the first and last sample alone), paired by dataset. Also 95%
+  `ends` (the first and last time point alone), paired by dataset. Also 95%
   coverage.
 - **Power** at effect e (0.02, 0.05, 0.1 per day): among karyotypes with
   |truth| ≥ e, the share whose 95% interval excludes zero on the correct
@@ -166,7 +166,7 @@ false-positive rate:
 - `abm_constant.cpp`: the simulator with constant fitness (e3).
 - `hmc_check.R`: the HMC check above.
 - `report.R`: tables, gates and `overview.pdf`.
-- `auto_eval.R`: the automatic choice (`series = "auto"`), scored on the
+- `auto_eval.R`: an automatic choice among the methods (tried, not adopted), scored on the
   existing fits (below); output in `results/<build>/auto/`.
 
 Results are in `results/` (git-ignored).
@@ -178,7 +178,7 @@ On HPC, the task lists hold one line per fit:
 ## Results (build cv10)
 
 42 of the 768 `state_space` fits did not finish within the first 6 h job
-limit, all with 8 samples (e1 8, e2 14, e3 20; 2 of the e2 ones also ran out
+limit, all with 8 time points (e1 8, e2 14, e3 20; 2 of the e2 ones also ran out
 of memory at 8 GB). They were rerun with 21 h and 16 GB, and all finished (the
 longest in 18.3 h). The numbers below include them.
 
@@ -192,15 +192,15 @@ distances 0, 1 and 2.
 | e1 | bottleneck 200 | 0.99–1.01 | 1.61–1.78 | 0.95–1.00 |
 | e1 | bottleneck 2000 | 1.00 | 1.08–1.14 | 0.99–1.02 |
 | e1 | bottleneck 20000 | 1.00–1.01 | 0.91–1.01 | 0.93–0.97 |
-| e2 | 4 samples | 0.89–0.94 | 0.77–0.85 | 0.79–0.82 |
-| e2 | 8 samples | 0.93 | 0.68–0.73 | 0.79–0.81 |
+| e2 | 4 time points | 0.89–0.94 | 0.77–0.85 | 0.79–0.82 |
+| e2 | 8 time points | 0.93 | 0.68–0.73 | 0.79–0.81 |
 | e3 | bottleneck 200 | 0.89–1.01 | 1.35–1.68 | 1.03–1.15 |
 | e3 | bottleneck 2000 | 0.83–1.02 | 1.14–1.72 | 0.99–1.23 |
 | e3 | bottleneck 20000 | 0.75–1.00 | 1.24–2.01 | 0.81–1.17 |
 
-- **`pairwise`** restarts from the observed sample at every pair. Passaging
+- **`pairwise`** restarts at every pair from its earlier time point as observed. Passaging
   drift within each pair is then read as selection. It is worst with small
-  bottlenecks and samples 6 days apart (up to 2.6 in one e1 cell). It is
+  bottlenecks and time points 6 days apart (up to 2.6 in one e1 cell). It is
   worst of all on neutral data. In clonal sweeps (e2) it is the most
   accurate, and with little drift it is close to `ends`.
 - **`state_space`** is close to or better than `ends` on e1 and clearly
@@ -249,7 +249,7 @@ At a controlled 5% false-positive rate (Measures), effect 0.05:
 | failed fits | 0 | 0 | 0 | 0 (42 after a rerun with more time) |
 | not accepted, e1 / e2 / e3 | 29% / 46% / 32% | 32% / 56% / 29% | 27% / 68% / 22% | 47% / 94% / 65% |
 | median time, s (e1 / e2 / e3) | 73 / 126 / 85 | 196 / 444 / 244 | 344 / 789 / 468 | 888 / 2140 / 1664 |
-| time per fit relative to `anchored`, 4 / 8 samples (median) | 0.4–0.5 / 0.2–0.25 | 1 | 1.3–1.7 / 1.6–2.0 | 2.6–4.0 / 7.7–12.4 |
+| time per fit relative to `anchored`, 4 / 8 time points (median) | 0.4–0.5 / 0.2–0.25 | 1 | 1.3–1.7 / 1.6–2.0 | 2.6–4.0 / 7.7–12.4 |
 | median peak memory, GB | 0.6–0.8 | 1.1–1.6 | 1.5–2.1 | 2.1–3.3 (up to 16) |
 
 "Not accepted" means the convergence check did not accept the fit; such fits
@@ -275,12 +275,12 @@ the `benchmark` session) is weighed before this is final. Both new methods
 are kept:
 - `pairwise` for clonal sweeps through large bottlenecks;
 - `state_space` where clones sweep under moderate drift. It costs 3–4 times
-  as much as `anchored` with 4 samples, and 8–12 times as much with 8, where
+  as much as `anchored` with 4 time points, and 8–12 times as much with 8, where
   some fits take up to 18 h and 16 GB.
 
-Neither suits small bottlenecks or samples a few days apart.
+Neither suits small bottlenecks or time points a few days apart.
 
-### Automatic choice (`series = "auto"`)
+### Automatic choice: tried, not adopted
 
 `auto_eval.R` picks, for each dataset, one of the methods already fitted,
 from measures of the counts and of the anchored fit, and scores the pick as
@@ -291,15 +291,16 @@ the criterion were fixed before any rule was scored (script header):
 - among those, the lowest e2 ratio; within 0.01 of it, the simpler rule.
 
 Two measures carry the choice:
-- `ends_major`: the least share, over the samples in between, of a sample's
-  cells on the majors of the first and last sample. A clonal sweep takes a
-  sample off them.
+- `ends_major`: the least share, over the time points in between, of the
+  cells at a time point on the majors of the first and last time point. A
+  clonal sweep moves the cells of a time point off them.
 - `weight`: the anchored fit's intermediate weight, 1 / max(1, dispersion of
   the majors' counts). It is low under strong passaging drift.
 
-Chosen: `ends_major < 0.3` → `pairwise` if `weight >= 0.5` (or no sample in
+Chosen: `ends_major < 0.3` → `pairwise` if `weight >= 0.5` (or no time point in
 between is left to measure it), otherwise `state_space`; `anchored` if
-`ends_major >= 0.3`. This is `sparse_joint_auto_thresholds`.
+`ends_major >= 0.3`. Commit 4ff8906 had it as `series = "auto"`; it was
+removed after the paper benchmark (below).
 
 | rule | e1 cells | e1 | e2 | e3 | picks on e2 (a / p / s) |
 | --- | --- | --- | --- | --- | --- |
@@ -320,5 +321,32 @@ between `anchored` (0.93) and the best fitted method per dataset (0.74).
 - Choosing the thresholds on landscapes 1–6 and scoring on 7–12 (and back)
   says nothing: on a half, even `anchored` fails the e1 gate.
 
-The paper benchmark (E4) is the held-out check. Until it passes, `anchored`
-stays the default and `"auto"` must be requested.
+The paper benchmark (E4, alfak2 05a8855, by the `benchmark` session) was the
+held-out check. Its criterion was fixed beforehand: on each of 13 tests, auto
+must not be worse than `anchored` by more than a set margin on the same inputs.
+- Auto passed 10 of the 13 and failed 3, so it was not adopted.
+- On ABM it chose `anchored` for all 800 inputs and matched it exactly.
+- On missegregation landscapes it chose `pairwise` for 93 of 250 inputs.
+- On Salehi it chose `pairwise` for 102 and `state_space` for 23 of 205
+  inputs.
+
+| test (paired, same inputs) | auto | `anchored` | margin | result |
+| --- | --- | --- | --- | --- |
+| missegregation landscapes, 8 passages, r | 0.804 | 0.815 | −0.01 | fail (worse on 32%, better on 6%; p = 4e-5) |
+| missegregation landscapes, 4 passages, r | 0.754 | 0.764 | −0.01 | pass (at the margin) |
+| Salehi forecast beats parent, Wasserstein | 0.506 | 0.541 | −0.02 | fail (p = 0.004) |
+| Salehi forecast beats parent, Euclidean | 0.410 | 0.422 | | pass |
+| Salehi sweeps, Euclidean | 0.417 | 0.438 | 0 | fail (1 of 48 pairs; p = 0.85) |
+| Salehi sweeps, Wasserstein | 0.639 | 0.639 | | pass |
+| Salehi novel karyotypes | 0.607 | 0.521 | | pass (better; p = 6e-5) |
+| ABM r and forecasts, both windows | = | = | | pass (identical) |
+
+Why it failed:
+- Both other methods forecast Salehi less well than `anchored`: Wasserstein
+  0.52 for `pairwise` and 0.49 for `state_space`, against 0.54.
+- `pairwise`, which auto chose on missegregation landscapes, has lower r
+  there: 0.74 against 0.82 with 8 passages.
+- Its gain on novel Salehi karyotypes comes from `pairwise` (0.66 alone).
+
+The method is therefore named in `series`, and `anchored` remains the
+default.

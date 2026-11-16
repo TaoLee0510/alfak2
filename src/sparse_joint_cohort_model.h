@@ -1,20 +1,20 @@
 #ifndef ALFAK2_SPARSE_JOINT_COHORT_MODEL_H
 #define ALFAK2_SPARSE_JOINT_COHORT_MODEL_H
 
-// Sparse joint count model for several two-timepoint samples on one
+// Sparse joint count model for several two-time-point datasets on one
 // landscape.
 //
-// Every sample keeps its own domain, initial abundances and depth, exactly as
-// in `sparse_joint_model.h`. What the samples share is the landscape: a
-// "node" is a karyotype, a "state" is a node in one sample's domain, and the
+// Every dataset keeps its own domain, initial abundances and depth, exactly as
+// in `sparse_joint_model.h`. What the datasets share is the landscape: a
+// "node" is a karyotype, a "state" is a node in one dataset's domain, and the
 // log birth rate of a state is the node's shared value, optionally with a
-// sample-specific deviation. A karyotype that is abundant in one sample and
+// dataset-specific deviation. A karyotype that is abundant in one dataset and
 // an unobserved neighbour in another is then informed by both.
 //
-// Each sample has its own trend coefficients (a column of `coef`), with its
+// Each dataset has its own trend coefficients (a column of `coef`), with its
 // own design: dosage and curvature about its own mean karyotype, and the
 // distance to its own majors. The prior mean of a node is the average of the
-// trends of the samples that have it. Samples that share no karyotype are
+// trends of the datasets that have it. Datasets that share no karyotype are
 // then fitted as if alone, apart from the scales. Tying the columns with a
 // TMB map gives one trend for the cohort; `shared_trend` then applies the
 // coefficient prior once.
@@ -24,19 +24,19 @@
 
 template<class Type>
 Type sparse_joint_cohort_model(objective_function<Type>* obj) {
-  DATA_VECTOR(y0);                    // counts, states of all samples concatenated
+  DATA_VECTOR(y0);                    // counts, states of all datasets concatenated
   DATA_VECTOR(y1);
-  DATA_IVECTOR(state_sample);         // sample of each state
+  DATA_IVECTOR(state_sample);         // dataset of each state
   DATA_IVECTOR(state_node);           // landscape node of each state
-  DATA_IVECTOR(state_major);          // 1 if the state is major in its sample
-  DATA_VECTOR(dt);                    // per sample
-  DATA_IVECTOR(edge_from);            // one-step edges between states of a sample
+  DATA_IVECTOR(state_major);          // 1 if the state is major in its dataset
+  DATA_VECTOR(dt);                    // per dataset
+  DATA_IVECTOR(edge_from);            // one-step edges between states of a dataset
   DATA_IVECTOR(edge_to);
   DATA_VECTOR(edge_log_prob);
   DATA_VECTOR(log_self);              // per state
   DATA_MATRIX(design);                // per state; first column is the intercept
   DATA_IVECTOR(coef_group);           // 0 intercept, 1 dosage, 2 curvature, 3 interaction, 4 shell
-  DATA_IVECTOR(reference);            // per sample: state whose net rate centres theta1
+  DATA_IVECTOR(reference);            // per dataset: state whose net rate centres theta1
   DATA_VECTOR(zeta_prior_mean);
   DATA_VECTOR(zeta_prior_sd);
   DATA_SCALAR(intercept_mean);
@@ -46,7 +46,7 @@ Type sparse_joint_cohort_model(objective_function<Type>* obj) {
   DATA_VECTOR(log_scale_prior_sd);
   DATA_INTEGER(deviations);           // 1: states deviate from their node; 0: they equal it
   DATA_INTEGER(balance);
-  DATA_VECTOR(history);               // per sample
+  DATA_VECTOR(history);               // per dataset
   DATA_SCALAR(balance_sd);
   DATA_VECTOR(balance_offset);        // zero, except to evaluate the expected information
   DATA_INTEGER(shared_trend);         // 1: the columns of `coef` are tied by a map
@@ -54,8 +54,8 @@ Type sparse_joint_cohort_model(objective_function<Type>* obj) {
   PARAMETER_VECTOR(zeta);             // per state: log expected count at the first timepoint
   PARAMETER_VECTOR(m);                // per node: shared log birth rate
   PARAMETER_VECTOR(g);                // per state: log birth rate, used when `deviations`
-  PARAMETER_MATRIX(coef);             // trend coefficients, one column per sample
-  PARAMETER_VECTOR(theta1);           // per sample
+  PARAMETER_MATRIX(coef);             // trend coefficients, one column per dataset
+  PARAMETER_VECTOR(theta1);           // per dataset
   PARAMETER_VECTOR(log_scale);
 
   int n_state = y0.size();
@@ -76,8 +76,8 @@ Type sparse_joint_cohort_model(objective_function<Type>* obj) {
       else nll -= dnorm(coef(k, c), Type(0), scale(coef_group(k) - 1), true);
     }
   }
-  // Trend of each state from its sample's coefficients; a node's prior mean
-  // is the average over the samples that have it.
+  // Trend of each state from its dataset's coefficients; a node's prior mean
+  // is the average over the datasets that have it.
   vector<Type> trend(n_state);
   vector<Type> node_trend(n_node);
   vector<Type> node_states(n_node);
@@ -106,7 +106,7 @@ Type sparse_joint_cohort_model(objective_function<Type>* obj) {
     net(i) = (Type(2) * exp(log_self(i)) - Type(1)) * exp(log_birth(i));
 
   // Initial abundances: free, or at mutation-selection balance with the
-  // sample's own majors (see sparse_joint_model.h).
+  // dataset's own majors (see sparse_joint_model.h).
   vector<Type> balance_residual(n_state);
   balance_residual.setZero();
   if (balance == 1) {

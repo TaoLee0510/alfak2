@@ -30,9 +30,9 @@ fit_sparse_joint_cohort(
 }
 \arguments{
 \item{samples}{List of two-column count matrices with karyotype row names,
-or of \code{alfak2_data} objects. Names identify the samples.}
+or of \code{alfak2_data} objects. Names identify the datasets.}
 
-\item{dt}{Time between the two samples: one value, or one per sample.
+\item{dt}{Time between the two time points: one value, or one per dataset.
 Used for count matrices only.}
 
 \item{beta}{Missegregation rate per chromosome copy and division, if
@@ -47,10 +47,10 @@ rate around \code{log(birth_rate)}.}
 
 \item{trend}{\code{"select"}, \code{"sample"} or \code{"shared"}; see above.}
 
-\item{major_frequency}{Minimum share of any sample for a karyotype to
+\item{major_frequency}{Minimum share of the cells at any time point for a karyotype to
 anchor the domain as a major karyotype.}
 
-\item{major_count}{Minimum number of cells, over all samples, for a major
+\item{major_count}{Minimum number of cells, over all time points, for a major
 karyotype. A single cell must not be enough.}
 
 \item{max_states}{Largest domain to fit. If the domain would be larger,
@@ -69,23 +69,23 @@ distance.}
 frequency at the first timepoint of a karyotype seen at no timepoint. It
 is a frequency, not a count: a domain has thousands of unseen
 karyotypes, and a prior in counts would give them a large share of a
-small sample. A karyotype seen only later is centred on its frequency at
+time point with few cells. A karyotype seen only later is centred on its frequency at
 the earliest timepoint it was seen, with the same standard deviation:
 absent other evidence its frequency is taken not to have changed.}
 
 \item{initial_state}{\code{"free"} or \code{"balance"}; see \code{\link[=fit_sparse_joint]{fit_sparse_joint()}}.
-Unlike a single sample, a cohort starts free by default: with balance,
+Unlike a single dataset, a cohort starts free by default: with balance,
 the scale optimisation of some simulated cohorts failed and left no
 marginal likelihood to choose the trend by.}
 
 \item{history}{With \code{initial_state = "balance"}, the time over which each
-sample's balance built up: one value, or one per sample. By default each
-sample's history is chosen as \code{\link[=fit_sparse_joint]{fit_sparse_joint()}} chooses it, by a
-single-sample fit with the cohort's settings
+dataset's balance built up: one value, or one per dataset. By default each
+dataset's history is chosen as \code{\link[=fit_sparse_joint]{fit_sparse_joint()}} chooses it, by a
+single-dataset fit with the cohort's settings
 (\code{diagnostics$history_profiles}); the cohort is then fitted once with
-those histories. A history describes the population a sample came from,
+those histories. A history describes the population a dataset came from,
 and choosing all of them jointly would multiply the number of cohort fits
-by the candidates of every sample.}
+by the candidates of every dataset.}
 
 \item{balance_sd}{Spread, on the log scale, of initial abundances around
 the balance.}
@@ -104,40 +104,40 @@ the scale parameters; see Details for what follows it.}
 }
 \value{
 An \code{alfak2_sparse_joint_cohort_fit} object. \code{landscape} has one row
-per karyotype in any sample's domain, with the shared fitness; \code{samples}
-has one summary per sample, as returned by \code{\link[=fit_sparse_joint]{fit_sparse_joint()}}.
+per karyotype in any dataset's domain, with the shared fitness; \code{samples}
+has one summary per dataset, as returned by \code{\link[=fit_sparse_joint]{fit_sparse_joint()}}.
 \code{diagnostics$domain_coverage} is the table of \code{\link[=fit_sparse_joint]{fit_sparse_joint()}} with a
-\code{sample} column, one row per sample and timepoint. If a timepoint of any
-sample has no cell inside that sample's domain, the function stops with
-an error of class \code{alfak2_domain_coverage_error} that names the sample;
-this is checked for every sample before any is fitted.
+\code{sample} column, one row per dataset and timepoint. If a timepoint of any
+dataset has no cell inside that dataset's domain, the function stops with
+an error of class \code{alfak2_domain_coverage_error} that names the dataset;
+this is checked for every dataset before any is fitted.
 }
 \description{
-Fits several two-timepoint samples at once. Each sample keeps its own
+Fits several two-time-point datasets at once. Each dataset keeps its own
 domain, as in \code{\link[=fit_sparse_joint]{fit_sparse_joint()}}, and its own initial abundances; the
-samples share the fitness of the karyotypes they have in common and one
-trend. A karyotype that is abundant in one sample and an unobserved
+datasets share the fitness of the karyotypes they have in common and one
+trend. A karyotype that is abundant in one dataset and an unobserved
 neighbour in another is informed by both.
 }
 \details{
-With \code{sharing = "partial"} a karyotype's birth rate in a sample deviates
+With \code{sharing = "partial"} a karyotype's birth rate in a dataset deviates
 from the shared value by an amount whose scale is estimated, so that
-samples which do not follow one landscape are not forced onto it. With
+datasets which do not follow one landscape are not forced onto it. With
 \code{sharing = "full"} it is the shared value.
 
-With \code{trend = "sample"} every sample has its own trend: dosage and
+With \code{trend = "sample"} every dataset has its own trend: dosage and
 curvature about its own mean karyotype, and distance to its own major
-karyotypes. Samples then share only the karyotypes they have in common and
-the prior scales, and samples with no karyotype in common are fitted as if
+karyotypes. Datasets then share only the karyotypes they have in common and
+the prior scales, and datasets with no karyotype in common are fitted as if
 alone. \code{trend = "shared"} fits one trend for the cohort, which helps when
-the samples follow one landscape and on simulated cohorts from different
-landscapes predicted much worse than fitting each sample alone.
+the datasets follow one landscape and on simulated cohorts from different
+landscapes predicted much worse than fitting each dataset alone.
 \code{trend = "select"}, the default, fits both and keeps the one with the
 higher marginal likelihood; on simulated cohorts it chose the shared trend
-for samples of one landscape and separate trends otherwise. It takes twice
+for datasets of one landscape and separate trends otherwise. It takes twice
 as long. The marginal likelihoods are in \code{diagnostics$trend_objective}.
 The scale optimisation is checked as in \code{\link[=fit_sparse_joint]{fit_sparse_joint()}}:
 \code{diagnostics$trend_convergence} tells whether each trend's was accepted,
 and \code{diagnostics$optimisation} how the kept one was checked; its
-\code{flat_direction} also names the sample of each karyotype.
+\code{flat_direction} also names the dataset of each karyotype.
 }

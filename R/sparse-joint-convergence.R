@@ -3,7 +3,7 @@
 # The scales (dosage, curvature, interaction, residual) are fitted by Laplace
 # marginal likelihood: an outer nlminb over the log scales, an inner Newton
 # optimisation of the latent variables. The inner problem is not convex. A
-# karyotype with no cell in the first sample and one in the second can owe it
+# karyotype with no cell at the first time point and one at the second can owe it
 # to having been there already or to mutation from a neighbour, and between
 # the two explanations the joint density is nearly flat. Where the inner
 # Hessian is nearly singular the log determinant of the Laplace approximation
@@ -123,7 +123,7 @@ sparse_joint_inner_flattest <- function(env, mode = env$last.par, iterations = 2
 # direction of a fit that is not accepted. `names` are their parameter names,
 # in the order of the inner problem. `states` describes the states that
 # `zeta` and `g` follow, one row each in their order (`karyotype`, `cells`:
-# its counts in each sample, as text, `major`, and in a cohort `sample`);
+# its counts at each time point, as text, `major`, and in a cohort `sample`);
 # `nodes` likewise the karyotypes of a cohort's shared birth rates `m`.
 sparse_joint_latent_labels <- function(names, states, nodes = NULL, state_index = NULL) {
   # `state_index`: the state of each latent variable, where it is not its
@@ -187,7 +187,7 @@ sparse_joint_describe_flat <- function(flat, composition = NULL, min_share = 0.2
   lead <- vapply(seq_len(nrow(rows)), function(i) {
     r <- rows[i, ]
     what <- if (is.na(r$karyotype)) paste("a", r$variable) else {
-      paste0("the ", r$variable, " of karyotype ", r$karyotype, if (!is.na(r$sample)) paste0(" in sample ", r$sample))
+      paste0("the ", r$variable, " of karyotype ", r$karyotype, if (!is.na(r$sample)) paste0(" in dataset ", r$sample))
     }
     detail <- c(if (!is.na(r$major)) if (isTRUE(r$major)) "major" else "not major",
                 if (!is.na(r$cells)) paste("cells", r$cells), sprintf("%.0f%%", 100 * r$share))

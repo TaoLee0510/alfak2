@@ -2,8 +2,8 @@
 #
 #   Rscript validation/sparse_joint/depth_limit.R [--depth=20000] [--split=dev] [--workers=1]
 #
-# For the typical scenario, the two samples are redrawn from the same true
-# populations at a much larger depth and the sparse joint model is fitted to
+# For the typical scenario, the cells at the two time points are redrawn from
+# the same true populations at a much larger depth and the sparse joint model is fitted to
 # them. Two references are scored beside it:
 #   shell mean   every karyotype predicted at the true mean fitness of its
 #                distance stratum (0, 1, 2): what a perfect trend without
@@ -52,7 +52,7 @@ score_one <- function(id) {
   group <- ifelse(reference > 0, "reference", nodes$distance)
   shell_mean <- stats::ave(relative, group)
   shell_mean[reference > 0] <- 0
-  # Deep samples from the same populations; the scored nodes stay those of the
+  # Deep draws from the same populations; the scored nodes stay those of the
   # benchmark dataset.
   deep <- stt_sample_counts(dataset$truth$frequency_t0, dataset$truth$frequency_t1, depth, depth,
                             dataset$interval, dataset$seed + 7L)
@@ -84,7 +84,7 @@ columns <- c("rmse", "rmse_zero", "bias", "spearman", "coverage95")
 table <- stats::aggregate(rows[columns], rows[c("stratum", "method")], function(v) mean(v, na.rm = TRUE))
 table[columns] <- round(table[columns], 3)
 options(width = 160)
-cat(sprintf("%s, %d datasets; deep samples of %g cells per timepoint (median fit %.0f s, %d states)\n",
+cat(sprintf("%s, %d datasets; deep draws of %g cells per time point (median fit %.0f s, %d states)\n",
             config$cohort_scenario, length(unique(rows$dataset_id)), depth, stats::median(rows$seconds),
             as.integer(stats::median(rows$states))))
 print(table[order(table$stratum, table$method), ], row.names = FALSE)

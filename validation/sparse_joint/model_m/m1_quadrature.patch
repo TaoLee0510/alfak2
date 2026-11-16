@@ -180,7 +180,7 @@
 +// approximation. Used when the data carry `minor_quadrature = 1`.
 +//
 +// A non-major state with few cells has two explanations of nearly equal
-+// weight for a count in the second sample: it was there and not sampled, or
++// weight for a count at the second time point: it was there and not sampled, or
 +// its neighbours made it during the interval. Its initial log abundance z then
 +// has a posterior far from normal, and the Laplace approximation picks one
 +// explanation, or finds none (a near-singular Hessian along z). Here

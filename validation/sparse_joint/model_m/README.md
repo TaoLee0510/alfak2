@@ -40,8 +40,8 @@ searching again.
 
 - **The flat direction** was at least 90% non-major zeta in all 91 degenerate
   candidates. The most negative term of the curvature along it:
-  - in 61 of them, the second-sample mixture residual: "was there, not
-    sampled" against "made by a neighbour";
+  - in 61 of them, the mixture residual at the second time point: "was there,
+    not sampled" against "made by a neighbour";
   - in 30, the second-order part of the balance prior (long histories).
 - **The rejected candidates**: 37 of the 39 jump. A step of 1e-3 in a scale
   moves the objective by a median of 3.95.
@@ -56,16 +56,16 @@ to 2e-11, but neither item stopped being degenerate.
 
 | Item | Smallest inner eigenvalue | Flat direction now | Time |
 | --- | --- | --- | --- |
-| dev L05 sparse, history 360 | 1.4e-5 | zeta of two majors with no first-sample cell (0 -> 4, 0 -> 8) | 12x |
+| dev L05 sparse, history 360 | 1.4e-5 | zeta of two majors with no cell at the first time point (0 -> 4, 0 -> 8) | 12x |
 | dev L03 long, history 1080 | 1.3e-4 | g of non-majors with 0-1 then 0 cells | 8x |
 
 Of the 91 degenerate candidates, 76 lie in items that have a major with 0-1
-first-sample cells. Among healthy candidates it is 160 of 285.
+cells at the first time point. Among healthy candidates it is 160 of 285.
 
 ## Conclusion
 
 The degeneracy comes from karyotypes with few cells, not from the non-major
-class. Majors are defined by their share in any one sample, so they can have
+class. Majors are defined by their share at any one time point, so they can have
 few cells too. Integrating one class of latent variable out moves the flat
 direction to the next.
 
@@ -89,7 +89,7 @@ changed had a median RMSE ratio to ff13cf4 of 1.000 at every distance.
   The fits are those of ff13cf4.
 - A fit that is not accepted now names its flat direction:
   - `diagnostics$optimisation$flat_direction`: the leading latent variables,
-    with karyotype, cells per sample, major and share;
+    with karyotype, cells per time point, major and share;
   - `flat_composition`: the share by kind of latent variable;
   - the convergence warning names both.
 

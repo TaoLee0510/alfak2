@@ -1,5 +1,5 @@
 # Patient regrowth: a recurrence that grows from a few surviving cells, and
-# growth that starts some time after the first sample (README.md in this
+# growth that starts some time after the first time point (README.md in this
 # directory).
 #
 # The truth populations are those of the development benchmark's development
@@ -32,7 +32,7 @@ pr_config <- function(output_dir = NULL, build = "ff13cf4") {
   config$landscapes <- config$landscapes[config$landscapes$split == "dev", ]
   config$library_root <- file.path(si_repo, "validation", "sparse_joint", "multi_timepoint", "results")
   config$t0 <- 1440
-  # What the model is told: 360 days between the samples, 500 and 700 cells,
+  # What the model is told: 360 days between the time points, 500 and 700 cells,
   # as in the benchmark's typical and bottleneck scenarios.
   config$interval <- 360
   config$depth <- c(500, 700)
@@ -84,8 +84,8 @@ pr_dataset_id <- function(landscape_id, patient, scenario) {
 
 # Patient 1 of every landscape for every scenario (the scored datasets), and
 # patients 2-8 for the cohort scenarios. One sampling seed per landscape and
-# patient, shared by its scenarios: the first sample is then the same cells in
-# every scenario, and the survivors of the same size are the same cells.
+# patient, shared by its scenarios: the cells at the first time point are then
+# the same in every scenario, and the survivors of the same size are the same cells.
 pr_dataset_plan <- function(config) {
   plan <- list()
   for (i in seq_len(nrow(config$landscapes))) {

@@ -1,14 +1,15 @@
 # Sparse two-timepoint benchmark
 
-Scores fitness-landscape estimates from two sparse karyotype samples against a
-known truth, separately for observed karyotypes and their one- and two-step
-neighbours. It is the development scoreboard for alfak2: every candidate change
-is compared here against the original ALFA-K (`alfakR`) and the current alfak2
-pipeline before it is considered for the 22-chromosome HPC confirmation.
+Scores fitness-landscape estimates from sparse karyotype counts at two time
+points against a known truth, separately for observed karyotypes and their one-
+and two-step neighbours. It is the development scoreboard for alfak2: every
+candidate change is compared here against the original ALFA-K (`alfakR`) and
+the current alfak2 pipeline before it is considered for the 22-chromosome HPC
+confirmation.
 
 ## Design
 
-The simulated data are built to resemble real two-timepoint tumour samples. The
+The simulated data are built to resemble real two-timepoint tumour datasets. The
 reference is a set of 20 GBM inputs (22 chromosomes, copy numbers 1–4). Among
 the 15 with at least 100 cells at both timepoints, and for the simulated
 `typical_500_700_360d` datasets of the development landscapes:
@@ -17,24 +18,25 @@ the 15 with at least 100 cells at both timepoints, and for the simulated
 | --- | --- | --- |
 | Karyotypes observed | 65 (55–182) | 162 (45–328) |
 | Fraction seen at both timepoints | 0.31 (0.12–0.53) | 0.13 (0.08–0.27) |
-| Total-variation distance between samples | 0.82 (0.47–0.91) | 0.71 (0.10–0.85) |
+| Total-variation distance between time points | 0.82 (0.47–0.91) | 0.71 (0.10–0.85) |
 | Largest clone | 0.13 (0.09–0.21) | 0.25 (0.13–0.81) |
 | Karyotypes seen in one cell only | 0.27 (0.04–0.34) | 0.57 (0.53–0.61) |
 | SD of log frequency change, shared karyotypes with ≥20 cells | 1.73 (0.98–2.25) | 2.12 (1.71–2.50) |
 
 `run.R --stage=profile --real-dir=DIR` recomputes both columns. The simulated
-samples have more single-cell karyotypes and correspondingly fewer shared ones
+data have more single-cell karyotypes and correspondingly fewer shared ones
 than the real inputs; the other statistics overlap.
 
 Choices that follow from this comparison:
 
 - **22 chromosomes.** With 8 chromosomes the population is trapped on a local
-  peak within about 700 days and samples become 98% one karyotype.
-- **First sample at day 1440.** Earlier, clones replace each other completely
-  within a year (no karyotype is shared between the samples); later, the
-  smoother landscapes freeze as well.
+  peak within about 700 days and the cells drawn at a time point are 98% one
+  karyotype.
+- **First time point at day 1440.** Earlier, clones replace each other
+  completely within a year (no karyotype is shared between the time points);
+  later, the smoother landscapes freeze as well.
 - **Wavelengths 0.4, 0.8, 1.2, 1.6**, three landscapes each. The 0.4 class is
-  the frozen, near-monoclonal regime that about one real sample in ten
+  the frozen, near-monoclonal regime that about one real dataset in ten
   resembles. The others give ongoing adaptation.
 - **Nullisomy is lethal.** Daughters with a copy number outside 1–8 die. The
   original ALFA-K simulator lets nullisomic cells live; its populations then
@@ -48,8 +50,8 @@ distribution against the missegregation kernel, viability losses, growth,
 selection between two clones, passaging, and reproducibility.
 
 A landscape has 8 "patients": independent trajectories from the diploid founder
-on the same landscape. Patient 1 makes the single-sample scoreboard (96
-development datasets); all eight form the cohort for cross-sample learning.
+on the same landscape. Patient 1 makes the single-dataset scoreboard (96
+development datasets); all eight form the cohort for cross-dataset learning.
 
 | Scenario | Cells at t0 / t1 | Interval (days) |
 | --- | --- | --- |
@@ -67,11 +69,11 @@ break an assumption on purpose and are reported beside it:
 
 | Stress scenario | Cells at t0 / t1 | Interval (days) | What it breaks |
 | --- | --- | --- | --- |
-| `short_500_700_30d`, `short_500_700_60d` | 500 / 700 | 30, 60 | Few generations between the samples (27 and 54), as for a slowly dividing tumour |
-| `shift_500_700_360d`, `shift_3000_100_360d` | 500 / 700, 3000 / 100 | 360 | Half of the landscape's waves are redrawn at the first sample, as when treatment starts then; fitness before and after stays correlated |
-| `turned_500_700_360d`, `turned_3000_100_360d` | 500 / 700, 3000 / 100 | 360 | The landscape is turned about the dominant karyotype at the first sample: that karyotype keeps its fitness, but which neighbour is fit is drawn anew |
+| `short_500_700_30d`, `short_500_700_60d` | 500 / 700 | 30, 60 | Few generations between the time points (27 and 54), as for a slowly dividing tumour |
+| `shift_500_700_360d`, `shift_3000_100_360d` | 500 / 700, 3000 / 100 | 360 | Half of the landscape's waves are redrawn at the first time point, as when treatment starts then; fitness before and after stays correlated |
+| `turned_500_700_360d`, `turned_3000_100_360d` | 500 / 700, 3000 / 100 | 360 | The landscape is turned about the dominant karyotype at the first time point: that karyotype keeps its fitness, but which neighbour is fit is drawn anew |
 
-In the last four, truth is the landscape between the samples.
+In the last four, truth is the landscape between the time points.
 
 ## Scoring
 
@@ -144,4 +146,4 @@ The held-out landscapes are for the final confirmation only and need
 The simulation has no spatial sampling bias and no karyotype-calling error,
 and treatment is represented only by the bottleneck scenario. Passing this
 benchmark is necessary for a candidate, not evidence of accuracy on patient
-samples.
+data.

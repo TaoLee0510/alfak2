@@ -1,7 +1,7 @@
 # Sparse joint count model: design record
 
-`fit_sparse_joint()` fits two sparse karyotype samples with one count
-likelihood on a sparse domain. This note records why the model has its present
+`fit_sparse_joint()` fits sparse karyotype counts at two time points with one
+count likelihood on a sparse domain. This note records why the model has its present
 form and how it scores. Every number is from the development landscapes of
 `benchmark/sparse_two_timepoint` (22 chromosomes, 12 landscapes, 8 scenarios,
 96 datasets), with fitness as growth rate per day.
@@ -41,11 +41,11 @@ difference. It is held within 0.05 (log scale) of a supplied value. See "The
 two rates the model is given" below for what a wrong value does.
 
 **Majors need a share and a count.** Domain = karyotypes holding at least 1%
-of either sample and at least 3 cells, plus all their one-step neighbours.
-With every observed karyotype as a major, a 50-cell sample put all 50 cells on
-majors by construction, while their neighbours held 25% of the true
+at either time point and at least 3 cells, plus all their one-step neighbours.
+With every observed karyotype as a major, a time point with 50 cells had all 50
+on majors by construction, while their neighbours held 25% of the true
 population; the likelihood read those structural zeros as strong unfitness
-(bias of -0.21 per day at one step). At 500/700 cells the sample had 213 cells
+(bias of -0.21 per day at one step). At 500/700 cells, 213 cells were
 on neighbours of majors against 206 expected, so there the evidence is sound.
 
 **Shell term: distance to the nearest major, power 0.85.** Mean true fitness
@@ -71,7 +71,7 @@ the domain, which the table shows is nearly independent of distance.
 **Priors on the frequency scale.** A karyotype never seen has prior frequency
 1e-5 at the first timepoint; one seen only at the second is centred on its
 frequency there. In counts, the same prior gave thousands of unseen neighbours
-a large share of a small sample.
+a large share of a time point with few cells.
 
 **Tried and dropped.** A separate residual scale for majors: no gain (RMSE
 0.026 / 0.053 / 0.082 against 0.025 / 0.051 / 0.078 at distances 0 / 1 / 2 on
@@ -79,7 +79,7 @@ the typical scenario), slower, one failed fit.
 
 ## Uncertainty
 
-**Relative fitness.** Two samples identify fitness differences. The model
+**Relative fitness.** Two time points identify fitness differences. The model
 reports fitness relative to the count-weighted mean of the majors, with the
 uncertainty of that difference. The posterior of every log birth rate also
 carries the uncertainty of the baseline (0.05), which is common to all
@@ -119,7 +119,7 @@ set of `short_interval/` and the paper-sized set of `lattice_residual/`, the
 factor the intervals needed varied with the regime, from about 0.4 on smooth
 landscapes to 1.8, and neither the predicted drop nor the interval told the
 regimes apart; refitting the constants by likelihood narrowed the
-overcovered cells and widened none. Karyotypes seen in neither sample now
+overcovered cells and widened none. Karyotypes seen at neither time point now
 have a deficit of 1.1, the smallest that keeps every non-stress regime at 0.90
 or more; observed karyotypes keep 0.6 and the floor 0.009. Point predictions
 are unchanged; unobserved intervals are 1.1-1.9 times as wide (median 1.4),
@@ -166,8 +166,8 @@ Over all eight core scenarios (96 datasets), RMSE at distances 0 / 1 / 2:
 - The missegregation rate acts the same way, and only the product matters:
   doubling one and halving the other gives RMSE 0.048 and 0.049 and mean
   predictions -0.058 and -0.059, against 0.050 and -0.061 for the reference.
-- Neither the marginal likelihood of one sample nor that of a cohort locates
-  the rate. For single samples over 0.1–4 it is best at 0.1 in 9 of 12
+- Neither the marginal likelihood of one dataset nor that of a cohort locates
+  the rate. For single datasets over 0.1–4 it is best at 0.1 in 9 of 12
   datasets and at 0.5 in 3. For three cohorts of eight over 0.25–4 it is best
   at 0.25 in two and flat (within 1.1) in the third.
 
@@ -188,8 +188,8 @@ correlation between the predictions at the two ends of a range is 0.71–1.00
 
 ## How far from the limit
 
-`depth_limit.R` refits the typical scenario on samples of 20 000 cells per
-timepoint drawn from the same populations, and scores a perfect stratum
+`depth_limit.R` refits the typical scenario on 20 000 cells per time point
+drawn from the same populations, and scores a perfect stratum
 mean: every karyotype predicted at the true mean of its distance stratum.
 
 | Distance | Benchmark depth | 20 000 cells | True stratum mean |
@@ -207,8 +207,8 @@ happened to establish, not by sampling.
 ## Initial abundances at balance (the default)
 
 `initial_state = "balance"` starts every non-major karyotype at
-mutation-selection balance with the majors next to it, so that the first
-sample's levels inform fitness. Its spread around balance (`balance_sd`)
+mutation-selection balance with the majors next to it, so that the levels
+at the first time point inform fitness. Its spread around balance (`balance_sd`)
 hardly matters: 0.3, 0.5 and 1 give RMSE within 0.003 of each other on the
 benchmark. It stays at 1; tighter values moved the fitted baseline to 1.2
 times the supplied one.
@@ -220,20 +220,20 @@ held-out fits then finish.
 
 It became the default on 2026-11-11, after the held-out confirmation, where
 it passed every criterion and the free model did not. It assumes that fitness
-before the first sample resembled fitness between the samples. On simulated
-landscapes that changed at the first sample it was still the more accurate
-of the two (stress scenarios, below), which matters for patients treated
-between the samples. Up to 8327282 its history was the interval between the
-samples, which is too short when the samples are close: at 30 days, about 27
+before the first time point resembled fitness between the time points. On
+simulated landscapes that changed at the first time point it was still the
+more accurate of the two (stress scenarios, below), which matters for patients
+treated between the time points. Up to 8327282 its history was the interval
+between the time points, which is too short when the time points are close: at 30 days, about 27
 divisions, it predicted worse than the free model, at 60 days as well. Since
 2026-11-13 the history is chosen by marginal likelihood (next section). It
 takes about 1.5 times as long as the free model with a fixed history.
 
 ## History of the balance prior
 
-The balance prior centres a non-major karyotype's first-sample abundance on
-what its major neighbours fed it over `history`. With `history` equal to the
-interval, samples a few days or weeks apart put that centre far below the
+The balance prior centres a non-major karyotype's abundance at the first time
+point on what its major neighbours fed it over `history`. With `history` equal
+to the interval, time points a few days or weeks apart put that centre far below the
 abundance the neighbours reached over the population's real history; the
 model then overestimated their fitness and the predictions spread far more
 than the truth (one-step RMSE 2.3–2.6 times that of predicting no
@@ -251,7 +251,7 @@ diagnosis; its README the numbers.
   Held-out landscapes: core within +0.3% (pooled 0.6–1.1% lower), stress
   scenarios 2–5% lower, `short_500_700_30d` 18–27% lower. On new short-interval
   landscapes (6–42 days, seed base 94000) one-step RMSE fell by 71% and 60% at
-  6 days (first sample at day 120 and 1440), 4–10% at 18 days, and not at 42.
+  6 days (first time point at day 120 and 1440), 4–10% at 18 days, and not at 42.
 - Estimating the history as an outer parameter with the scales was faster but
   unreliable: the joint optimum has separate basins for a short history with
   large scales and a long one with small scales, and a quarter of the
@@ -262,9 +262,9 @@ diagnosis; its README the numbers.
   0.0067, deficit 0.53) and would bring short-interval coverage to 90%.
 - Cost: one fit per candidate, 2.9 times the earlier fit time on the
   development benchmark and up to 13 times at intervals of days.
-- A cohort fit with `initial_state = "balance"` chooses each sample's history
-  in the same way, by a single-sample fit; on cohorts of eight 6-day samples
-  this lowered one-step RMSE by 58%, and at 360 days it is neutral (mean
+- A cohort fit with `initial_state = "balance"` chooses each dataset's history
+  in the same way, by a single-dataset fit; on cohorts of eight datasets with
+  time points 6 days apart this lowered one-step RMSE by 58%, and at 360 days it is neutral (mean
   RMSE ratio 0.99 on development, 1.01 on held-out cohorts). The cohort fit
   takes 2.4–3.7 times as long. `initial_state = "free"` gives the earlier model; the
 benchmark entries without "balance" in their name use it.
@@ -289,7 +289,7 @@ Spearman above both existing methods, all with landscape-bootstrap intervals
 excluding zero. The safety line fails in one cell: scenario
 `unbalanced_3000_100_360d` at distance 0, RMSE 17% above the two-layer
 pipeline. That cell is two near-monoclonal datasets whose information is in
-the deep first sample, which the default model does not read. With balance
+the deep first time point, which the default model does not read. With balance
 all 18 pass; its worst cell is 0.69 of the two-layer pipeline.
 
 ## Held-out confirmation
@@ -309,8 +309,8 @@ Twelve landscapes simulated with seeds sealed until the methods were frozen
   two-layer pipeline. All 168 fits finished.
 - The default model passes 12 of 15. The safety line fails at distances 0 and
   1 (1.38 and 1.14) in `unbalanced_3000_100_360d`, as on the development
-  landscapes, from three datasets in which most observed karyotypes, seen in
-  the deep first sample only, are predicted at the trend (bias -0.12 to
+  landscapes, from three datasets in which most observed karyotypes, seen at
+  the deep first time point only, are predicted at the trend (bias -0.12 to
   -0.23), and at distance 0 in `very_sparse_50_50_180d` (1.33), from one
   dataset with three observed karyotypes.
 - ALFA-K fails in 5 of 96 fits and its error is 3–6 times that of no
@@ -328,19 +328,19 @@ each); the held-out landscapes agree.
 
 | Scenario | No information | Sparse joint | With balance | Coverage, default |
 | --- | --- | --- | --- | --- |
-| 30 days between samples (27 generations) | 0.049 / 0.096 / 0.141 | 0.028 / 0.048 / 0.070 | 0.033 / 0.066 / 0.097 | 1.00 / 0.98 / 0.96 |
+| 30 days between time points (27 generations) | 0.049 / 0.096 / 0.141 | 0.028 / 0.048 / 0.070 | 0.033 / 0.066 / 0.097 | 1.00 / 0.98 / 0.96 |
 | 60 days (54 generations) | 0.050 / 0.096 / 0.142 | 0.026 / 0.046 / 0.069 | 0.027 / 0.047 / 0.071 | 0.99 / 0.97 / 0.95 |
-| Half of the landscape redrawn at the first sample, 500 / 700 cells | 0.074 / 0.113 / 0.156 | 0.058 / 0.084 / 0.116 | 0.053 / 0.071 / 0.096 | 0.73 / 0.73 / 0.72 |
+| Half of the landscape redrawn at the first time point, 500 / 700 cells | 0.074 / 0.113 / 0.156 | 0.058 / 0.084 / 0.116 | 0.053 / 0.071 / 0.096 | 0.73 / 0.73 / 0.72 |
 | The same, 3000 / 100 cells | 0.070 / 0.110 / 0.147 | 0.060 / 0.083 / 0.108 | 0.050 / 0.066 / 0.082 | 0.82 / 0.80 / 0.79 |
 | Landscape turned about the dominant clone, 500 / 700 | 0.082 / 0.128 / 0.172 | 0.059 / 0.079 / 0.105 | 0.058 / 0.074 / 0.097 | 0.87 / 0.83 / 0.80 |
 | The same, 3000 / 100 | 0.093 / 0.138 / 0.180 | 0.088 / 0.113 / 0.134 | 0.067 / 0.079 / 0.095 | 0.85 / 0.88 / 0.88 |
 
-- Few generations between the samples do not hurt the default model; rank
+- Few generations between the time points do not hurt the default model; rank
   agreement falls (Spearman 0.32 / 0.29 / 0.25 at 30 days). Balance is worse
   at 30 days (held out: 0.069 against 0.049 at distance 1), because its
   history then is 30 days while the cloud around a clone took far longer to
   build. At 60 days the two are equal.
-- A landscape that changes at the first sample, as when treatment starts then,
+- A landscape that changes at the first time point, as when treatment starts then,
   leaves both better than no information, with intervals that are too narrow
   (0.72–0.88 for the default model; 0.82–0.94 with balance).
 - Balance was expected to fail there and does not: it is at least as accurate
@@ -352,7 +352,7 @@ each); the held-out landscapes agree.
 ## Forward prediction
 
 `forward_prediction.R`: total-variation distance between the predicted and
-the true composition of the domain 180 days after the second sample, default
+the true composition of the domain 180 days after the second time point, default
 model.
 
 | Forecast | Development (72 datasets) | Held out (72) |
@@ -367,35 +367,35 @@ Fitted against unchanged: -0.042 (landscape bootstrap 95% interval -0.079 to
 The fit closes about a quarter of the gap to what the true fitness would give
 with this forward model and starting point.
 
-## Real samples
+## Real datasets
 
-`real_cohort.R` on 20 GBM samples (22 chromosomes, 8–3889 cells per timepoint,
+`real_cohort.R` on 20 GBM datasets (22 chromosomes, 8–3889 cells per timepoint,
 179–3599 days apart), birth rates 0.02–1 per day, missegregation rate 5e-5.
 There is no truth; these are checks of behaviour.
 
-- All 20 samples fit at all three rates; in 17 the scale optimiser converged
+- All 20 datasets fit at all three rates; in 17 the scale optimiser converged
   at all three. Median 149 s for the three fits, maximum 679 s; median 849
   states, maximum 1558.
 - Over the 50-fold range of rates the mean deficit of non-major karyotypes per
   day changes 47-fold (median) and per division 0.94-fold. Predictions at the
-  two ends have rank correlation 0.66 / 0.76 / 0.96 (quartiles); one sample is
+  two ends have rank correlation 0.66 / 0.76 / 0.96 (quartiles); one dataset is
   at -0.2.
-- Two halves of the cells of a sample (10 samples with at least 200 cells at
+- Two halves of the cells of a dataset (10 datasets with at least 200 cells at
   both timepoints) agree with Spearman 0.88 for karyotypes with 10 or more
   cells, 0.76 with 2–9 cells and 0.33 with one cell. All differences are
   within the reported intervals, and 98–100% within the model's own, which
   describe sampling but not model error.
-- Pearson dispersion of the second sample's counts around the fit: quartiles
-  0.04 / 0.27 / 1.2; one sample at 15.
-- The samples overlap: a median 38% of a sample's karyotypes are seen in
-  another sample and 69% lie in another sample's domain. The recurrent ones
-  are chromosome 10 loss (17 samples), chromosome 7 gain (15) and both (14).
+- Pearson dispersion of the counts at the second time point around the fit:
+  quartiles 0.04 / 0.27 / 1.2; one dataset at 15.
+- The datasets overlap: a median 38% of a dataset's karyotypes are seen in
+  another dataset and 69% lie in another dataset's domain. The recurrent ones
+  are chromosome 10 loss (17 datasets), chromosome 7 gain (15) and both (14).
   Simulated cohorts overlap less (0–38% in 9 of 12 landscapes).
 
 ## Cohort
 
-`fit_sparse_joint_cohort()` shares the fitness of karyotypes between samples,
-with a between-sample deviation whose scale is estimated. Scored on patient 1
+`fit_sparse_joint_cohort()` shares the fitness of karyotypes between datasets,
+with a between-dataset deviation whose scale is estimated. Scored on patient 1
 of each landscape in the typical scenario, fitted with patients 2–8 of the same
 landscape (cohort) or with patient 1 of seven other landscapes (control).
 RMSE, with Spearman correlation in brackets, at distances 0 / 1 / 2:
@@ -413,11 +413,11 @@ RMSE, with Spearman correlation in brackets, at distances 0 / 1 / 2:
   +0.07 / +0.06 / +0.07). It does not lower the error, and the bias of
   unobserved karyotypes rises slightly (+0.01). The planned criterion, lower
   error at distances 1 and 2, is not met.
-- One trend for samples of different landscapes is harmful: RMSE +0.019 and
+- One trend for datasets of different landscapes is harmful: RMSE +0.019 and
   +0.032 at distances 1 and 2, Spearman -0.16, both with intervals excluding
-  zero. The trend's dosage and curvature then describe no sample.
+  zero. The trend's dosage and curvature then describe no dataset.
 - The trend is therefore chosen by marginal likelihood between one trend and
-  one per sample. It chose separate trends for 11 of 12 control cohorts, and
+  one per dataset. It chose separate trends for 11 of 12 control cohorts, and
   for cohorts of one landscape the shared trend in 7 of 12 development and 8
   of 12 held-out landscapes; the others are the rugged landscapes (wavelength
   1.2–1.6), whose patients sit on different peaks. The control then costs
@@ -438,12 +438,12 @@ RMSE, with Spearman correlation in brackets, at distances 0 / 1 / 2:
   eight took up to 57 minutes. The cohort default stays free.
 - A cohort of eight takes 10 s to 45 min, twice that when the trend is chosen.
 
-On the 20 GBM samples the per-sample trend is strongly preferred (negative log
+On the 20 GBM datasets the per-dataset trend is strongly preferred (negative log
 marginal likelihood 11 470 against 11 893), and the estimated deviation of a
 karyotype's fitness between patients is large (0.05 on the log scale, against
 a residual of 0.003). The patients do not look like one landscape. Within a
-sample, estimates under the two trends agree (Spearman 0.94, median over
-samples). The fit takes about an hour for 16 000 states.
+dataset, estimates under the two trends agree (Spearman 0.94, median over
+datasets). The fit takes about an hour for 16 000 states.
 
 ## The second-layer methods of the two-layer pipeline
 
@@ -513,7 +513,7 @@ and tables in `doc/generated/`). Each cell holds three landscapes.
   error. In the 50/50 design it is otherwise 0.53 to 0.84; in all other
   designs 0.41 to 0.83. On the development landscapes all 96 are below (0.39
   to 0.88).
-- Most of the gain comes between 50 and 200 cells per sample; 500/700 adds
+- Most of the gain comes between 50 and 200 cells per time point; 500/700 adds
   little. A 1080-day interval is worse than 360 days at wavelengths 0.8 and
   1.2 (0.62 to 0.75 against 0.49 to 0.61). 3000/100 is the weakest design at
   wavelength 1.6 (0.83 at distance 1).
@@ -528,7 +528,7 @@ and tables in `doc/generated/`). Each cell holds three landscapes.
   stays at 0.12 to 0.33 on rugged ones. The two-layer pipeline ranks observed
   karyotypes better in 7 of 8 designs at wavelength 1.6 and 2 of 8 at 1.2.
 - Coverage 0.77 to 1.00; below 0.90 mostly at distance 2 with the long
-  interval (0.81 to 0.83) or a shallow first sample (100/3000: 0.77 to 0.86),
+  interval (0.81 to 0.83) or a shallow first time point (100/3000: 0.77 to 0.86),
   at wavelengths up to 0.8.
 
 ## Distances 3 and 4
@@ -630,7 +630,7 @@ called `alfak()`: an earlier decision keeps that name out of alfak2, and it
 would mask `alfakR::alfak()` wherever both packages are loaded.
 
 - Karyotypes are chosen as in alfakR: frequent (`minobs` cells over both
-  samples), their one-step neighbours, and those neighbours' neighbours, in
+  time points), their one-step neighbours, and those neighbours' neighbours, in
   alfakR's order. `minobs` does not change the fit.
 - alfakR's bootstrap replicates become joint posterior draws. Each karyotype's
   draws are widened by independent noise to its calibrated standard
@@ -653,7 +653,7 @@ attributes, the landscape has the same karyotypes in the same order (868,
 13 157 and 20 126 rows), and the frequent karyotypes and neighbours agree. The
 one addition is `tmp` in `xval.Rds`, the paired matrix of earlier alfakR
 versions, which the PANcanKFLs scripts read before recomputing a Kriging
-cross-validation. On two GBM samples the PANcanKFLs reader
+cross-validation. On two GBM datasets the PANcanKFLs reader
 `make_parent_neighbor_matrix()` runs on the output unchanged.
 
 The cross-validation R-squared measures something else than alfakR's. On a
@@ -672,7 +672,7 @@ fits (history candidates) ended with nlminb's "false convergence"; 91 of them
 had a degenerate Laplace approximation: the inner Hessian's smallest
 eigenvalue was 1e-8 to 1e-6, against at least 4.4e-3 where nlminb converged,
 along the initial abundance of a karyotype with very few cells (mostly none
-in the first sample and one or two in the second). There the objective drops
+at the first time point and one or two at the second). There the objective drops
 by half a log determinant for no reason in the data, depends on the path of
 the inner optimisation, and TMB's gradient is out by orders of magnitude.
 
@@ -689,52 +689,52 @@ the inner optimisation, and TMB's gradient is out by orders of magnitude.
   it changed); it is kept as an internal option, off.
 - Integrating the initial abundance of non-major karyotypes out by quadrature
   (stage M) moved the flat direction to the next sparse quantity (zeta of
-  majors with no first-sample cell, g of non-majors that die out); stopped,
+  majors with no cell at the first time point, g of non-majors that die out); stopped,
   prototype kept as `model_m/m1_quadrature.patch`.
 
-## More than two samples
+## More than two time points
 
 `multi_timepoint/` (stage 2). One population passaged and sampled 4 or 8
 times, 6 or 60 days apart, bottlenecks of 200, 2000 and 20000 cells, 200 or
-1000 cells per sample, 12 landscapes (288 datasets); the multi-sample fits
-against fits of the first and the last sample (`ends`), RMSE ratio per
+1000 cells per time point, 12 landscapes (288 datasets); the multi-time-point
+fits against fits of the first and the last time point (`ends`), RMSE ratio per
 landscape, medians over landscapes:
 
 | arm | bottleneck 200 | 2000 | 20000 | cells within 3% |
 | --- | --- | --- | --- | --- |
-| `all` (every sample for every karyotype) | 1.31-1.44 | 1.01-1.09 | 0.94-0.96 | 7 / 24 |
-| `majors`, default (majors from the ends, intermediate samples for them, weight 1/dispersion) | 0.97-1.01 | 0.99-1.00 | 1.00-1.01 | 21 / 24 |
+| `all` (every time point for every karyotype) | 1.31-1.44 | 1.01-1.09 | 0.94-0.96 | 7 / 24 |
+| `majors`, default (majors from the ends, intermediate time points for them, weight 1/dispersion) | 0.97-1.01 | 0.99-1.00 | 1.00-1.01 | 21 / 24 |
 
-- With all samples for every karyotype, the loss sits on karyotypes seen only
-  in intermediate samples (fitness overestimated) and, with strong drift, on
+- With all time points for every karyotype, the loss sits on karyotypes seen
+  only at intermediate time points (fitness overestimated) and, with strong drift, on
   everything. It is not passaging drift alone: at a bottleneck of 2e5 the same
   landscape still lost 13% on those karyotypes. Clones that arise, grow by
-  chance and are lost between samples count once per sample, and choosing the
-  majors from every sample makes some of them majors.
+  chance and are lost between time points count once per time point, and choosing
+  the majors from every time point makes some of them majors.
 - The default is safe but gains nothing on these simulations; median
   coverage per setting is 0.96-1.00 (0.92-1.00 for `all`). A model of the clones' chance and of passaging
   drift (the plan's stage 3) is not built.
-- A sample in between with no cell on the states it counts for is left out
+- A time point in between with no cell on the states it counts for is left out
   (from cv7). Its depth offset is free, so it carries no information. The
-  Salehi trajectories of the ALFA-K paper benchmark have such samples. In 53
+  Salehi trajectories of the ALFA-K paper benchmark have such time points. In 53
   of 205 trajectories with more than two passages, a passage in the middle
   had no cell on the ends' majors after a clonal sweep. In 43 of them that
   passage had no cell in the domain at all. The simulated cultures here have
   none.
 
-`series_methods/`: three ways to tie the samples together
+`series_methods/`: three ways to tie the time points together
 (`fit_sparse_joint(series = ...)`).
 - `anchored` is the method above.
-- `pairwise` fits each pair of consecutive samples as two samples, with its
+- `pairwise` fits each pair of consecutive time points as two time points, with its
   own majors and domain.
-- `state_space` has latent abundances at every sample, linked by the dynamics
+- `state_space` has latent abundances at every time point, linked by the dynamics
   plus an estimated drift.
 
 All three share one landscape. They were compared on the cultures above
 (e1), on clonal sweeps (e2) and on neutral cultures (e3). Results are the
 median RMSE ratio to `ends`, as ranges over distances 0–2:
 
-| | e1, bottleneck 200 / 20000 | e2, 4 / 8 samples | e3 |
+| | e1, bottleneck 200 / 20000 | e2, 4 / 8 time points | e3 |
 | --- | --- | --- | --- |
 | `anchored` | 0.99–1.01 / 1.00–1.01 | 0.89–0.94 / 0.93 | 0.75–1.02 |
 | `pairwise` | 1.61–1.78 / 0.91–1.01 | 0.77–0.85 / 0.68–0.73 | 1.14–2.01 |
@@ -742,16 +742,20 @@ median RMSE ratio to `ends`, as ranges over distances 0–2:
 
 - Only `anchored` passes the gates set beforehand, so it stays the default.
 - `pairwise` reads passaging drift within each pair as selection.
-- `state_space` costs 3–12 times as much; with 8 samples some fits take up
+- `state_space` costs 3–12 times as much; with 8 time points some fits take up
   to 18 h and 16 GB.
-- `series = "auto"` keeps `anchored` unless a sample in between has less
-  than 30% of its cells on the first and last samples' majors (a sweep);
-  there it takes `pairwise` if the anchored intermediate weight is at least
-  0.5, otherwise `state_space`. It keeps `anchored` on all of e1 and 95% of
-  e3, and gives 0.81 on e2. The rule was fixed on e1–e3 and is checked on
-  the paper benchmark.
-- A pair whose sample has no cell in the pair's domain no longer stops the
-  fit. The sample is left out, as for `anchored` (`series_methods/README.md`).
+- An automatic choice was tried and not adopted. It kept `anchored` unless a
+  time point in between had less than 30% of its cells on the majors of the
+  first and last time points (a sweep). There it took `pairwise` if the
+  anchored intermediate weight was at least 0.5, otherwise `state_space`.
+  - It was fixed on e1–e3: it kept `anchored` on all of e1 and on 95% of e3,
+    and gave 0.81 on e2.
+  - On the paper benchmark it failed 3 of 13 checks against `anchored`. It
+    was worse on missegregation landscapes with 8 passages (r 0.804 against
+    0.815) and on Salehi forecasts (Wasserstein 0.506 against 0.541).
+  - The method is therefore named in `series`.
+- A pair with a time point that has no cell in the pair's domain no longer
+  stops the fit. The time point is left out, as for `anchored` (`series_methods/README.md`).
   This stopped 42 of 187 Salehi trajectories in c7f809c; now none stops.
 - The calibrated 95% intervals always contain zero, since
   `relative_sd` ≥ 0.6 |`relative_fitness`|. Power is therefore measured at a
@@ -759,7 +763,7 @@ median RMSE ratio to `ends`, as ranges over distances 0–2:
 
 ## Patient regrowth
 
-`patient_regrowth/` (two samples). A recurrence grown from 2000, 200 or 20
+`patient_regrowth/` (two time points). A recurrence grown from 2000, 200 or 20
 survivors costs little (skill of observed karyotypes -0.03 to -0.12, neighbours
 unchanged). Growth that started late, not told to the model, costs a great deal
 (skill below zero when the population grew for a quarter of the interval or
@@ -769,14 +773,14 @@ not help.
 
 ## Open
 
-- The free model misses the information in a deep first sample (the failing
+- The free model misses the information at a deep first time point (the failing
   safety cell); balance reads it, with a history now chosen by marginal
   likelihood (above).
 - The unknown birth rate has no remedy beyond the range fit. Intervals are too
   narrow when the assumed rate is too low, because both calibration terms
   scale with it.
 - Intervals are too narrow after 1080 days and when the landscape changes at
-  the first sample.
+  the first time point.
 - Observed karyotypes outside the domain all get the same observed level, so
   on diverse populations (smooth landscapes) about half the rare observed
   karyotypes are not ranked. Adding the trend's variation to that level is
@@ -787,7 +791,7 @@ not help.
   on rugged ones). Far intervals are too narrow at wavelength 0.8 (coverage
   0.84 at distance 4).
 - The calibration constants come from one family of simulated landscapes.
-- With more than two samples the samples in between add little (above); a
+- With more than two time points the time points in between add little (above); a
   model of clone chance and passaging drift is untried.
 - ALFA-K with minobs 5 has 75 of 96 development fits (the HPC run continues)
   and none on the held-out landscapes. On those 75 its RMSE is 0.169 / 0.225
@@ -804,7 +808,7 @@ not help.
   less than 2% (`lattice_residual/`). Most of the cross-validation's
   underestimate of held-out frequent karyotypes is the selection of those
   karyotypes, not an error in use.
-- In young populations (first sample at day 120, paper-sized passages) at
+- In young populations (first time point at day 120, paper-sized passages) at
   wavelength 0.4, unobserved karyotypes are overestimated (bias +0.06 at
   distance one, +0.11 at two). Their intervals now cover at least 90%
   (deficit for unobserved karyotypes, above), but the bias remains. It is not
@@ -822,7 +826,7 @@ per scenario. `calibration.R` and `calibration_fit.R` examine and fit the
 reported uncertainty. `rate_sensitivity.R` sweeps the two supplied rates.
 `forward_prediction.R` scores forecasts of the later composition.
 `depth_limit.R` compares the fit with deep resamples and a perfect stratum
-mean. `real_cohort.R` runs the checks on real samples. `alfakR_compat.R`
+mean. `real_cohort.R` runs the checks on real datasets. `alfakR_compat.R`
 compares the output files with those of alfakR. `wavelength_tables.R` writes
 the tables by wavelength of the method document. `scenario_results.R` writes the figures and
 tables by sampling design to `doc/generated/`. `far_distance.R` fits and

@@ -64,9 +64,9 @@ mm_report <- function() {
     if (nrow(deg)) {
       deg$y0_band <- cut(deg$top_y0, c(-1, 0, 2, Inf), c("0", "1-2", "3+"))
       deg$y1_band <- cut(deg$top_y1, c(-1, 0, 2, 5, Inf), c("0", "1-2", "3-5", "6+"))
-      add("Leading non-major state of each degenerate fit (counts in the first and second sample):", "",
+      add("Leading non-major state of each degenerate fit (counts at the first and second time point):", "",
           table_md(as.data.frame.matrix(table(y0 = deg$y0_band, y1 = deg$y1_band))), "",
-          sprintf("Its second-sample expectation: own growth median %.2f, inflow from majors %.2f, from non-majors %.3f.",
+          sprintf("Its expectation at the second time point: own growth median %.2f, inflow from majors %.2f, from non-majors %.3f.",
                   stats::median(deg$top_share_own), stats::median(deg$top_share_major), stats::median(deg$top_share_minor)),
           sprintf("Residual curvature on its own diagonal against -(y1 - lambda) pi (1 - pi): largest difference %.2g.",
                   max(abs(deg$top_diag_residual - deg$top_residual_formula))), "")
@@ -130,7 +130,7 @@ mm_report <- function() {
                 nrow(q), length(qd)),
         "against the exact rule (trapezoid, step 0.002 on +-40 prior sd). `worst_u`: where the counts put z, in prior",
         "sd from the prior mean, for the worst state.", "", table_md(per_rule), "",
-        "Largest error by first-sample count:", "",
+        "Largest error by count at the first time point:", "",
         table_md(cbind(y0 = levels(q$y0_band), as.data.frame(lapply(stats::setNames(rules, rules), function(r) {
           as.numeric(tapply(abs(q[[r]]), q$y0_band, max))
         })))), "",
@@ -143,7 +143,7 @@ mm_report <- function() {
     rules <- intersect(names(mm_rules), names(st))
     st$regime <- ifelse(abs(st$m - log(st$y0 + 0.5)) / st$s > 6, "counts far from prior", "counts near prior")
     add("## Quadrature under stress (synthetic states)", "",
-        sprintf("%d states: first-sample counts 0-149, second 0-300, prior mean -10 to 3, prior sd 1 and 3.", nrow(st)),
+        sprintf("%d states: counts 0-149 at the first time point, 0-300 at the second, prior mean -10 to 3, prior sd 1 and 3.", nrow(st)),
         sprintf("Exact rule against stats::integrate on %d of them: largest absolute difference %.2g.",
                 sum(!is.na(st$integrate_check)), max(abs(st$integrate_check), na.rm = TRUE)), "",
         table_md(do.call(rbind, lapply(split(st, st$regime), function(x) {

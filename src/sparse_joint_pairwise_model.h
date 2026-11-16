@@ -4,13 +4,13 @@
 // Sparse joint count model for one population sampled three or more times,
 // fitted pair by pair (`series = "pairwise"`).
 //
-// Each pair of consecutive samples is modelled as two samples are in
+// Each pair of consecutive time points is modelled as two time points are in
 // `sparse_joint_model.h`: its own domain (the majors of the pair and their
-// one-step neighbours), its own initial abundances at the earlier sample,
+// one-step neighbours), its own initial abundances at the earlier time point,
 // the first-order closed form over its interval, and its own depth. All
-// pairs share one landscape: the birth rates and their trend. A sample
+// pairs share one landscape: the birth rates and their trend. A time point
 // between the first and the last is the end of one pair and the start of
-// the next, so the dynamics restart from every sample as it was observed.
+// the next, so the dynamics restart from every time point as it was observed.
 //
 // States are those of the union of the pairs' domains; `member` says which
 // take part in which pair. The initial abundances form a states-by-pairs
@@ -21,9 +21,9 @@
 
 template<class Type>
 Type sparse_joint_pairwise_model(objective_function<Type>* obj) {
-  DATA_MATRIX(y_start);               // counts at each pair's earlier sample, states x pairs
-  DATA_MATRIX(y_end);                 // counts at its later sample
-  DATA_VECTOR(interval);              // time between the two samples of each pair
+  DATA_MATRIX(y_start);               // counts at each pair's earlier time point, states x pairs
+  DATA_MATRIX(y_end);                 // counts at its later time point
+  DATA_VECTOR(interval);              // time between the two time points of each pair
   DATA_MATRIX(member);                // 1: the state is in that pair's domain
   DATA_MATRIX(pair_major);            // 1: a major of that pair
   DATA_IVECTOR(edge_from);            // one-step edges between states
@@ -46,7 +46,7 @@ Type sparse_joint_pairwise_model(objective_function<Type>* obj) {
   DATA_MATRIX(balance_offset);        // zero, except to evaluate the expected information
   DATA_VECTOR(weight);                // 1: a state's counts enter the likelihood; 0: held out
 
-  PARAMETER_MATRIX(zeta);             // log expected count at each pair's earlier sample
+  PARAMETER_MATRIX(zeta);             // log expected count at each pair's earlier time point
   PARAMETER_VECTOR(g);                // log birth rate
   PARAMETER_VECTOR(coef);             // trend coefficients
   PARAMETER_VECTOR(theta);            // per pair: log depth ratio, centred on its reference state
@@ -56,7 +56,7 @@ Type sparse_joint_pairwise_model(objective_function<Type>* obj) {
   int n_pair = y_start.cols();
   Type nll = 0;
 
-  // Landscape prior: trend plus an independent residual, as for two samples.
+  // Landscape prior: trend plus an independent residual, as for two time points.
   vector<Type> scale = exp(log_scale);
   for (int k = 0; k < log_scale.size(); ++k)
     nll -= dnorm(log_scale(k), log_scale_prior_mean(k), log_scale_prior_sd(k), true);
@@ -104,7 +104,7 @@ Type sparse_joint_pairwise_model(objective_function<Type>* obj) {
       if (weight(i) != Type(0)) nll -= weight(i) * dpois(y_start(i, k), exp(zeta(i, k)), true);
     }
 
-    // The later sample: the closed form over the pair's interval, within its
+    // The later time point: the closed form over the pair's interval, within its
     // domain.
     vector<Type> log_n(n);
     for (int i = 0; i < n; ++i) log_n(i) = zeta(i, k) + net(i) * interval(k);

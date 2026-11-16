@@ -5,28 +5,28 @@
 //
 // Everything is as in `sparse_joint_model.h` (landscape prior, net rates,
 // initial abundances and the balance prior are the same code), except that
-// the forward solution from the first sample is evaluated at every later
-// sample time tau_k:
+// the forward solution from the first time point is evaluated at every later
+// time point tau_k:
 //
 //   n_j(tau_k) = exp(d_j tau_k) n_j(0) + sum_i M_ji phi1(d_j, d_i; tau_k) n_i(0),
 //
-// and each later sample has its own depth offset theta_k. Every sample is
+// and each later time point has its own depth offset theta_k. Every time point is
 // thereby compared with the first-order solution started at the first
-// sample, as a fit to the first and last samples compares the last one; a
-// later sample does not restart the dynamics. The Hessian keeps the sparsity
-// of the two-sample model: a state still depends only on itself and its
-// neighbours. With two samples the objective equals that of
+// time point, as a fit to the first and last time points compares the last one; a
+// later time point does not restart the dynamics. The Hessian keeps the sparsity
+// of the two-time-point model: a state still depends only on itself and its
+// neighbours. With two time points the objective equals that of
 // `sparse_joint_model.h`. `sparse_joint_model.h` is left unchanged so that
-// two-sample fits stay exactly as they were; R uses this template for more
-// than two samples.
+// two-time-point fits stay exactly as they were; R uses this template for more
+// than two time points.
 
 #undef TMB_OBJECTIVE_PTR
 #define TMB_OBJECTIVE_PTR obj
 
 template<class Type>
 Type sparse_joint_series_model(objective_function<Type>* obj) {
-  DATA_MATRIX(y);                     // counts, one column per sample, first sample first
-  DATA_VECTOR(tau);                   // time of each later sample since the first
+  DATA_MATRIX(y);                     // counts, one column per time point, first time point first
+  DATA_VECTOR(tau);                   // time of each later time point since the first
   DATA_IVECTOR(edge_from);            // one-step edges inside the domain
   DATA_IVECTOR(edge_to);
   DATA_VECTOR(edge_log_prob);         // log P_ij of the single-daughter kernel
@@ -47,12 +47,12 @@ Type sparse_joint_series_model(objective_function<Type>* obj) {
   DATA_SCALAR(balance_sd);            // log-scale spread around it
   DATA_VECTOR(balance_offset);        // zero, except to evaluate the expected information
   DATA_VECTOR(weight);                // 1: a state's counts enter the likelihood; 0: held out
-  DATA_MATRIX(sample_weight);         // per state and later sample: 1 counts, 0 left out
+  DATA_MATRIX(sample_weight);         // per state and later time point: 1 counts, 0 left out
 
-  PARAMETER_VECTOR(zeta);             // log expected count at the first sample
+  PARAMETER_VECTOR(zeta);             // log expected count at the first time point
   PARAMETER_VECTOR(g);                // log birth rate
   PARAMETER_VECTOR(coef);             // trend coefficients
-  PARAMETER_VECTOR(theta);            // per later sample: log depth ratio, centred on the reference state
+  PARAMETER_VECTOR(theta);            // per later time point: log depth ratio, centred on the reference state
   PARAMETER_VECTOR(log_scale);
 
   int n = y.rows();
@@ -101,13 +101,13 @@ Type sparse_joint_series_model(objective_function<Type>* obj) {
     for (int i = 0; i < n; ++i) nll -= dnorm(zeta(i), zeta_prior_mean(i), zeta_prior_sd(i), true);
   }
 
-  // First sample.
+  // First time point.
   for (int i = 0; i < n; ++i) {
     if (weight(i) == Type(0)) continue;
     nll -= weight(i) * dpois(y(i, 0), exp(zeta(i)), true);
   }
 
-  // Later samples: the forward solution from the first sample at tau_k.
+  // Later time points: the forward solution from the first time point at tau_k.
   matrix<Type> log_intensity(n, n_later);
   for (int k = 0; k < n_later; ++k) {
     vector<Type> log_n(n);

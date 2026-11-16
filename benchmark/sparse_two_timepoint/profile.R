@@ -2,7 +2,7 @@
 #
 # These statistics need no truth, so the same function describes simulated
 # datasets and real inputs. They are used to check that the benchmark's
-# sampling window produces data that look like the real two-timepoint samples
+# sampling window produces data that look like the real two-timepoint datasets
 # in diversity and in turnover between the timepoints.
 
 stt_count_profile <- function(counts) {

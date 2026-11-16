@@ -1,6 +1,6 @@
 #' Fit the complete alfak2 pipeline
 #'
-#' By default fits the sparse joint count model, built for sparse samples at
+#' By default fits the sparse joint count model, built for sparse counts at
 #' two or more timepoints: see [fit_sparse_joint()], whose result is
 #' returned. Its outputs
 #' can be converted to those of alfakR with [as_alfakR()], or produced
@@ -88,7 +88,7 @@
 #'   `dt`, `beta` and `sparse_joint_control` then apply, and giving any other
 #'   is an error. `"two_layer"` retains separate local and extrapolation fits;
 #'   `"joint_count"` fits a single count likelihood and structured landscape
-#'   prior on the entire bounded target graph. On simulated sparse samples the
+#'   prior on the entire bounded target graph. On simulated sparse data the
 #'   sparse joint model predicted fitness at distances 0 to 2 better than both
 #'   (`validation/sparse_joint/README.md`).
 #' @param sparse_joint_control Named list of further arguments for

@@ -1,7 +1,7 @@
 # Unobserved karyotypes predicted too fit at intermediate ruggedness
 
 In the paper-sized young populations of `../lattice_residual` (wavelength 0.4,
-first sample at day 120) `fit_sparse_joint()` at af362af predicts unobserved
+first time point at day 120) `fit_sparse_joint()` at af362af predicts unobserved
 karyotypes too fit: bias +0.06 at distance one and +0.11 at distance two from
 the data, with 95% intervals covering 0.87 and 0.82 of them (0.83 and 0.73 at
 6-day intervals). The same holds, less strongly, on the development-sized
@@ -50,8 +50,8 @@ predicted drop nor the interval told the regimes apart. Refitting the two
 constants by likelihood makes the undercovered cells worse (it narrows the
 overcovered ones), and so does a separate deficit fitted by likelihood.
 
-Decision (user, 2026-11-13): a deficit of its own for karyotypes seen in
-neither sample, 1.1, the smallest that keeps every simulated non-stress
+Decision (user, 2026-11-13): a deficit of its own for karyotypes seen at
+neither time point, 1.1, the smallest that keeps every simulated non-stress
 regime at 90% or more (observed karyotypes keep 0.6, the floor 0.009):
 
 | deficit for unobserved | worst non-stress cell | cells below 0.93 (of 22) | worst stress cell | width, median |

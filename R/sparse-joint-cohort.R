@@ -1,68 +1,68 @@
-# Sparse joint count model for a cohort: several two-timepoint samples that
+# Sparse joint count model for a cohort: several two-time-point datasets that
 # share one landscape.
 #
 # A "node" is a karyotype of the shared landscape; a "state" is a node in one
-# sample's domain. Each sample has its own domain, initial abundances and
-# depth, as in `fit_sparse_joint()`. Samples are tied through the log birth
+# dataset's domain. Each dataset has its own domain, initial abundances and
+# depth, as in `fit_sparse_joint()`. Datasets are tied through the log birth
 # rate of the nodes they have in common and through one trend.
 
 #' Fit the sparse joint count model to a cohort
 #'
-#' Fits several two-timepoint samples at once. Each sample keeps its own
+#' Fits several two-time-point datasets at once. Each dataset keeps its own
 #' domain, as in [fit_sparse_joint()], and its own initial abundances; the
-#' samples share the fitness of the karyotypes they have in common and one
-#' trend. A karyotype that is abundant in one sample and an unobserved
+#' datasets share the fitness of the karyotypes they have in common and one
+#' trend. A karyotype that is abundant in one dataset and an unobserved
 #' neighbour in another is informed by both.
 #'
-#' With `sharing = "partial"` a karyotype's birth rate in a sample deviates
+#' With `sharing = "partial"` a karyotype's birth rate in a dataset deviates
 #' from the shared value by an amount whose scale is estimated, so that
-#' samples which do not follow one landscape are not forced onto it. With
+#' datasets which do not follow one landscape are not forced onto it. With
 #' `sharing = "full"` it is the shared value.
 #'
-#' With `trend = "sample"` every sample has its own trend: dosage and
+#' With `trend = "sample"` every dataset has its own trend: dosage and
 #' curvature about its own mean karyotype, and distance to its own major
-#' karyotypes. Samples then share only the karyotypes they have in common and
-#' the prior scales, and samples with no karyotype in common are fitted as if
+#' karyotypes. Datasets then share only the karyotypes they have in common and
+#' the prior scales, and datasets with no karyotype in common are fitted as if
 #' alone. `trend = "shared"` fits one trend for the cohort, which helps when
-#' the samples follow one landscape and on simulated cohorts from different
-#' landscapes predicted much worse than fitting each sample alone.
+#' the datasets follow one landscape and on simulated cohorts from different
+#' landscapes predicted much worse than fitting each dataset alone.
 #' `trend = "select"`, the default, fits both and keeps the one with the
 #' higher marginal likelihood; on simulated cohorts it chose the shared trend
-#' for samples of one landscape and separate trends otherwise. It takes twice
+#' for datasets of one landscape and separate trends otherwise. It takes twice
 #' as long. The marginal likelihoods are in `diagnostics$trend_objective`.
 #' The scale optimisation is checked as in [fit_sparse_joint()]:
 #' `diagnostics$trend_convergence` tells whether each trend's was accepted,
 #' and `diagnostics$optimisation` how the kept one was checked; its
-#' `flat_direction` also names the sample of each karyotype.
+#' `flat_direction` also names the dataset of each karyotype.
 #'
 #' @param samples List of two-column count matrices with karyotype row names,
-#'   or of `alfak2_data` objects. Names identify the samples.
-#' @param dt Time between the two samples: one value, or one per sample.
+#'   or of `alfak2_data` objects. Names identify the datasets.
+#' @param dt Time between the two time points: one value, or one per dataset.
 #'   Used for count matrices only.
 #' @param sharing `"partial"` or `"full"`; see above.
 #' @param trend `"select"`, `"sample"` or `"shared"`; see above.
 #' @param initial_state `"free"` or `"balance"`; see [fit_sparse_joint()].
-#'   Unlike a single sample, a cohort starts free by default: with balance,
+#'   Unlike a single dataset, a cohort starts free by default: with balance,
 #'   the scale optimisation of some simulated cohorts failed and left no
 #'   marginal likelihood to choose the trend by.
 #' @param history With `initial_state = "balance"`, the time over which each
-#'   sample's balance built up: one value, or one per sample. By default each
-#'   sample's history is chosen as [fit_sparse_joint()] chooses it, by a
-#'   single-sample fit with the cohort's settings
+#'   dataset's balance built up: one value, or one per dataset. By default each
+#'   dataset's history is chosen as [fit_sparse_joint()] chooses it, by a
+#'   single-dataset fit with the cohort's settings
 #'   (`diagnostics$history_profiles`); the cohort is then fitted once with
-#'   those histories. A history describes the population a sample came from,
+#'   those histories. A history describes the population a dataset came from,
 #'   and choosing all of them jointly would multiply the number of cohort fits
-#'   by the candidates of every sample.
+#'   by the candidates of every dataset.
 #' @inheritParams fit_sparse_joint
 #'
 #' @return An `alfak2_sparse_joint_cohort_fit` object. `landscape` has one row
-#'   per karyotype in any sample's domain, with the shared fitness; `samples`
-#'   has one summary per sample, as returned by [fit_sparse_joint()].
+#'   per karyotype in any dataset's domain, with the shared fitness; `samples`
+#'   has one summary per dataset, as returned by [fit_sparse_joint()].
 #'   `diagnostics$domain_coverage` is the table of [fit_sparse_joint()] with a
-#'   `sample` column, one row per sample and timepoint. If a timepoint of any
-#'   sample has no cell inside that sample's domain, the function stops with
-#'   an error of class `alfak2_domain_coverage_error` that names the sample;
-#'   this is checked for every sample before any is fitted.
+#'   `sample` column, one row per dataset and timepoint. If a timepoint of any
+#'   dataset has no cell inside that dataset's domain, the function stops with
+#'   an error of class `alfak2_domain_coverage_error` that names the dataset;
+#'   this is checked for every dataset before any is fitted.
 #' @export
 fit_sparse_joint_cohort <- function(samples,
                                     dt = NULL,
@@ -90,7 +90,7 @@ fit_sparse_joint_cohort <- function(samples,
   }
   sparse_joint_cohort_check_pairs(samples)
   trend_mode <- match.arg(trend)
-  # With the balance prior and no history given, each sample's history is
+  # With the balance prior and no history given, each dataset's history is
   # chosen as fit_sparse_joint() chooses it, once, before the trend.
   history_profiles <- NULL
   if (is.null(history) && match.arg(initial_state) == "balance") {
@@ -135,14 +135,14 @@ fit_sparse_joint_cohort <- function(samples,
   initial_state <- match.arg(initial_state)
   calibration <- sparse_joint_validate_calibration(calibration)
   n_sample <- length(samples)
-  if (is.null(names(samples))) names(samples) <- paste0("sample", seq_len(n_sample))
+  if (is.null(names(samples))) names(samples) <- paste0("dataset", seq_len(n_sample))
   if (anyDuplicated(names(samples)) || any(!nzchar(names(samples)))) {
     stop("`samples` need distinct, non-empty names.", call. = FALSE)
   }
   is_data <- vapply(samples, inherits, logical(1), what = "alfak2_data")
   if (any(!is_data)) {
     if (is.null(dt) || !length(dt) %in% c(1L, n_sample)) {
-      stop("`dt` must give one interval, or one per sample.", call. = FALSE)
+      stop("`dt` must give one interval, or one per dataset.", call. = FALSE)
     }
     dt <- rep_len(dt, n_sample)
   }
@@ -151,7 +151,7 @@ fit_sparse_joint_cohort <- function(samples,
   })
   beta <- data[[1L]]$beta
   if (any(vapply(data, function(d) !isTRUE(all.equal(d$beta, beta)), logical(1)))) {
-    stop("All samples must have the same missegregation rate.", call. = FALSE)
+    stop("All datasets must have the same missegregation rate.", call. = FALSE)
   }
   validate_scalar(birth_rate, "birth_rate", lower = .Machine$double.eps)
   validate_scalar(birth_rate_log_sd, "birth_rate_log_sd", lower = .Machine$double.eps)
@@ -178,14 +178,14 @@ fit_sparse_joint_cohort <- function(samples,
     stop("Observed karyotypes must lie within the copy-number bounds.", call. = FALSE)
   }
   if (any(vapply(data, function(d) any(colSums(d$counts) <= 0), logical(1)))) {
-    stop("Both timepoints of every sample need at least one cell.", call. = FALSE)
+    stop("Both timepoints of every dataset need at least one cell.", call. = FALSE)
   }
   domains <- lapply(data, function(d) {
     sparse_joint_domain(d$counts, major_frequency, major_count, max_states, as.integer(min_cn), as.integer(max_cn))
   })
   coverage <- sparse_joint_cohort_coverage(data, domains, names(samples), major_frequency, major_count)
 
-  # States of all samples, concatenated; nodes are their distinct karyotypes.
+  # States of all datasets, concatenated; nodes are their distinct karyotypes.
   sizes <- vapply(domains, function(d) length(d$labels), integer(1))
   offset <- c(0L, cumsum(sizes))
   n_state <- sum(sizes)
@@ -205,10 +205,10 @@ fit_sparse_joint_cohort <- function(samples,
   }
   log_self <- bind("log_self")
 
-  # Trend designs. A sample's own trend is centred on its count-weighted mean
+  # Trend designs. A dataset's own trend is centred on its count-weighted mean
   # karyotype and measures distance to its own majors. The cohort's trend is
-  # centred on the average of those means, weighting samples equally, and
-  # measures distance to the nearest major of any sample.
+  # centred on the average of those means, weighting datasets equally, and
+  # measures distance to the nearest major of any dataset.
   major_labels <- unique(state_label[state_major])
   major <- parse_karyotypes(major_labels)
   sample_centre <- lapply(domains, function(d) {
@@ -277,7 +277,7 @@ fit_sparse_joint_cohort <- function(samples,
   node_latent <- which(solver$names == "m")
   state_latent <- if (deviations) which(solver$names == "g") else node_latent[state_node]
   m_hat <- cbind(solver$mode[node_latent], sqrt(solver$variance(node_latent)))
-  # Positions of each sample's coefficients among the latent variables.
+  # Positions of each dataset's coefficients among the latent variables.
   coef_latent <- which(solver$names == "coef")
   coef_index <- lapply(seq_len(n_sample), function(s) {
     if (shared_trend) coef_latent else coef_latent[(s - 1L) * n_coef + seq_len(n_coef)]
@@ -307,8 +307,8 @@ fit_sparse_joint_cohort <- function(samples,
                stringsAsFactors = FALSE),
     sparse_joint_fitness_columns(node_self, m_hat[, 1L], m_hat[, 2L])
   )
-  # The cohort's reference weights every sample's majors by their share of
-  # that sample's major cells, and every sample equally.
+  # The cohort's reference weights every dataset's majors by their share of
+  # that dataset's major cells, and every dataset equally.
   major_share <- unlist(lapply(seq_len(n_sample), function(s) {
     rows <- offset[[s]] + seq_len(sizes[[s]])
     weight <- ifelse(state_major[rows], y0[rows] + y1[rows], 0)
@@ -316,7 +316,7 @@ fit_sparse_joint_cohort <- function(samples,
   }), use.names = FALSE)
   node_weight <- as.numeric(tapply(major_share, factor(state_node, levels = seq_len(n_node)), sum))
   relative <- sparse_joint_relative(solver, node_latent, landscape$fitness_mean, landscape$log_birth_sd, node_weight)
-  # Covariance of each sample's trend coefficients with the cohort reference.
+  # Covariance of each dataset's trend coefficients with the cohort reference.
   relative$reference$sample_coef_covariance <- lapply(coef_index, function(index) relative$covariance[index])
   landscape$relative_fitness <- relative$mean
   landscape$relative_sd <- sparse_joint_calibrate(relative$sd, relative$mean, landscape$shell, birth_rate,
@@ -334,15 +334,15 @@ fit_sparse_joint_cohort <- function(samples,
                  stringsAsFactors = FALSE),
       sparse_joint_fitness_columns(2 * exp(log_self[rows]) - 1, state_hat[rows, 1L], state_hat[rows, 2L])
     )
-    # Relative to the sample's own majors.
+    # Relative to the dataset's own majors.
     own <- sparse_joint_relative(solver, state_latent[rows], summary$fitness_mean, summary$log_birth_sd,
                                  major_share[rows])
     summary$relative_fitness <- own$mean
     summary$relative_sd <- sparse_joint_calibrate(own$sd, own$mean, summary$shell, birth_rate, calibration,
                                                   observed = summary$count_t0 + summary$count_t1 > 0)
     summary$relative_sd_model <- own$sd
-    # Covariance of every node's shared value, and of the sample's trend
-    # coefficients, with this sample's reference.
+    # Covariance of every node's shared value, and of the dataset's trend
+    # coefficients, with this dataset's reference.
     own$reference$coef_covariance <- own$covariance[coef_index[[s]]]
     references[[s]] <<- c(own$reference, list(node_covariance = own$covariance[node_latent]))
     summary
@@ -383,24 +383,24 @@ fit_sparse_joint_cohort <- function(samples,
 #' Predict fitness from a cohort fit
 #'
 #' Without `sample`, returns the shared landscape: the posterior of a
-#' karyotype in any sample's domain, and the trend elsewhere. With `sample`,
-#' returns fitness in that sample: its own posterior inside its domain; the
-#' shared value, widened by the between-sample deviation, for a karyotype that
-#' only other samples have in their domain; and otherwise as
-#' [predict.alfak2_sparse_joint_fit()] does for a single sample.
+#' karyotype in any dataset's domain, and the trend elsewhere. With `sample`,
+#' returns fitness in that dataset: its own posterior inside its domain; the
+#' shared value, widened by the between-dataset deviation, for a karyotype that
+#' only other datasets have in their domain; and otherwise as
+#' [predict.alfak2_sparse_joint_fit()] does for a single dataset.
 #'
 #' @param object An `alfak2_sparse_joint_cohort_fit`.
 #' @param karyotypes Character labels or an integer matrix of karyotypes.
-#' @param sample Name or index of a sample, or `NULL` for the shared landscape.
+#' @param sample Name or index of a dataset, or `NULL` for the shared landscape.
 #' @param ... Unused.
 #'
 #' @return Data frame with `karyotype`, `fitness_mean`, `fitness_sd`,
 #'   `conf_low`, `conf_high`, `relative_fitness`, `relative_sd`,
 #'   `relative_sd_model`, `shell` and `source`, which is `"sample"`,
 #'   `"landscape"`, `"observed_level"` or `"trend"`. Relative fitness is
-#'   measured from the count-weighted mean of the sample's major karyotypes,
-#'   or of all samples' when `sample` is `NULL`; `shell` is the distance to the
-#'   nearest major karyotype of the sample, or of any sample.
+#'   measured from the count-weighted mean of the dataset's major karyotypes,
+#'   or of all datasets' when `sample` is `NULL`; `shell` is the distance to the
+#'   nearest major karyotype of the dataset, or of any dataset.
 #' @export
 predict.alfak2_sparse_joint_cohort_fit <- function(object, karyotypes, sample = NULL, ...) {
   labels <- if (is.character(karyotypes)) karyotypes else format_karyotypes(as.matrix(karyotypes))
@@ -409,18 +409,18 @@ predict.alfak2_sparse_joint_cohort_fit <- function(object, karyotypes, sample = 
   if (!shared) {
     if (is.character(sample)) sample <- match(sample, names(object$samples))
     if (length(sample) != 1L || is.na(sample) || sample < 1L || sample > length(object$samples)) {
-      stop("`sample` must name one sample of the cohort.", call. = FALSE)
+      stop("`sample` must name one dataset of the cohort.", call. = FALSE)
     }
   }
   reference <- if (shared) trend$reference else trend$sample_reference[[sample]]
   cn <- parse_karyotypes(labels)
   self <- 2 * sparse_joint_self_probability(cn, object$diagnostics$beta) - 1
-  # In a sample, a karyotype deviates from the shared value.
+  # In a dataset, a karyotype deviates from the shared value.
   deviation <- if (shared) 0 else trend$scales[["deviation"]]
 
   # The trend everywhere, then overwritten by better-informed sources. In a
-  # sample it is that sample's trend. For the shared landscape it is the
-  # average of the samples' trends; the variance taken is the average of
+  # dataset it is that dataset's trend. For the shared landscape it is the
+  # average of the datasets' trends; the variance taken is the average of
   # theirs, which is at least the variance of the average.
   trend_part <- function(s, reference_covariance) {
     part <- trend$samples[[s]]
@@ -443,13 +443,13 @@ predict.alfak2_sparse_joint_cohort_fit <- function(object, karyotypes, sample = 
   log_birth[known] <- object$landscape$log_birth_mean[node[known]]
   log_birth_sd[known] <- sqrt(object$landscape$log_birth_sd[node[known]]^2 + deviation^2)
   # Covariance of the node's log birth rate with the reference: stored for a
-  # sample; for the shared landscape it is implied by the stored relative sd.
+  # dataset; for the shared landscape it is implied by the stored relative sd.
   if (!shared) covariance[known] <- reference$node_covariance[node[known]]
   source[known] <- "landscape"
 
   if (!shared) {
-    # An observed karyotype left out of this sample's domain sits at the level
-    # of the sample's observed neighbours, unless another sample observed it
+    # An observed karyotype left out of this dataset's domain sits at the level
+    # of the dataset's observed neighbours, unless another dataset observed it
     # inside its own domain and so informs it directly.
     level <- trend$observed_level[[sample]]
     left_out <- labels %in% object$dropped[[sample]] & !is.null(level) &
@@ -470,7 +470,7 @@ predict.alfak2_sparse_joint_cohort_fit <- function(object, karyotypes, sample = 
       relative_sd = NA_real_,
       relative_sd_model = sqrt(pmax(fitness$fitness_mean^2 * log_birth_sd^2 + reference$variance -
                                       2 * fitness$fitness_mean * covariance, 0)),
-      # Distance to the nearest major of the sample, or of any sample.
+      # Distance to the nearest major of the dataset, or of any dataset.
       shell = sparse_joint_major_distance(cn, if (shared) trend$major else {
         own <- object$samples[[sample]]
         parse_karyotypes(own$karyotype[own$major])
@@ -478,8 +478,8 @@ predict.alfak2_sparse_joint_cohort_fit <- function(object, karyotypes, sample = 
       source = source, stringsAsFactors = FALSE
     )
   )
-  # Seen in some sample: a karyotype of the landscape observed there, or one
-  # placed at a sample's observed level.
+  # Seen in some dataset: a karyotype of the landscape observed there, or one
+  # placed at a dataset's observed level.
   seen <- (known & object$landscape$n_observed[ifelse(known, node, 1L)] > 0) | source == "observed_level"
   out$relative_sd <- sparse_joint_calibrate(out$relative_sd_model, out$relative_fitness, out$shell,
                                             trend$birth_rate, trend$calibration, observed = seen)
@@ -501,20 +501,20 @@ predict.alfak2_sparse_joint_cohort_fit <- function(object, karyotypes, sample = 
 print.alfak2_sparse_joint_cohort_fit <- function(x, ...) {
   d <- x$diagnostics
   cat("<alfak2_sparse_joint_cohort_fit>\n")
-  cat("  samples:", d$n_samples, " karyotypes:", d$n_nodes, "(", d$shared_nodes, "in more than one sample )\n")
-  cat("  sharing:", d$sharing, " trend:", d$trend, " between-sample deviation:",
+  cat("  datasets:", d$n_samples, " karyotypes:", d$n_nodes, "(", d$shared_nodes, "in more than one dataset )\n")
+  cat("  sharing:", d$sharing, " trend:", d$trend, " between-dataset deviation:",
       signif(x$trend$scales[["deviation"]], 3), "\n")
   if (!is.null(d$domain_coverage)) {
     lowest <- d$domain_coverage[which.min(d$domain_coverage$fraction), ]
     cat("  cells in the domain: lowest", sprintf("%.0f%%", 100 * lowest$fraction),
-        "(sample", lowest$sample, lowest$timepoint, ")\n")
+        "(dataset", lowest$sample, lowest$timepoint, ")\n")
   }
   cat("  baseline birth rate:", d$birth_rate, " convergence:", d$convergence, "\n")
   invisible(x)
 }
 
-# Coverage of each sample's domain, by sample and timepoint; an error if a
-# timepoint of any sample has no cell in its domain.
+# Coverage of each dataset's domain, by dataset and timepoint; an error if a
+# timepoint of any dataset has no cell in its domain.
 sparse_joint_cohort_coverage <- function(data, domains, sample_names, major_frequency, major_count) {
   coverage <- do.call(rbind, lapply(seq_along(data), function(s) {
     cbind(sample = sample_names[[s]],
@@ -523,15 +523,15 @@ sparse_joint_cohort_coverage <- function(data, domains, sample_names, major_freq
   }))
   rownames(coverage) <- NULL
   if (any(coverage$cells_in_domain <= 0)) {
-    sparse_joint_coverage_error(coverage, "A timepoint has no cell inside its sample's model domain.", by_sample = TRUE)
+    sparse_joint_coverage_error(coverage, "A timepoint has no cell inside its dataset's model domain.", by_sample = TRUE)
   }
   coverage
 }
 
-# Each sample's history for the balance prior, chosen by a single-sample fit
+# Each dataset's history for the balance prior, chosen by a single-dataset fit
 # with the cohort's settings and copy-number bounds. `arguments` are those of
 # fit_sparse_joint_cohort().
-# Cohort fits take two timepoints per sample.
+# Cohort fits take two timepoints per dataset.
 sparse_joint_cohort_check_pairs <- function(samples) {
   n_time <- vapply(samples, function(s) {
     counts <- if (inherits(s, "alfak2_data")) s$counts else s
@@ -539,9 +539,9 @@ sparse_joint_cohort_check_pairs <- function(samples) {
   }, integer(1))
   bad <- which(!is.na(n_time) & n_time != 2L)
   if (length(bad)) {
-    label <- if (is.null(names(samples)) || !nzchar(names(samples)[bad[1L]])) sprintf("sample %d", bad[1L]) else
+    label <- if (is.null(names(samples)) || !nzchar(names(samples)[bad[1L]])) sprintf("dataset %d", bad[1L]) else
       names(samples)[bad[1L]]
-    stop(sprintf("Cohort fits take two timepoints per sample; %s has %d.", label, n_time[bad[1L]]), call. = FALSE)
+    stop(sprintf("Cohort fits take two timepoints per dataset; %s has %d.", label, n_time[bad[1L]]), call. = FALSE)
   }
   invisible(TRUE)
 }
@@ -552,7 +552,7 @@ sparse_joint_cohort_histories <- function(arguments) {
   is_data <- vapply(samples, inherits, logical(1), what = "alfak2_data")
   dt <- arguments$dt
   if (any(!is_data) && (is.null(dt) || !length(dt) %in% c(1L, n_sample))) {
-    stop("`dt` must give one interval, or one per sample.", call. = FALSE)
+    stop("`dt` must give one interval, or one per dataset.", call. = FALSE)
   }
   if (!is.null(dt)) dt <- rep_len(dt, n_sample)
   data <- lapply(seq_len(n_sample), function(s) {
@@ -560,9 +560,9 @@ sparse_joint_cohort_histories <- function(arguments) {
   })
   max_cn <- arguments$max_cn
   if (is.null(max_cn)) max_cn <- max(vapply(data, function(d) max(parse_karyotypes(rownames(d$counts))), numeric(1))) + 1L
-  # Every sample's domain must hold cells at both timepoints; checked for all
-  # samples before any is fitted, so that the error names the sample.
-  sample_names <- if (is.null(names(samples))) paste0("sample", seq_len(n_sample)) else names(samples)
+  # Every dataset's domain must hold cells at both timepoints; checked for all
+  # datasets before any is fitted, so that the error names the dataset.
+  sample_names <- if (is.null(names(samples))) paste0("dataset", seq_len(n_sample)) else names(samples)
   in_bounds <- vapply(data, function(d) {
     cn <- parse_karyotypes(rownames(d$counts))
     all(cn >= arguments$min_cn & cn <= max_cn) && all(colSums(d$counts) > 0)
@@ -576,7 +576,7 @@ sparse_joint_cohort_histories <- function(arguments) {
   }
   single <- arguments[intersect(names(arguments), names(formals(fit_sparse_joint)))]
   single[c("counts", "dt", "beta", "history", "max_cn", "initial_state")] <- NULL
-  # Fitted only to choose each sample's history: their convergence is in the
+  # Fitted only to choose each dataset's history: their convergence is in the
   # profiles, not warned about.
   fits <- lapply(data, function(d) {
     withCallingHandlers(

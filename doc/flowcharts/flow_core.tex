@@ -1,4 +1,4 @@
-% alfak2 sparse joint model: the two-sample fit, whose steps every path shares.
+% alfak2 sparse joint model: the two-time-point fit, whose steps every path shares.
 % Mirrors fit_sparse_joint(), sparse_joint_problem(), sparse_joint_domain(),
 % sparse_joint_optimise_scales(), sparse_joint_posterior() and
 % predict.alfak2_sparse_joint_fit() in R/. Build: pdflatex flow_core.tex
@@ -8,21 +8,21 @@
 \begin{tikzpicture}
 
 \node[box=cTwo, w=12.6cm] (in) at (0,0) {%
-  \textbf{Two samples} $t_0$ and $t_1$, interval $T$: counts $y_{0i}$, $y_{1i}$ with totals $N_0$, $N_1$.
+  \textbf{Two time points} $t_0$ and $t_1$, interval $T$: counts $y_{0i}$, $y_{1i}$ with totals $N_0$, $N_1$.
   The anchored, pairwise and state-space paths run the same steps on their own counts (their charts say
   what changes).};
 
 \node[box, w=12.6cm, below=0.45cm of in] (major) {%
   \textbf{1 Major karyotypes $\mathcal M$}\quad share $\phi_v=\max_k y_{kv}/N_k\ge\phi_{\min}=0.01$ and at
-  least 3 cells over the samples; if none qualifies, the most abundant. If the domain would
+  least 3 cells over both time points; if none qualifies, the most abundant. If the domain would
   exceed 5000 states, $\phi_{\min}$ is raised until it fits.};
 \node[box, w=12.6cm, below=0.4cm of major] (domain) {%
   \textbf{2 Domain} $\mathcal D=\mathcal M\cup\{$one-step neighbours of $\mathcal M$ within
   $[c_{\min},c_{\max}]\}$, observed or not, majors first. Observed karyotypes outside $\mathcal D$ are
   set aside with their cells; \code{predict()} places them later.};
-\node[dec, below=0.45cm of domain] (cover) {Does each sample have a cell in $\mathcal D$?};
-\node[err, w=4.1cm, right=0.6cm of cover] (stop) {%
-  \textbf{Stop} with an error of class\\ {\ttfamily\scriptsize alfak2\_domain\_coverage\_error};\\ the samples may be too far apart.};
+\node[dec, below=0.45cm of domain] (cover) {Does each time point have a cell in $\mathcal D$?};
+\node[err, w=4.5cm, right=0.6cm of cover] (stop) {%
+  \textbf{Stop} with an error of class\\ {\ttfamily\scriptsize alfak2\_domain\_coverage\_error};\\ the time points may differ too much.};
 \draw[arr] (major) -- (domain);
 \draw[arr] (domain) -- (cover);
 \draw[arr, draw=cErrB] (cover) -- node[lab, above] {no} (stop);
@@ -74,7 +74,7 @@
   \textbf{10 Relative fitness}\quad $d_i=(2P_{ii}-1)\,e^{g_i}$; $\rho_i=d_i-R$, with $R$ the majors'
   count-weighted mean; $s_i$ by the delta method; reported
   $\tilde s_i^2=s_i^2+(\kappa\rho_i)^2+\bigl(a\,b_0(1+\mathrm{dist}_i)\bigr)^2$, $a=0.009$,
-  $\kappa=0.6$ for states seen in a sample and $1.1$ for the others.};
+  $\kappa=0.6$ for states seen at a time point and $1.1$ for the others.};
 \draw[arr] (loop) -- (best);
 \draw[arr] (best) -- (post);
 \draw[arr] (post) -- (rel);

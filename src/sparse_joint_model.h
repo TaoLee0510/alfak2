@@ -12,7 +12,7 @@
 //
 // A state therefore depends only on itself and its neighbours, which keeps
 // the Hessian of the latent variables sparse on domains of thousands of
-// states. The two multinomial samples are written in their Poisson form for
+// states. The multinomial counts at the two time points are written in their Poisson form for
 // the same reason: a softmax over the domain would couple every pair of
 // states. `R/forward-closed-form.R` holds the reference implementation.
 
@@ -88,7 +88,7 @@ Type sparse_joint_model(objective_function<Type>* obj) {
   //   n_j(0) = sum_p M_jp exp(-d_p h) phi1(d_j, d_p; h) n_p(0),
   //
   // which tends to M_jp n_p(0) / (d_p - d_j) for a long history and a less
-  // fit neighbour. Its count in the first sample then informs its fitness.
+  // fit neighbour. Its count at the first time point then informs its fitness.
   // `balance_offset` shifts the residual of that prior. It is zero in a fit.
   // Set to the residual at the mode, it leaves the Gauss-Newton part of the
   // prior's curvature, which is positive semi-definite, as replacing counts

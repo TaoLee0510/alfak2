@@ -8,9 +8,9 @@
 #
 # The gates were fixed before any fit of the three methods was scored (plan
 # of 2026-11-14, handoff):
-#   e1  not worse than the first and last sample alone: in at least 18 of the
-#       24 cells (bottleneck x spacing x depth x samples) the median RMSE
-#       ratio to `ends` is at most 1.03 at every distance, and the median
+#   e1  not worse than the first and last time point alone: in at least 18 of
+#       the 24 cells (bottleneck x spacing x depth x number of time points) the
+#       median RMSE ratio to `ends` is at most 1.03 at every distance, and the median
 #       over cells is at most 1.02 at every distance;
 #   e3  false positives controlled: median share of karyotypes called
 #       different at most 0.05, and at most 0.10 at every bottleneck;

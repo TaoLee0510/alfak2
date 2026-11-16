@@ -1,5 +1,5 @@
 # Stage 2 of the multi-timepoint work: one population sampled at several
-# times, with passaging bottlenecks of different sizes between the samples
+# times, with passaging bottlenecks of different sizes between the time points
 # (README.md in this directory).
 #
 # The data come from the development simulator of
@@ -35,13 +35,13 @@ mt_config <- function(output_dir = NULL, set = c("series", "heldout")) {
   config$patients_per_landscape <- 1L
   # The population grows on the development benchmark's settings (5e4 cells
   # at the start, thinned to 1% whenever it exceeds 2e6) until the first
-  # sample at day 1440. From then on it is thinned to `bottleneck` cells,
+  # time point at day 1440. From then on it is thinned to `bottleneck` cells,
   # nb / bottleneck growth per passage.
   config$abm$end_day <- 1440
   config$t0 <- 1440
   config$nb <- config$abm$max_pop
   config$bottlenecks <- c(2e4, 2e3, 2e2)
-  # Days between samples: about one passage at the largest bottleneck (the
+  # Days between time points: about one passage at the largest bottleneck (the
   # population divides about 0.9 times per day and grows 100-fold per
   # passage), and about ten.
   config$spacings <- c(6, 60)
@@ -57,21 +57,21 @@ mt_config <- function(output_dir = NULL, set = c("series", "heldout")) {
   }
   config$methods <- list(
     zero = list(type = "zero"),
-    # Every sample, and the first and last only (two timepoints: exactly
+    # Every time point, and the first and last only (two timepoints: exactly
     # ff13cf4).
     all = series("all"),
     ends = series("ends"),
-    # Every sample, the ones between the first and the last for the majors
-    # only. `majors_any` (cv4): majors chosen from every sample; `majors1`
-    # (cv5): majors and domain from the first and last sample, the samples in
-    # between at full weight; `majors` (cv5): the same with their weight the
+    # Every time point, the ones between the first and the last for the majors
+    # only. `majors_any` (cv4): majors chosen from every time point; `majors1`
+    # (cv5): majors and domain from the first and last time point, the time
+    # points in between at full weight; `majors` (cv5): the same with their weight the
     # inverse of the majors' dispersion in a first fit. The pilot found the
-    # all-sample fit worse than first+last, on karyotypes seen only in between
+    # fit on all time points worse than first+last, on karyotypes seen only in between
     # and on clones that became majors in between.
     majors_any = series("all", intermediate = "majors", build = "cv4"),
     majors1 = series("all", intermediate = "majors", intermediate_weight = 1, build = "cv5"),
     majors = series("all", intermediate = "majors", build = "cv5"),
-    # alfakR dev2 f93b2d2 on every sample, as in the development benchmark
+    # alfakR dev2 f93b2d2 on every time point, as in the development benchmark
     # (minobs 20, 45 bootstraps), with the window's bottleneck as n0.
     alfakR = list(type = "alfakR", build = NULL, library = "alfakR_f93b2d2", minobs = 20L, nboot = 45L,
                   nn_prior = "empirical")
@@ -85,9 +85,9 @@ mt_dataset_id <- function(landscape_id, bottleneck, spacing, depth, samples) {
 }
 
 # One ABM window per landscape, bottleneck and spacing, recorded at the
-# first sample and every `spacing` days after it; each recorded population
-# sampled at each depth. The four-sample datasets are the first four columns
-# of the eight-sample ones (the same cells), so the two are paired.
+# first time point and every `spacing` days after it; each recorded population
+# sampled at each depth. The four-time-point datasets are the first four
+# columns of the eight-time-point ones (the same cells), so the two are paired.
 mt_window_plan <- function(config) {
   plan <- list()
   for (i in seq_len(nrow(config$landscapes))) for (b in seq_along(config$bottlenecks)) {
@@ -181,8 +181,8 @@ mt_stage_datasets <- function(config, workers) {
   cat("Datasets:", nrow(index), " index:", si_index_path(config), "\n")
 }
 
-# Scored nodes from all samples: observed means seen in any sample, and the
-# reference weights use the first sample and the sum of the later ones, so
+# Scored nodes from all time points: observed means seen at any time point, and
+# the reference weights use the first time point and the sum of the later ones, so
 # that every arm is scored on the same karyotypes against the same reference.
 mt_dataset_nodes <- function(config, dataset) {
   path <- file.path(config$output_dir, "nodes", paste0(dataset$dataset_id, ".rds"))
@@ -208,14 +208,14 @@ mt_counts <- function(dataset, columns) {
 }
 
 # Dispersion of the majors' counts about the fit's expectation at the later
-# samples (the first sample's expectation is free): mean of (y - E)^2 / E.
+# time points (the expectation at the first time point is free): mean of (y - E)^2 / E.
 # About one under the model's Poisson sampling; passaging drift raises it.
 mt_dispersion <- function(fit) {
   s <- fit$summary[fit$summary$major, , drop = FALSE]
   later <- grep("^count_t[1-9][0-9]*$", names(s), value = TRUE)
   y <- as.matrix(s[later])
   e <- as.matrix(s[sub("^count", "expected", later)])
-  # Scale each sample's expectation to its observed total over the majors,
+  # Scale the expectation at each time point to its observed total over the majors,
   # so that the depth offsets do not count as dispersion.
   e <- sweep(e, 2L, colSums(y) / colSums(e), "*")
   mean((y - e)^2 / pmax(e, 1e-8))

@@ -191,8 +191,8 @@ mm_state_inputs <- function(p, d) {
   m <- ifelse(fed, q$log_start + d$balance_offset, d$zeta_prior_mean)
   s <- ifelse(fed, d$balance_sd, d$zeta_prior_sd)
   c1 <- p$theta1 - q$centre
-  # Where the counts alone put z: the first sample, and the second sample
-  # read as the state's own growth; the prior where they say nothing.
+  # Where the counts alone put z: the count at the first time point, and the
+  # count at the second read as the state's own growth; the prior where they say nothing.
   own <- pmax(d$y1 - exp(c1 + log_inflow), 0)
   info <- d$y0 + own
   xlogx <- function(x) ifelse(x > 0, x * log(x), 0)

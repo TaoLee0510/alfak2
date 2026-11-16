@@ -25,7 +25,7 @@ fit_sparse_joint(
   control = list(eval.max = 200, iter.max = 100),
   inner_control = list(maxit = 200, tol = 1e-10),
   times = NULL,
-  series = c("anchored", "pairwise", "state_space", "auto"),
+  series = c("anchored", "pairwise", "state_space"),
   intermediate = c("majors", "all"),
   intermediate_weight = NULL
 )
@@ -34,7 +34,7 @@ fit_sparse_joint(
 \item{counts}{Count matrix with karyotype row names and one column per
 timepoint, at least two, in time order; or an \code{alfak2_data} object.}
 
-\item{dt}{Time between the samples, if \code{counts} is a matrix: one interval
+\item{dt}{Time between the time points, if \code{counts} is a matrix: one interval
 for two timepoints, or one per pair of consecutive timepoints. See also
 \code{times}.}
 
@@ -46,10 +46,10 @@ for two timepoints, or one per pair of consecutive timepoints. See also
 \item{birth_rate_log_sd}{Prior standard deviation of the log baseline birth
 rate around \code{log(birth_rate)}.}
 
-\item{major_frequency}{Minimum share of any sample for a karyotype to
+\item{major_frequency}{Minimum share of the cells at any time point for a karyotype to
 anchor the domain as a major karyotype.}
 
-\item{major_count}{Minimum number of cells, over all samples, for a major
+\item{major_count}{Minimum number of cells, over all time points, for a major
 karyotype. A single cell must not be enough.}
 
 \item{max_states}{Largest domain to fit. If the domain would be larger,
@@ -68,29 +68,29 @@ distance.}
 frequency at the first timepoint of a karyotype seen at no timepoint. It
 is a frequency, not a count: a domain has thousands of unseen
 karyotypes, and a prior in counts would give them a large share of a
-small sample. A karyotype seen only later is centred on its frequency at
+time point with few cells. A karyotype seen only later is centred on its frequency at
 the earliest timepoint it was seen, with the same standard deviation:
 absent other evidence its frequency is taken not to have changed.}
 
 \item{initial_state}{How abundances at the first timepoint are treated.
 \code{"balance"}, the default, starts every karyotype that is not major at
 mutation-selection balance with the major karyotypes next to it, so that
-its count in the first sample also informs its fitness. \code{"free"}
-estimates one for every karyotype and so uses the first sample only as a
-starting point. Balance takes fitness before the first sample to have
-resembled fitness between the samples. On simulated landscapes it was
+its count at the first time point also informs its fitness. \code{"free"}
+estimates one for every karyotype and so uses the first time point only as a
+starting point. Balance takes fitness before the first time point to have
+resembled fitness between the time points. On simulated landscapes it was
 still more accurate than \code{"free"} when the landscape changed at the first
-sample, as under a new treatment.}
+time point, as under a new treatment.}
 
 \item{history}{Time, in units of \code{dt}, over which the balance built up
-before the first sample. By default it is chosen among the interval
-between the first and the last sample and 30, 100, 300, 1000 and 3000
+before the first time point. By default it is chosen among the interval
+between the first and the last time point and 30, 100, 300, 1000 and 3000
 divisions at \code{birth_rate} that are longer than that interval: the model is fitted at
 each and the fit with the highest marginal likelihood is kept, so a fit
 takes up to six times as long; \code{diagnostics$history_profile} lists the
 candidates. A single value fixes the history; several values are the
 candidates. Up to alfak2 8327282 the history was the interval itself
-(\code{history = dt}). With samples a few weeks apart that is far shorter than
+(\code{history = dt}). With time points a few weeks apart that is far shorter than
 the population has been evolving: the balance prior then holds the
 neighbours of the major karyotypes far below their observed abundance, and
 their fitness is overestimated (validation/sparse_joint/short_interval).}
@@ -113,43 +113,31 @@ the scale parameters; see Details for what follows it.}
 \item{times}{Sampling times, one per column of \code{counts}, instead of \code{dt};
 only their differences matter. When given, \code{dt} is not used.}
 
-\item{series}{With more than two samples, how they are tied together.
-\code{"anchored"}, the default: one trajectory from the first sample, with
-the majors and the domain from the first and the last sample (see
-\code{intermediate}). \code{"pairwise"}: every pair of consecutive samples is
-fitted as two samples are, with its own majors, domain, initial
+\item{series}{With more than two time points, how they are tied together.
+\code{"anchored"}, the default: one trajectory from the first time point, with
+the majors and the domain from the first and the last time point (see
+\code{intermediate}). \code{"pairwise"}: every pair of consecutive time points is
+fitted as two time points are, with its own majors, domain, initial
 abundances and depth, and all pairs share one landscape. \code{"state_space"}:
-every sample has latent abundances, linked from one sample to the next
+every time point has latent abundances, linked from one time point to the next
 by the same dynamics plus a drift whose scale is estimated
-(\code{diagnostics$drift}); the pairs' domains are joined. \code{"auto"}: one of
-the three, chosen from the data:
-\itemize{
-\item the anchored method when every sample in between has at least 30\% of
-its cells on the first and last samples' majors;
-\item otherwise (a clonal sweep) the pairwise method when the anchored
-intermediate weight is at least 0.5 (little drift), or when no sample
-in between remains to measure it;
-\item else the state-space method.
-}
-
-The fit is that method's fit, and \code{diagnostics$series_choice} gives the
-choice and the two measures. Two samples give the same fit with all
-methods. The methods and the choice are compared in
+(\code{diagnostics$drift}); the pairs' domains are joined. Two time points
+give the same fit with all three. The three are compared in
 validation/sparse_joint/series_methods.}
 
-\item{intermediate}{With more than two samples, how the samples between
+\item{intermediate}{With more than two time points, how the time points between
 the first and the last are used. \code{"majors"}, the default: the majors and
-the domain are chosen from the first and the last sample, as for two
-samples, and the samples in between count for the majors only, with
+the domain are chosen from the first and the last time point, as for two
+time points, and the time points in between count for the majors only, with
 weight \code{intermediate_weight}; the other karyotypes are fitted to the first
-and the last sample. \code{"all"}: like the first and the last, for every
-state, with the majors chosen from every sample. See Details.}
+and the last time point. \code{"all"}: like the first and the last, for every
+state, with the majors chosen from every time point. See Details.}
 
 \item{intermediate_weight}{With \code{intermediate = "majors"}, the weight of the
-samples in between, in (0, 1]. \code{NULL} estimates it: the inverse of the
-dispersion of the majors' counts in those samples in a first fit (at the
+time points in between, in (0, 1]. \code{NULL} estimates it: the inverse of the
+dispersion of the majors' counts at those time points in a first fit (at the
 shortest history), at most 1, so that a population that drifts between
-samples (small passaging bottlenecks) leans on the first and the last.}
+time points (small passaging bottlenecks) leans on the first and the last.}
 }
 \value{
 An \code{alfak2_sparse_joint_fit} object. \code{summary} has one row per
@@ -160,21 +148,21 @@ and \code{relative_fitness} is that rate minus the count-weighted mean over
 the major karyotypes, with \code{relative_sd} its uncertainty.
 \code{diagnostics$domain_coverage} has one row per timepoint: \code{cells},
 \code{cells_in_domain} and their ratio \code{fraction}, \code{karyotypes},
-\code{major_candidates} (karyotypes with at least \code{major_frequency} of that
-sample and \code{major_count} cells over both), \code{majors} (major karyotypes seen
+\code{major_candidates} (karyotypes with at least \code{major_frequency} of the cells at that
+time point and \code{major_count} cells over both), \code{majors} (major karyotypes seen
 at that timepoint), \code{shared} (karyotypes seen at both timepoints) and
 \code{median_distance_outside} (median distance from its cells outside the
 domain to the nearest major karyotype). With more than two timepoints,
-\code{diagnostics$times} are the sample times fitted and
-\code{diagnostics$dropped_samples} the samples left out. It has one row per
-sample left out (\code{sample}, its column in the input; \code{time}; and the
+\code{diagnostics$times} are the times of the time points fitted and
+\code{diagnostics$dropped_samples} the time points left out. It has one row per
+time point left out (\code{sample}, its column in the input; \code{time}; and the
 coverage columns), and no rows when none was. For the pairwise and
 state-space methods its columns are \code{sample}, \code{time}, \code{timepoint},
-\code{cells} and \code{uncovered}: the sample without a cell in its pair's domain,
-which is the sample itself, or a first or last sample next to it.
+\code{cells} and \code{uncovered}: the time point without a cell in its pair's domain,
+which is the time point itself, or a first or last time point next to it.
 }
 \description{
-Fits fitness to sparse karyotype samples of one population, two or more
+Fits fitness to sparse karyotype counts of one population at two or more
 timepoints, with a single count likelihood on a sparse domain: the
 well-sampled ("major") karyotypes and all their one-step neighbours. Division dynamics use a closed form in which each
 karyotype grows on its own and receives mutational influx from its
@@ -184,39 +172,39 @@ predicted with \code{\link[=predict]{predict()}} from a fitted trend in chromoso
 curvature and distance to the nearest major karyotype.
 }
 \details{
-With more than two timepoints every later sample is compared with the
-same closed-form dynamics started at the first sample, each with its own
-depth; the dynamics are not restarted at intermediate samples. Fitness is
+With more than two timepoints every later time point is compared with the
+same closed-form dynamics started at the first time point, each with its own
+depth; the dynamics are not restarted at intermediate time points. Fitness is
 taken to be constant over the whole series, and the history of the balance
-prior is at least the time from the first to the last sample. Two-timepoint
+prior is at least the time from the first to the last time point. Two-timepoint
 fits are unchanged. By default (\code{intermediate = "majors"}) the majors and
-the domain come from the first and the last sample, and the samples in
+the domain come from the first and the last time point, and the time points in
 between count for the majors only, weighted by the inverse of their
 dispersion in a first fit (\code{diagnostics$intermediate_weight},
 \code{intermediate_dispersion}). Clones that arise, grow by chance and are lost
-between samples, or are thinned by passaging, would otherwise count once
-per sample and read as fit. On simulated passaged cultures the default was
-as accurate as the first and the last sample alone; every sample for every
+between time points, or are thinned by passaging, would otherwise count once
+per time point and read as fit. On simulated passaged cultures the default was
+as accurate as the first and the last time point alone; every time point for every
 karyotype (\code{"all"}) was 4-6\% more accurate with large bottlenecks (20000
 cells) and up to 2.4 times less accurate with small ones (200)
 (validation/sparse_joint/multi_timepoint).
 
-The first and the last sample must each have a cell in the domain. A
-sample in between with no cell on the states it counts for (the majors by
+The first and the last time point must each have a cell in the domain. A
+time point in between with no cell on the states it counts for (the majors by
 default, the domain with \code{"all"}) is left out with a warning
-(\code{diagnostics$dropped_samples}). Its depth is free, so such a sample says
-nothing under the model, and the fit is the fit to the other samples.
+(\code{diagnostics$dropped_samples}). Its depth is free, so such a time point says
+nothing under the model, and the fit is the fit to the other time points.
 Leaving it out is the limit of its own likelihood. The input as given is
 kept in \code{input}, for \code{\link[=as_alfakR]{as_alfakR()}}.
 
 With \code{series} \code{"pairwise"} or \code{"state_space"}, each pair of consecutive
-samples has its own domain, and both samples of a pair need a cell in it.
-A sample in between without one is left out in the same way, and its
-neighbours become a pair. The first and the last sample are kept. When one
+time points has its own domain, and both time points of a pair need a cell in it.
+A time point in between without one is left out in the same way, and its
+neighbours become a pair. The first and the last time point are kept. When one
 of them has no cell in its pair's domain, its neighbour in between is left
-out instead, so that it pairs with a sample further in. This repeats until
-every pair is covered. At worst the first and the last sample remain, and
-the fit is the two-sample fit.
+out instead, so that it pairs with a time point further in. This repeats until
+every pair is covered. At worst the first and the last time point remain, and
+the fit is the two-time-point fit.
 
 Observed karyotypes that are not next to a major karyotype are left out of
 the likelihood, together with their cells. They would enter only because
@@ -226,7 +214,7 @@ observed neighbours inside the domain.
 
 \code{diagnostics$domain_coverage} reports, for each timepoint, how many of its
 cells lie inside the domain. If a timepoint has none, typically because
-every major karyotype comes from the other sample and the two samples share
+every major karyotype comes from the other time point and the two time points share
 no karyotype, there is nothing to fit and the function stops with an error
 of class \code{alfak2_domain_coverage_error}. Its message begins "A timepoint
 has no cell inside the model domain." and its \code{coverage} element holds the
@@ -250,14 +238,14 @@ is the same as before this check (alfak2 ff13cf4); so is the choice of
 history, by the lowest objective.
 
 Most fits that are not accepted have a karyotype with very few cells, whose
-initial abundance or birth rate the data hardly constrain. A count in the
-second sample, for one, has two explanations of nearly equal weight: the
+initial abundance or birth rate the data hardly constrain. A count at the
+second time point, for one, has two explanations of nearly equal weight: the
 karyotype was there and not sampled, or its neighbours made it during the
 interval. The Laplace approximation is then nearly flat along that
 quantity, or jumps from one explanation to the other as the scales change.
 For a fit that is not accepted, \code{flat_direction} lists the latent variables
 with the largest shares of the flattest direction of the inner Hessian
-(\code{variable}, \code{karyotype}, its \code{cells} in each sample, \code{major}, \code{share}),
+(\code{variable}, \code{karyotype}, its \code{cells} at each time point, \code{major}, \code{share}),
 \code{flat_composition} its make-up by kind of latent variable (\code{variable},
 \code{major}, \code{share}), and the warning names both when that Hessian is nearly
 singular. On simulated data, fits that searching again turned into
@@ -269,17 +257,17 @@ is kept as \code{relative_sd_model}. That one takes the model to be exact, and
 on simulated populations its 95\% intervals cover about three in four
 observed karyotypes and half of the unobserved ones. The reported value is
 \verb{sqrt(model sd^2 + (deficit * relative fitness)^2 + (floor * birth_rate * (1 + shell))^2)}, where \code{shell} is the distance to
-the nearest major karyotype. The deficit is 0.6 for karyotypes seen in a
-sample and 1.1 for those seen in neither: zero counts do not tell how far
+the nearest major karyotype. The deficit is 0.6 for karyotypes seen at a
+time point and 1.1 for those seen at none: zero counts do not tell how far
 below the major karyotypes an unobserved karyotype lies, and on moderately
 rugged simulated landscapes the predicted drop was up to 40\% too shallow.
 On simulated landscapes the resulting 95\% intervals covered at least 90\%
 of the karyotypes in every regime tested, and close to all of them on
 smooth or very rugged landscapes, where they are wider than needed. The
-constants carry over to real samples only as far as those landscapes
+constants carry over to real data only as far as those landscapes
 resemble them.
 
-The baseline birth rate is supplied rather than estimated. Two samples
+The baseline birth rate is supplied rather than estimated. Two time points
 identify it only weakly, and a free baseline drifts upwards and inflates
 every fitness difference. Rerun with other values to see how much a
 conclusion depends on it.

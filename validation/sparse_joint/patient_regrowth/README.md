@@ -1,9 +1,9 @@
 # Patient regrowth: few survivors and delayed growth
 
-Patient samples such as the GBM pairs are not passages. The first sample is
-taken at surgery and the second at recurrence, which can be regarded as grown
-from a small subset of the primary's cells; and the time at which that subset
-started to grow does not correspond to the sampling times. This study asks how
+Patient data such as the GBM pairs are not passages. The cells of the first
+time point are taken at surgery and those of the second at recurrence, which
+can be regarded as grown from a small subset of the primary's cells; and the
+time at which that subset started to grow does not correspond to the sampling times. This study asks how
 much either costs the two-timepoint model as shipped (alfak2 ff13cf4), and
 whether the remedies at hand help.
 
@@ -25,8 +25,8 @@ model is always told that 360 days passed.
 | `s0020_d875` | 20 | 0.125 |
 
 Before growth starts the survivors neither divide nor die. Seeds (base 99000)
-are shared by the scenarios of a patient: the first sample is the same cells
-in every scenario, survivors of one size are the same cells, and a dormant
+are shared by the scenarios of a patient: the cells at the first time point are
+the same in every scenario, survivors of one size are the same cells, and a dormant
 scenario's recurrence is its immediate-regrowth scenario's population after
 the shorter growth time. Patients 2-8 are generated for `none`, `s0200` and
 `s0020`, for cohort fits.
@@ -126,7 +126,7 @@ whether each scale optimisation was accepted (53 of 96 `base` fits were not).
   survivors (+0.05).
 
 Decision (2026-11-14, on my recommendation under the user's authorisation):
-no change to the package. The README says, for patient samples, that the
+no change to the package. The README says, for patient data, that the
 model must be told the time the population actually grew (or the birth rate
 times the growing share), and that when this is unknown a range of rates is
 the safer choice, at a cost when there was no delay.

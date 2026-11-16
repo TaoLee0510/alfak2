@@ -170,7 +170,7 @@ stt_stage_report <- function(config, split) {
   }))
   if (is.null(paired)) stop("No paired comparison is available yet.", call. = FALSE)
   verdict <- do.call(rbind, lapply(candidates, function(candidate) stt_acceptance(cells, candidate, acceptance)))
-  # Cohort methods against the single-sample model, on the cohort scenario.
+  # Cohort methods against the single-dataset model, on the cohort scenario.
   cohort_cells <- cells[cells$scenario == config$cohort_scenario, ]
   cohort_paired <- do.call(rbind, lapply(intersect(acceptance$cohort, methods), function(method) {
     do.call(rbind, lapply(c("rmse", "bias", "spearman", "coverage95"), function(metric) {
@@ -216,7 +216,7 @@ stt_stage_report <- function(config, split) {
                                 "candidate_mean", "difference", "ci_low", "ci_high", "relative_change")], 4L),
     if (!is.null(cohort_paired)) {
       utils::write.csv(cohort_paired, file.path(report_dir, sprintf("cohort_%s.csv", split)), row.names = FALSE)
-      c("", sprintf("## Cohort fits against the single-sample fit (scenario %s)", config$cohort_scenario), "",
+      c("", sprintf("## Cohort fits against the single-dataset fit (scenario %s)", config$cohort_scenario), "",
         stt_markdown_table(cohort_paired[c("candidate", "baseline", "metric", "stratum", "n_landscapes", "baseline_mean",
                                            "candidate_mean", "difference", "ci_low", "ci_high")], 4L))
     },

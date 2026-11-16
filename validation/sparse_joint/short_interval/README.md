@@ -4,7 +4,7 @@ The ALFA-K paper benchmark (`alfak2-paper-benchmark`) found two weaknesses of
 the sparse joint model at 8327282, both outside the range it was developed on
 (intervals of 180–1080 days, wavelengths 0.4–1.6):
 
-1. **Short intervals.** With samples one passage apart (about 6 days), the
+1. **Short intervals.** With time points one passage apart (about 6 days), the
    predictions for karyotypes held out of the fit are more dispersed than the
    truth supports: the slope of truth on held-out prediction is 0.06–0.56.
 2. **Few frequent karyotypes.** On the most rugged landscapes (wavelength 0.2,
@@ -35,11 +35,11 @@ The development simulator of `benchmark/sparse_two_timepoint` (sourced, not
 modified), with its own landscapes (seed base 93000) and output directory:
 
 - wavelengths 0.2, 0.4, 0.8 and 1.6, five landscapes each, one patient;
-- first sample at day 120 (as young as the paper's ABM populations) or day
+- first time point at day 120 (as young as the paper's ABM populations) or day
   1440 (as in the development benchmark): separates a short interval from a
   young population;
 - intervals of 6, 18 and 42 days (one, three and seven passages of the paper's
-  ABM), 1000 cells at each sample.
+  ABM), 1000 cells at each time point.
 
 120 datasets. The paper's ABM data are not used, so that its benchmark stays
 independent.
@@ -163,7 +163,7 @@ against 8327282 (`balance`).
 ## Cohort model
 
 `fit_sparse_joint_cohort()` with `initial_state = "balance"` now chooses each
-sample's history by a single-sample fit and fits the cohort once with them
+dataset's history by a single-dataset fit and fits the cohort once with them
 (its default initial state stays `"free"`, where the history does not enter).
 
 - Development cohort scenario (8 patients, 360 days, HPC): one-step RMSE on
@@ -172,8 +172,8 @@ sample's history by a single-sample fit and fits the cohort once with them
   marginal likelihood for either trend). Held-out cohort scenario (final
   confirmation): within 0.98–1.09 per landscape (mean 1.01, Spearman
   0.003–0.008 lower), all 12 fitted. At long intervals the change is neutral.
-- Cohorts of eight 6-day samples (`cohort_short.R`, wavelengths 0.8 and 1.6,
-  first sample at day 120; patients 2–8 are new trajectories): one-step RMSE
+- Cohorts of eight datasets with time points 6 days apart (`cohort_short.R`,
+  wavelengths 0.8 and 1.6, first time point at day 120; patients 2–8 are new trajectories): one-step RMSE
   2.15 → 0.73 times that of no information (paired −58%, all 10 better),
   Spearman 0.69 → 0.81. The fit took 3.7 times as long.
 

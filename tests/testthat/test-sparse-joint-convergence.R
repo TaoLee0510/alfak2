@@ -89,7 +89,7 @@ test_that("the flat direction is named by karyotype, cells and share", {
                      "led by the initial abundance of karyotype 2.3 (not major, cells 0 -> 2, 91%)"))
   expect_null(sparse_joint_flat_direction(vector[-1], labels))
   expect_null(sparse_joint_flat_direction(NULL, labels))
-  # A cohort: states carry their sample; shared birth rates their node.
+  # A cohort: states carry their dataset; shared birth rates their node.
   cohort <- sparse_joint_latent_labels(
     c("zeta", "zeta", "m", "m"),
     states = data.frame(karyotype = c("2.2", "2.2"), sample = c("A", "B"), cells = c("3 -> 4", "0 -> 1"),
@@ -99,7 +99,7 @@ test_that("the flat direction is named by karyotype, cells and share", {
   expect_equal(cohort$sample, c("A", "B", NA, NA))
   expect_equal(cohort$karyotype, c("2.2", "2.2", "2.2", "2.3"))
   expect_equal(sparse_joint_describe_flat(sparse_joint_flat_direction(c(0, 1, 0, 0), cohort)),
-               "along the initial abundance of karyotype 2.2 in sample B (not major, cells 0 -> 1, 100%)")
+               "along the initial abundance of karyotype 2.2 in dataset B (not major, cells 0 -> 1, 100%)")
 })
 
 test_that("finite-difference and projected gradients respect the bounds", {

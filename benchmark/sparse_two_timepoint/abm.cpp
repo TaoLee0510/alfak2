@@ -8,7 +8,7 @@
 // is thinned binomially, which models passaging.
 //
 // Two things differ from the ALFA-K simulator. Daughters with a copy number
-// outside [min_cn, max_cn] die: real samples contain no nullisomic karyotypes,
+// outside [min_cn, max_cn] die: real data contain no nullisomic karyotypes,
 // and both fitting methods assume nullisomy is not viable. And the number of
 // dividing cells is binomial rather than a capped Poisson, so the mean growth
 // factor per step is exactly 1 + fitness * delta_t for a clone of any size.

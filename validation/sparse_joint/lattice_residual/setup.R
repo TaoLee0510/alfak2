@@ -47,7 +47,7 @@ lr_config <- function(output_dir = NULL, set = c("rugged", "heldout")) {
   config$abm$max_pop <- 2e7
   config$abm$end_day <- 120
   config$abm$record_days <- 60
-  # First sample at day 120, about the age of the paper's populations at their
+  # First time point at day 120, about the age of the paper's populations at their
   # windows; intervals of one, three and seven passages.
   intervals <- c(6, 18, 42)
   config$scenarios <- data.frame(

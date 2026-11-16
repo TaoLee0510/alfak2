@@ -21,13 +21,13 @@ test_that("the domain is the major karyotypes and all their one-step neighbours"
   expect_true(all(distance[-(1:3)] == 1))
 })
 
-test_that("majors need both a share of a sample and a number of cells", {
+test_that("majors need both a share of a time point and a number of cells", {
   counts <- labelled_counts("2.2.2" = c(30, 20), "2.3.2" = c(0, 3), "3.2.2" = c(1, 0), "2.2.1" = c(0, 1))
-  # shares of either sample: 0.97, 0.125, 0.032, 0.042
+  # shares at either time point: 0.97, 0.125, 0.032, 0.042
   expect_equal(sparse_joint_major(counts, 0.01, major_count = 3), c("2.2.2", "2.3.2"))
   expect_equal(sparse_joint_major(counts, 0.01, major_count = 4), "2.2.2")
   expect_equal(sparse_joint_major(counts, 0.2, major_count = 3), "2.2.2")
-  # a single cell holds 3% of a sample here but does not make a major, so its
+  # a single cell holds 3% of the cells at a time point here but does not make a major, so its
   # neighbours are not brought into the domain
   domain <- sparse_joint_domain(counts, 0.01, 3, Inf, 1L, 4L)
   expect_equal(domain$n_major, 2L)
@@ -179,7 +179,7 @@ test_that("the balance prior is the closed-form influx from the majors", {
   expect_equal(objective(1L) - objective(0L), expected, tolerance = 1e-8)
 })
 
-test_that("with balance, the first sample tells neighbours apart", {
+test_that("with balance, the first time point tells neighbours apart", {
   sim <- simulate_balanced_counts()
   fit <- function(initial_state) {
     # The simulated population is exactly at balance, so little spread
@@ -212,7 +212,7 @@ test_that("reported uncertainty of relative fitness adds model error to the mode
   # without the uncertainty of the baseline, which all karyotypes share
   expect_true(all(summary$relative_sd_model[summary$major] < summary$fitness_sd[summary$major]))
   calibration <- sparse_joint_default_calibration
-  # Karyotypes seen in neither sample have a deficit of their own.
+  # Karyotypes seen at neither time point have a deficit of their own.
   observed <- summary$count_t0 + summary$count_t1 > 0
   expect_true(any(observed & !summary$major) && any(!observed))
   deficit <- ifelse(observed, calibration[["deficit"]], calibration[["deficit_unobserved"]])
@@ -315,7 +315,7 @@ test_that("by default the history is chosen among the interval and longer divisi
 })
 
 test_that("a timepoint with no cell next to a major karyotype stops with a typed error", {
-  # The second sample holds one clone; the first only single cells two or
+  # The second time point holds one clone; the first only single cells two or
   # three steps from it, none of which can anchor the domain.
   counts <- labelled_counts("2.2.2" = c(0, 20), "3.3.2" = c(1, 0), "1.1.2" = c(1, 0), "2.4.2" = c(1, 0),
                             "4.2.3" = c(1, 0))
@@ -325,7 +325,7 @@ test_that("a timepoint with no cell next to a major karyotype stops with a typed
   expect_match(conditionMessage(err), "^A timepoint has no cell inside the model domain\\. ")
   expect_match(conditionMessage(err), "Timepoint t0: none of its 4 cells lies within one step of a major karyotype; ",
                fixed = TRUE)
-  expect_match(conditionMessage(err), "the only major comes from t1, the samples share no karyotype", fixed = TRUE)
+  expect_match(conditionMessage(err), "the only major comes from t1, the time points share no karyotype", fixed = TRUE)
   expect_match(conditionMessage(err), "median distance to the nearest major is 2.", fixed = TRUE)
   coverage <- err$coverage
   expect_equal(coverage$timepoint, c("t0", "t1"))
@@ -363,7 +363,7 @@ test_that("a fit reports how many cells of each timepoint lie inside the domain"
   expect_output(print(fit), "cells in the domain: t0 ")
 })
 
-test_that("counts are checked per sample before fitting", {
+test_that("counts are checked per time point before fitting", {
   counts <- cbind(a = c(3, 1, 1, 0), b = c(0, 0, 2, 5), c = c(1, 1, 1, 0))
   rownames(counts) <- c("2.2.2", "2.3.2", "4.4.2", "0.2.2")
   check <- check_sparse_joint_counts(counts)

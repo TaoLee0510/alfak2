@@ -4,8 +4,8 @@
 # compared with Hamiltonian Monte Carlo draws of the same joint posterior at
 # the fitted scales, for the anchored, pairwise and state-space methods.
 #
-# The example is simulate_series_counts() of the package tests (4 samples, 21
-# states). The sampler is that of ../unobserved_bias/laplace_mean.R: whitened
+# The example is simulate_series_counts() of the package tests (4 time points,
+# 21 states). The sampler is that of ../unobserved_bias/laplace_mean.R: whitened
 # by the fit's expected information, identity mass, step size adapted in
 # warm-up towards an acceptance of 0.75.
 #

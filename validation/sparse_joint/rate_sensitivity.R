@@ -1,6 +1,6 @@
 # Sensitivity of the sparse joint model to the two rates it is given: the
-# baseline birth rate and the missegregation rate. Neither is known for a
-# patient sample.
+# baseline birth rate and the missegregation rate. Neither is known for
+# patient data.
 #
 #   Rscript validation/sparse_joint/rate_sensitivity.R [--scenarios=REGEX] [--grid=typical|ends]
 #                                                      [--workers=2] [--arguments='list(...)']
