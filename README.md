@@ -231,7 +231,7 @@ cohort$landscape                       # shared fitness of every karyotype
 predict(cohort, karyotypes, sample = "P1")
 ```
 
-By default (`initial_state = "balance"`) rare karyotypes start at
+With the balance prior (`initial_state = "balance"`) rare karyotypes start at
 mutation-selection balance with the clones next to them, so that their levels
 at the first time point inform their fitness as well. This takes fitness before
 the first time point to resemble fitness between the time points. On simulated
@@ -244,6 +244,25 @@ model, but it ranked karyotypes better; at about 60 divisions the two were
 equally accurate. Up to alfak2 8327282 the balance built up over the interval
 alone, and at about 30 divisions its errors were twice those of the free
 model.
+
+The balance prior reads the size of the cloud of rare karyotypes as fitness.
+That is right when the missegregation rate is the assumed one. When the true
+rate is higher, or cells are called a copy off, the cloud is larger for
+reasons other than fitness, and on such simulations the balance prior ranked
+neighbouring karyotypes worse than chance. The default, `initial_state =
+"auto"`, therefore checks the cloud first (two time points): a fit at the
+interval with the cloud's level free measures how much larger the cloud is
+than the balance allows. Above a factor of e (log level 1) the fit is
+`"free"`, otherwise `"balance"`. `fit$diagnostics$initial_state_check` holds
+the level and the choice.
+- On new simulated landscapes, the development scenarios all kept the balance
+  prior and were unchanged; short intervals were unchanged; populations as
+  diverse as Salehi passages, with a 2–8 times higher rate or 1–2% of
+  chromosomes miscalled, were switched and their errors fell by a fifth to a
+  quarter ([cloud level](validation/sparse_joint/cloud_level/README.md)).
+- With more than two time points `"auto"` is `"balance"`.
+- Up to alfak2 bf86c85 the default was `"balance"`; set it explicitly to
+  reproduce earlier fits.
 
 A fit needs cells at both time points within one step of a well-sampled
 karyotype. `fit$diagnostics$domain_coverage` gives, for each time point, how many

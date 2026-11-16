@@ -352,7 +352,7 @@ rather than the count scale, because a prior on counts would assign the
 several thousand unobserved karyotypes of a domain a substantial share of a
 few hundred cells.
 
-\paragraph{Mutation--selection balance (default).}
+\paragraph{Mutation--selection balance.}
 With \texttt{initial\_state = "balance"}, the major karyotypes retain the
 prior (\ref{eq:free-prior}), and each non-major state $j$ is centred on the
 abundance that its major neighbours would have generated over a history of
@@ -390,6 +390,49 @@ approximately 30 divisions or by a few weeks, because the mutational cloud
 then has too little time to form and the neighbours of the majors are held far
 below their observed abundance; the candidate histories address this case
 (validation/sparse\_joint/short\_interval).
+
+\paragraph{Choice between the two (default).}
+The balance prior reads the size of the cloud of non-major karyotypes as
+fitness. When the true missegregation rate exceeds $\beta$, when cells are
+called one copy off, or when the population is far from balance, the cloud is
+larger for reasons other than fitness. On simulated populations of this kind,
+as diverse as the passages of the Salehi data (about half of the cells on
+karyotypes observed once), the balance prior ranked neighbouring karyotypes
+worse than chance (one-copy direction accuracy 0.17--0.48), whereas
+independent initial abundances reached 0.48--0.71. Where its assumptions hold,
+the balance prior was about one fifth more accurate.
+
+With \texttt{initial\_state = "auto"}, the default for two time points, the
+model therefore first measures the cloud. A fit with $h=T$ in which all
+non-major states share one log factor $\ell$ over the balance,
+\begin{equation}
+  \zeta_j\sim\Normal\Bigl(\ell+\log\!\!\sum_{p\in\mathcal{M},\,p\sim j}\!\!M_{jp}\,
+  e^{\zeta_p-d_pT}\,\varphi_1(d_j,d_p;T),\ \sigma_\zeta^2\Bigr),
+  \qquad \ell\sim\Normal(0,3^2),
+  \label{eq:balance-level}
+\end{equation}
+gives the posterior mode $\hat\ell$ (\texttt{balance\_level = "free"}). If
+$\hat\ell>1$ (\texttt{auto\_level}), that is, if the cloud is more than about
+$e$ times larger than the balance allows, the fit uses (\ref{eq:free-prior});
+otherwise (\ref{eq:balance-prior}) with its candidate histories. The level is
+not used in the final fit: a free level and the mean fitness of the
+neighbours relative to the majors shift all non-major abundances alike, so a
+free level gives up what the cloud's size says about the neighbours, and alone
+it was about one fifth less accurate where the balance holds. With more than
+two time points \texttt{"auto"} is \texttt{"balance"}.
+
+The rule was fixed on the simulations of validation/sparse\_joint/cloud\_level
+and confirmed on new landscapes (seed bases 101000--103000): every
+development scenario retained the balance prior and was unchanged; at
+intervals of 6--42 days 23\% of the datasets switched, with errors unchanged
+(ratio 0.99--1.00); on populations with a 2--8-fold higher missegregation rate
+or 1--2\% miscalled chromosomes all switched, the error fell to 0.73--0.81 of
+the balance prior's at distances 0--2, and one-copy direction accuracy rose
+from 0.37 to 0.66 at distance 1. On the Salehi passages half
+of the trajectories switched. There the change in the ranking of predicted
+against observed change (the paper's Fig.~2d) reflects sampling noise more
+than the landscape: the distance between two random halves of one passage
+ranks the observed change at Spearman 0.62--0.77.
 
 \subsection{Prior on the Fitness Landscape}
 \label{sec:sj-prior}
@@ -1146,7 +1189,9 @@ observed karyotypes outside the domain are set aside with their cells.
 every pair of neighbouring domain states.
 \item \textbf{Trend covariates}, (\ref{eq:design}).
 \item \textbf{Prior on initial abundances}: (\ref{eq:free-prior}) for major
-karyotypes and, by default, (\ref{eq:balance-prior}) for all other states.
+karyotypes and, for all other states, (\ref{eq:balance-prior}) or, when a
+first fit with (\ref{eq:balance-level}) finds the cloud more than about $e$
+times the balance, (\ref{eq:free-prior}) (default \texttt{"auto"}).
 \item \textbf{Joint objective}: (\ref{eq:net}), (\ref{eq:forward}),
 (\ref{eq:poisson}) and (\ref{eq:trend})--(\ref{eq:scale-prior}), compiled as a
 single TMB objective function.
@@ -1207,7 +1252,8 @@ Argument & Default & Definition \\
 \texttt{shell\_power} & 0.85 & Exponent of the distance term \\
 \texttt{shell\_sd} & 0.5 & Prior standard deviation of $\gamma_{\mathrm{dist}}$ \\
 \texttt{initial\_frequency} & $\log10^{-5}$, 3 & $\log f_0$ and $\sigma_0$ in (\ref{eq:free-prior}) \\
-\texttt{initial\_state} & \texttt{"balance"} & Prior (\ref{eq:balance-prior}) for non-major states \\
+\texttt{initial\_state} & \texttt{"auto"} & (\ref{eq:balance-prior}) or (\ref{eq:free-prior}) for non-major states, by the level of (\ref{eq:balance-level}); \texttt{"balance"} with more than two time points \\
+\texttt{auto\_level} & 1 & Threshold on $\hat\ell$ \\
 \texttt{history} & $T$ and 30--3000 divisions longer than $T$ & Candidate
 history lengths $h$; the one of highest marginal likelihood is kept \\
 \texttt{balance\_sd} & 1 & $\sigma_\zeta$ \\

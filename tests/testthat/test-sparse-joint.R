@@ -61,11 +61,12 @@ test_that("compiled forward model equals the R closed form", {
     zeta_prior_mean = rep(0, n), zeta_prior_sd = rep(3, n), intercept_mean = 0, intercept_sd = 1,
     shell_sd = 0.5, log_scale_prior_mean = rep(log(0.05), 4), log_scale_prior_sd = rep(1.5, 4),
     n_major = domain$n_major, balance = 0L, history = sim$dt, balance_sd = 1, balance_offset = rep(0, n),
-    weight = rep(1, n)
+    weight = rep(1, n), level_free = 0L, level_sd = 1
   )
   parameters <- list(zeta = zeta, g = g, coef = rep(0, ncol(design$design)), theta1 = theta1,
-                     log_scale = rep(log(0.05), 4))
-  objective <- TMB::MakeADFun(tmb_data, parameters, DLL = "alfak2", silent = TRUE)
+                     log_scale = rep(log(0.05), 4), balance_level = 0)
+  objective <- TMB::MakeADFun(tmb_data, parameters, map = list(balance_level = factor(NA)), DLL = "alfak2",
+                              silent = TRUE)
   report <- objective$report()
   net <- (2 * exp(kernel$log_self) - 1) * exp(g)
   expect_equal(as.numeric(report$net), net, tolerance = 1e-12)
@@ -150,7 +151,8 @@ test_that("the balance prior is the closed-form influx from the majors", {
   design <- sparse_joint_design(domain$karyotypes, rep(2, 4), domain$major, 0.85)
   set.seed(6)
   parameters <- list(zeta = stats::rnorm(n, -1, 2), g = stats::rnorm(n, 0, 0.1),
-                     coef = rep(0, ncol(design$design)), theta1 = 0.3, log_scale = rep(log(0.05), 4))
+                     coef = rep(0, ncol(design$design)), theta1 = 0.3, log_scale = rep(log(0.05), 4),
+                     balance_level = 0)
   prior_mean <- stats::rnorm(n)
   history <- 45
   balance_sd <- 0.7
@@ -162,8 +164,8 @@ test_that("the balance prior is the closed-form influx from the majors", {
       zeta_prior_mean = prior_mean, zeta_prior_sd = rep(3, n), intercept_mean = 0, intercept_sd = 1,
       shell_sd = 0.5, log_scale_prior_mean = rep(log(0.05), 4), log_scale_prior_sd = rep(1.5, 4),
       n_major = domain$n_major, balance = balance, history = history, balance_sd = balance_sd,
-      balance_offset = rep(0, n), weight = rep(1, n)
-    ), parameters, DLL = "alfak2", silent = TRUE)$fn()
+      balance_offset = rep(0, n), weight = rep(1, n), level_free = 0L, level_sd = 1
+    ), parameters, map = list(balance_level = factor(NA)), DLL = "alfak2", silent = TRUE)$fn()
   }
   net <- (2 * exp(kernel$log_self) - 1) * exp(parameters$g)
   minor <- seq_len(n) > domain$n_major
@@ -379,4 +381,47 @@ test_that("counts are checked per time point before fitting", {
   expect_true(is.na(one$shared))
   expect_equal(check_sparse_joint_counts(prepare_alfak2_data(counts[, c("a", "b")]))$cells, c(5, 7))
   expect_error(check_sparse_joint_counts(counts - 2), "non-negative")
+})
+
+test_that("a free level of the balance prior and initial_state = \"auto\"", {
+  sim <- simulate_sparse_joint_counts()
+  args <- list(sim$counts, dt = sim$dt, beta = sim$beta, birth_rate = 1, major_frequency = 0.05, max_cn = 4,
+               history = sim$dt)
+  fixed <- do.call(fit_sparse_joint, args)
+  same <- do.call(fit_sparse_joint, c(args, list(balance_level = "fixed")))
+  expect_identical(fixed$diagnostics$objective, same$diagnostics$objective)
+  expect_null(fixed$diagnostics$balance_level)
+  free_level <- do.call(fit_sparse_joint, c(args, list(balance_level = "free")))
+  expect_true(is.finite(free_level$diagnostics$balance_level))
+  expect_gt(free_level$diagnostics$balance_level_sd, 0)
+  # The posterior can be rebuilt from the stored settings, as for any fit, and
+  # a fit stored before the level existed (no `balance_level` in its
+  # posterior) still rebuilds.
+  expect_silent(sparse_joint_rebuild(free_level, posterior = FALSE))
+  expect_null(fixed$posterior$balance_level)
+  expect_equal(sparse_joint_rebuild(fixed, posterior = FALSE)$g, fixed$posterior$g, tolerance = 1e-6)
+  # "auto": the level decides; with the threshold far above or below it, the
+  # fit is the balance or the free one.
+  auto_args <- args[names(args) != "history"]
+  high <- do.call(fit_sparse_joint, c(auto_args, list(initial_state = "auto", auto_level = 50)))
+  low <- do.call(fit_sparse_joint, c(auto_args, list(initial_state = "auto", auto_level = -50)))
+  expect_identical(high$diagnostics$initial_state_check$chosen, "balance")
+  expect_identical(low$diagnostics$initial_state_check$chosen, "free")
+  expect_identical(low$diagnostics$initial_state, "free")
+  balance <- do.call(fit_sparse_joint, c(auto_args, list(initial_state = "balance")))
+  expect_equal(high$summary$relative_fitness, balance$summary$relative_fitness)
+  # "auto" is the default.
+  default <- do.call(fit_sparse_joint, auto_args)
+  expect_false(is.null(default$diagnostics$initial_state_check))
+  expect_output(print(default), "chosen by \"auto\"")
+  # With more than two time points "auto" is "balance".
+  three <- cbind(sim$counts, sim$counts[, 2L])
+  colnames(three) <- c("0", "1", "2")
+  auto3 <- fit_sparse_joint(three, times = c(0, sim$dt, 2 * sim$dt), initial_state = "auto", birth_rate = 1,
+                            major_frequency = 0.05, max_cn = 4, intermediate_weight = 1, history = sim$dt)
+  balance3 <- fit_sparse_joint(three, times = c(0, sim$dt, 2 * sim$dt), initial_state = "balance", birth_rate = 1,
+                               major_frequency = 0.05, max_cn = 4, intermediate_weight = 1, history = sim$dt)
+  expect_identical(auto3$diagnostics$initial_state, "balance")
+  expect_null(auto3$diagnostics$initial_state_check)
+  expect_equal(auto3$summary$relative_fitness, balance3$summary$relative_fitness)
 })

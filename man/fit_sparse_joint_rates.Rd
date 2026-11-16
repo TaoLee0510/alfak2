@@ -57,8 +57,9 @@ birth rate 4 times too high predicts worse than no differences. Rankings
 change little either way. The point prediction is therefore taken at the
 lowest rate of the range by default, which is never too high when the range
 holds the true rate. The same holds for the missegregation rate: on
-simulated passaged cultures, a rate 4 times too high raised the error 1.5
-to 3 times, and one 4 times too low by about a fifth.
+simulated passaged cultures with true rates of 1, 4 and 16 times 5e-5, a
+rate 4 times too high raised the median error 1.9 to 3.7 times, and one 4
+times too low 1.2 to 1.6 times.
 
 The missegregation rate is not chosen by marginal likelihood: with
 few cells per time point, short intervals or strong drift between passages,
