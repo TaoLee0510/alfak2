@@ -597,7 +597,50 @@ likelihood of a single dataset nor that of a cohort identified the rate.
 Accordingly, \texttt{fit\_sparse\_joint\_rates()} fits the model at several
 rates across a plausible range and reports relative fitness at the
 \emph{lowest} rate, an interval covering all fitted rates, and fitness per
-division, $\rho_i/b_0$, over the range.
+division, $\rho_i/b_0$, over the range. These checks predate the candidate
+histories and the deficit of unobserved karyotypes. With the current model,
+the marginal likelihood does locate the missegregation rate, which enters
+together with $b_0$ (Section~\ref{sec:sj-beta}).
+
+\subsection{Choice of the Missegregation Rate}
+\label{sec:sj-beta}
+
+The missegregation rate $\beta$ enters through the kernel $P$: the influx
+into a neighbour, $2P_{pj}b_p$ in (\ref{eq:per-division}), is proportional to
+$\beta b_0$. A karyotype that is seen less often than this influx alone would
+produce is therefore read as less fit, and the size of that deficit follows
+the assumed rate. Only the product $\beta b_0$ is identified. By default
+$\beta=5\times10^{-5}$ is fixed, the value of the ALFA-K paper. With several
+values, or \texttt{beta = "auto"} for $5\times10^{-5}$ times $1/16$, $1/4$,
+$1$, $4$, $16$ and $64$, the model is fitted at each, with the history chosen
+within each, and the fit of lowest objective is kept. The counts are the same
+at every rate, so the Laplace marginal likelihoods compare directly. The
+pairwise and state-space methods take the rate chosen by the anchored model.
+The candidates are listed in \texttt{diagnostics\$beta\_profile}.
+
+On the paper's simulations, the chosen rate was tested against the rate that
+generated the data. There were 675 inputs: the first and last time point of
+windows of 2, 4 and 8 passages, from simulations with true rates of
+$5\times10^{-5}$ to $8\times10^{-4}$ (validation/sparse\_joint/beta\_choice).
+The criteria were fixed before scoring.
+\begin{itemize}
+\item The chosen rate lay within four times of the truth for 93\% of
+  inputs. It leant one grid step low: the simulated populations divide about
+  0.9 times a day, against the assumed 1.
+\item The landscape's correlation with the true fitness at the chosen rate
+  equalled that at the true rate in median.
+\item Where the true rate was at least four times the default, the chosen
+  rate improved the correlation over a fixed $5\times10^{-5}$ by 0.021 in
+  median, and by up to 0.24 with a window of 2 passages at
+  $8\times10^{-4}$.
+\end{itemize}
+
+On the Salehi data, the PDX trajectories preferred rates 4 to 16 times the
+default, and the in vitro trajectories preferred the default. A fixed common
+rate reverses the paper's comparison of fitness effects between the two
+settings, and the preferred rates restore its direction
+(validation/sparse\_joint/fig4d\_check). The default remains fixed, pending
+the paper benchmark with the chosen rates.
 
 \subsection{Joint Analysis of Multiple Datasets}
 \label{sec:sj-cohort}
@@ -1104,6 +1147,8 @@ invisibly.
 \toprule
 Argument & Default & Definition \\
 \midrule
+\texttt{beta} & $5\times10^{-5}$ & $\beta$; several values or \texttt{"auto"} are candidates
+(Section~\ref{sec:sj-beta}) \\
 \texttt{birth\_rate} & 1 & $b_0$, per unit of \texttt{dt} \\
 \texttt{birth\_rate\_log\_sd} & 0.05 & Prior standard deviation of $\gamma_0$ \\
 \texttt{major\_frequency} & 0.01 & $\phi_{\min}$ in (\ref{eq:major}) \\

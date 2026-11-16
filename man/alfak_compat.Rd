@@ -31,7 +31,9 @@ column per time point, and \code{dt}, the time per unit of the column names.}
 \item{minobs, nboot, n0, nb, correct_efflux, landscape_data_output}{See
 \code{\link[=as_alfakR]{as_alfakR()}}.}
 
-\item{pm}{Missegregation rate per chromosome copy and division.}
+\item{pm}{Missegregation rate per chromosome copy and division, as in
+alfakR. Several values or \code{"auto"} let alfak2 choose it; see \code{beta} of
+\code{\link[=fit_sparse_joint]{fit_sparse_joint()}}.}
 
 \item{allow_noninteger_counts}{Logical; round non-integer counts with a
 warning instead of stopping.}
