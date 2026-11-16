@@ -2,7 +2,7 @@
 % Please edit documentation in R/sparse-joint-rates.R
 \name{predict.alfak2_sparse_joint_rate_fit}
 \alias{predict.alfak2_sparse_joint_rate_fit}
-\title{Predict fitness over a range of baseline birth rates}
+\title{Predict fitness over a range of birth or missegregation rates}
 \usage{
 \method{predict}{alfak2_sparse_joint_rate_fit}(object, karyotypes, ...)
 }
@@ -21,11 +21,11 @@ chosen by \code{point} in \code{\link[=fit_sparse_joint_rates]{fit_sparse_joint_
 \code{relative_high} enclose its 95\% intervals at every fitted rate, and
 \code{relative_sd} is the standard deviation whose symmetric 95\% interval
 about \code{relative_fitness} contains them. \code{per_division} is relative
-fitness divided by the assumed rate, with \code{per_division_low} and
-\code{per_division_high} its range over the rates. The attribute
+fitness divided by the birth rate of the fit, with \code{per_division_low}
+and \code{per_division_high} its range over the rates. The attribute
 \code{rank_agreement} is the lowest Spearman correlation between the
 predictions at any two rates.
 }
 \description{
-Predict fitness over a range of baseline birth rates
+Predict fitness over a range of birth or missegregation rates
 }

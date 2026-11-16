@@ -9,7 +9,8 @@
 % ---- input and checks ---------------------------------------------------
 \node[box=cIn, w=15.1cm] (in) at (7.85,0) {%
   \textbf{Input}\quad \code{fit\_sparse\_joint(counts, dt | times, beta, \ldots)}, also reached from
-  \code{fit\_alfak2()} and \code{alfak\_compat()}. counts: cells per karyotype (rows) and time point (columns),
+  \code{fit\_alfak2()}, \code{alfak\_compat()} and, once per rate of a birth-rate or $\beta$ range,
+  \code{fit\_sparse\_joint\_rates()}. counts: cells per karyotype (rows) and time point (columns),
   time points $t_0<t_1<\dots<t_K$ in time order, $K\ge1$; $\beta$: missegregation rate per chromosome copy and
   division.\\[2pt]
   \textbf{Checks and settings}\quad copy numbers within $[c_{\min},c_{\max}]$ ($c_{\max}$: largest observed

@@ -2,7 +2,8 @@
 # The three multi-timepoint methods on simulated sets e1-e3 (README.md).
 #
 #   R=validation/sparse_joint/series_methods/run.R
-#   Rscript $R --stage=datasets --set=e2|e3 [--workers=6]
+#   Rscript $R --stage=truth    --set=e4 [--landscapes=REGEX] [--workers=3]
+#   Rscript $R --stage=datasets --set=e2|e3|e4 [--workers=6]
 #   Rscript $R --stage=sweeps   --set=e2 --build=BUILD     (e2's gate)
 #   Rscript $R --stage=fit      --set=SET --build=BUILD --methods=ends,anchored [--datasets=REGEX] [--workers=6]
 #   Rscript $R --stage=compose  --set=SET --build=BUILD   (ends_auto, anchored_auto)
@@ -29,6 +30,7 @@ sm_main <- function() {
   stage <- if (is.null(args$stage)) "" else args$stage
   workers <- if (is.null(args$workers)) 6L else as.integer(args$workers)
   if (stage == "datasets") return(sm_stage_datasets(sm_config(set), workers))
+  if (stage == "truth") return(sm_stage_truth(sm_config(set), workers, args$landscapes))
   if (is.null(args$build)) stop("--build is required for stage ", stage, ".", call. = FALSE)
   config <- sm_config(set, args$build)
   method_names <- if (is.null(args$methods)) character() else strsplit(args$methods, ",", fixed = TRUE)[[1L]]

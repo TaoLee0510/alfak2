@@ -2,22 +2,28 @@
 % Please edit documentation in R/sparse-joint-rates.R
 \name{fit_sparse_joint_rates}
 \alias{fit_sparse_joint_rates}
-\title{Fit the sparse joint model over a range of baseline birth rates}
+\title{Fit the sparse joint model over a range of birth or missegregation rates}
 \usage{
 fit_sparse_joint_rates(
   ...,
-  birth_rate_range,
+  birth_rate_range = NULL,
+  beta_range = NULL,
   n_rates = 3L,
   point = c("lowest", "centre"),
   fit_function = fit_sparse_joint
 )
 }
 \arguments{
-\item{...}{Arguments of the fitting function other than \code{birth_rate}:
-for \code{\link[=fit_sparse_joint]{fit_sparse_joint()}}, \code{counts}, \code{dt}, \code{beta} and so on.}
+\item{...}{Arguments of the fitting function other than the rate that is
+varied: for \code{\link[=fit_sparse_joint]{fit_sparse_joint()}}, \code{counts}, \code{dt}, \code{beta} or
+\code{birth_rate}, and so on.}
 
 \item{birth_rate_range}{Lowest and highest plausible baseline birth rate
 per unit of \code{dt}.}
+
+\item{beta_range}{Lowest and highest plausible missegregation rate (per
+chromosome per division), in place of \code{birth_rate_range}. Give one of
+the two.}
 
 \item{n_rates}{Number of rates fitted, spaced evenly on the log scale. An
 odd number puts one at the centre of the range.}
@@ -30,12 +36,14 @@ the centre and much less accurate when it is near the lowest.}
 }
 \value{
 An \code{alfak2_sparse_joint_rate_fit} object: \code{rates}, the \code{fits} at
-each of them, \code{point}, the index of the fit used for point predictions,
-and \code{central}, the index of the fit at the centre.
+each of them, \code{parameter} (\code{"birth_rate"} or \code{"beta"}, the rate that
+varies), \code{point}, the index of the fit used for point predictions, and
+\code{central}, the index of the fit at the centre.
 }
 \description{
-Use this when the baseline birth rate is unknown and only a plausible range
-can be given. The model is fitted at each of a few rates across the range.
+Use this when the baseline birth rate or the missegregation rate is unknown
+and only a plausible range can be given. The model is fitted at each of a
+few rates across the range, with the other rate held at its given value.
 \code{\link[stats:predict]{stats::predict()}} then reports relative fitness at one of them, an
 interval that covers every rate in the range, and relative fitness per
 division.
@@ -43,10 +51,19 @@ division.
 \details{
 The two directions of error are not alike. Assuming too low a rate shrinks
 the predicted deficits of rare and unobserved karyotypes towards zero; on
-simulated landscapes a rate 4 to 10 times too low still predicts better
-than no differences. Assuming too high a rate inflates them, and a rate 4
-times too high predicts worse than no differences. Rankings change little
-either way. The point prediction is therefore taken at the lowest rate of
-the range by default, which is never too high when the range holds the
-true rate.
+simulated landscapes a birth rate 4 to 10 times too low still predicts
+better than no differences. Assuming too high a rate inflates them, and a
+birth rate 4 times too high predicts worse than no differences. Rankings
+change little either way. The point prediction is therefore taken at the
+lowest rate of the range by default, which is never too high when the range
+holds the true rate. The same holds for the missegregation rate: on
+simulated passaged cultures, a rate 4 times too high raised the error 1.5
+to 3 times, and one 4 times too low by about a fifth.
+
+The missegregation rate is not chosen by marginal likelihood: with
+few cells per time point, short intervals or strong drift between passages,
+the likelihood prefers rates several times too high, and no rule tried
+(gates on interval and cells, evidence thresholds, a prior) separated those
+cases from real differences. A range shows how much the conclusions depend
+on it.
 }

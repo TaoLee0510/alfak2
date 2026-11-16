@@ -190,8 +190,26 @@ less fit. It is fixed, by default at 5e-5, the rate of the ALFA-K paper.
 Choosing it per dataset by marginal likelihood was tried and not adopted
 ([beta choice](validation/sparse_joint/beta_choice/README.md)).
 - On the paper's simulations the choice worked.
-- With time points 6 days apart it chose rates up to 16 times too high, and
-  errors rose by up to 3 times.
+- With time points every 6 days (18–42 days from first to last) it chose
+  rates up to 16 times too high, and errors rose by up to 3 times.
+- Gates on the interval and cells, evidence thresholds and a prior were
+  tested on simulations whose true rate is higher. None kept the default's
+  accuracy where the default was right and still found a higher rate. With
+  few cells, short intervals or strong drift, two time points do not
+  separate a higher rate from drift and sampling noise.
+
+When the rate is uncertain, fit across a range of rates, with the most likely
+rate at the lowest end. Too high a rate costs more than too low a rate:
+
+```r
+fit <- fit_sparse_joint_rates(counts, dt = 180, beta_range = c(5e-5, 8e-4))
+predict(fit, karyotypes)   # fitness at 5e-5, and an interval covering the range
+```
+
+On simulated cultures whose true rate was 4 or 16 times the default, the
+range 1–16 times restored the coverage of the 95% intervals, which had been
+as low as 0.85. The point predictions were those at the default. The
+intervals were wider, most of all when the default was right.
 
 Several datasets, such as several patients or cultures with two time points
 each, can be fitted together. Each keeps its own domain and initial

@@ -104,7 +104,7 @@ information).
 
 ## Simulated sets
 
-All three sets use the development simulator and the landscapes of
+All sets use the development simulator and the landscapes of
 `../multi_timepoint` (seed base 97000; held-out 98000 sealed).
 
 - **e1**: the stage-2 passaged cultures, linked, not copied. 288 datasets:
@@ -128,6 +128,11 @@ All three sets use the development simulator and the landscapes of
   `abm_constant.cpp`, a copy of the simulator with that one switch.
   Every fitness difference a method reports is a false positive. 288
   datasets.
+- **e4**: a higher missegregation rate, for `../beta_choice` only. The e1
+  design on populations simulated from day 0 at 4× (odd landscapes) or 16×
+  (even landscapes) the default rate. The truth populations are e4's own
+  (`--stage=truth`). Fits start from the default rate (`fit_beta`), and only
+  the two-time-point candidates were fitted. 288 datasets.
 
 ## Measures
 
