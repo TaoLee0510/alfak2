@@ -7,6 +7,10 @@
 #   e3  neutral: the stage-2 design, but from the first time point on every viable
 #       karyotype divides at one rate, so every fitness difference a method
 #       reports is a false positive.
+#   e4  the stage-2 design on populations that grew from day 0 at 4 times
+#       (odd landscapes) or 16 times (even) the default missegregation rate
+#       (validation/sparse_joint/beta_choice, short-interval plan). Its fits
+#       take the rate from the default, not from the truth.
 # Inputs in results/inputs/<set>, fits and scores of a build in
 # results/<build>/<set> (git-ignored). The simulator, landscapes (seed base
 # 97000) and truth populations are those of ../multi_timepoint.
@@ -17,9 +21,11 @@ source(file.path(mt_script_dir, "setup.R"))
 
 sm_default_output <- file.path(si_repo, "validation", "sparse_joint", "series_methods", "results")
 sm_sets <- c("e1", "e2", "e3")
+# Sets outside the series-methods report (report.R, auto_eval.R loop over sm_sets).
+sm_extra_sets <- "e4"
 
 # `build` NULL: the set's inputs (datasets stage); otherwise that build's fits.
-sm_config <- function(set = sm_sets, build = NULL) {
+sm_config <- function(set = c(sm_sets, sm_extra_sets), build = NULL) {
   set <- match.arg(set)
   inputs <- if (set == "e1") file.path(mt_default_output, "series") else file.path(sm_default_output, "inputs", set)
   config <- mt_config(if (is.null(build)) inputs else file.path(sm_default_output, build, set), "series")
@@ -35,6 +41,11 @@ sm_config <- function(set = sm_sets, build = NULL) {
     config$starts <- c(240, 480)
     config$spacings <- 120
     config$bottlenecks <- c(2e4, 2e3)
+  }
+  if (set == "e4") {
+    # True rate per landscape; fits start from the default rate (`fit_beta`).
+    config$beta_multiples <- ifelse(seq_len(nrow(config$landscapes)) %% 2L == 1L, 4, 16)
+    config$fit_beta <- config$beta
   }
   config$methods <- sm_methods()
   # Effect sizes for power (per day; true relative fitness of scored
@@ -86,6 +97,21 @@ sm_methods <- function() {
 }
 
 sm_beta_multiples <- c(b1o16 = 1 / 16, b1o4 = 1 / 4, b4 = 4, b16 = 16, b64 = 64)
+
+# e4's truth populations: the stage-2 trajectory of each landscape (same
+# seeds), grown from day 0 at its landscape's multiple of the default rate.
+sm_stage_truth <- function(config, workers, landscapes = NULL) {
+  if (config$set != "e4") stop("Only e4 has truth populations of its own.", call. = FALSE)
+  sm_load_abm(config)
+  rows <- seq_len(nrow(config$landscapes))
+  if (!is.null(landscapes)) rows <- rows[grepl(landscapes, config$landscapes$landscape_id[rows])]
+  si_parallel(rows, function(i) {
+    truth_config <- config
+    truth_config$beta <- config$beta * config$beta_multiples[[i]]
+    stt_generate_truth(truth_config, config$landscapes[i, ], 1L)
+  }, workers)
+  invisible()
+}
 
 # Per dataset, the candidate fit of lowest objective of each composed method.
 sm_stage_compose <- function(config) {
@@ -162,7 +188,7 @@ sm_window_plan <- function(config) {
   for (i in seq_len(nrow(config$landscapes))) for (st in seq_along(starts)) {
     for (b in seq_along(config$bottlenecks)) for (s in seq_along(config$spacings)) {
       # Seeds apart from stage 2's (landscape_seed * 1000 + b * 10 + s).
-      offset <- if (config$set == "e2") 500L + st * 100L else 700L
+      offset <- if (config$set == "e2") 500L + st * 100L else if (config$set == "e4") 900L else 700L
       plan[[length(plan) + 1L]] <- list(
         landscape = config$landscapes[i, ], start = starts[[st]], bottleneck = config$bottlenecks[[b]],
         spacing = config$spacings[[s]],
@@ -224,7 +250,10 @@ sm_stage_datasets <- function(config, workers) {
   if (config$set == "e1") stop("e1 links the stage-2 datasets; nothing to make.", call. = FALSE)
   dir.create(config$output_dir, recursive = TRUE, showWarnings = FALSE)
   truth_link <- file.path(config$output_dir, "truth")
-  if (!file.exists(truth_link)) file.symlink(file.path(mt_default_output, "series", "truth"), truth_link)
+  # e4 has truth populations of its own (--stage=truth).
+  if (config$set != "e4" && !file.exists(truth_link)) {
+    file.symlink(file.path(mt_default_output, "series", "truth"), truth_link)
+  }
   sm_load_abm(config)
   plan <- sm_window_plan(config)
   rows <- si_parallel(plan, function(item) {
@@ -323,7 +352,9 @@ sm_fit_series <- function(config, dataset, nodes, method) {
   warnings <- character()
   fit <- withCallingHandlers(
     do.call(alfak2::fit_sparse_joint, c(
-      list(counts, times = times, beta = dataset$beta * if (is.null(method$beta_multiple)) 1 else method$beta_multiple,
+      list(counts, times = times,
+           beta = (if (is.null(config$fit_beta)) dataset$beta else config$fit_beta) *
+             (if (is.null(method$beta_multiple)) 1 else method$beta_multiple),
            birth_rate = method$birth_rate, min_cn = method$min_cn,
            max_cn = method$max_cn),
       method$arguments)),

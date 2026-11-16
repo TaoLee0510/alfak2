@@ -61,3 +61,42 @@ test_that("invalid ranges are rejected", {
   expect_error(fit_sparse_joint_rates(sim$counts, dt = sim$dt, birth_rate = 1, birth_rate_range = c(0.5, 2)),
                "birth_rate_range")
 })
+
+test_that("a range of missegregation rates is fitted like a range of birth rates", {
+  sim <- simulate_sparse_joint_counts()
+  fit <- fit_sparse_joint_rates(sim$counts, dt = sim$dt, major_frequency = 0.05, max_cn = 4,
+                                beta_range = c(1.25e-5, 2e-4))
+  expect_s3_class(fit, "alfak2_sparse_joint_rate_fit")
+  expect_identical(fit$parameter, "beta")
+  expect_equal(fit$rates, c(1.25e-5, 5e-5, 2e-4))
+  expect_equal(vapply(fit$fits, function(f) f$data$beta, numeric(1)), fit$rates)
+  expect_equal(vapply(fit$fits, function(f) f$diagnostics$birth_rate, numeric(1)), rep(1, 3))
+  expect_identical(fit$point, 1L)
+  single <- fit_sparse_joint(sim$counts, dt = sim$dt, major_frequency = 0.05, max_cn = 4, beta = 5e-5)
+  targets <- single$summary$karyotype
+  prediction <- predict(fit, targets)
+  at_centre <- predict(single, targets)
+  expect_equal(predict(fit$fits[[2L]], targets)$relative_fitness, at_centre$relative_fitness)
+  expect_equal(prediction$relative_fitness, predict(fit$fits[[1L]], targets)$relative_fitness)
+  # per division divides by the birth rate of the fits, not by the varied rate
+  expect_equal(prediction$per_division, prediction$relative_fitness)
+  z <- stats::qnorm(0.975)
+  expect_true(all(prediction$relative_low <= at_centre$relative_fitness - z * at_centre$relative_sd + 1e-12))
+  expect_true(all(prediction$relative_high >= at_centre$relative_fitness + z * at_centre$relative_sd - 1e-12))
+  # a higher rate assumes more influx, so the neighbours' deficits grow
+  minor <- !single$summary$major
+  deficit <- vapply(fit$fits, function(f) mean(f$summary$relative_fitness[minor]), numeric(1))
+  expect_true(all(diff(deficit) < 0))
+  expect_output(print(fit), "missegregation rates")
+  # the point fit is what as_alfakR() uses
+  expect_equal(fit$fits[[fit$point]]$data$beta, 1.25e-5)
+})
+
+test_that("exactly one range is given, and not together with its rate", {
+  sim <- simulate_sparse_joint_counts()
+  expect_error(fit_sparse_joint_rates(sim$counts, dt = sim$dt), "one of")
+  expect_error(fit_sparse_joint_rates(sim$counts, dt = sim$dt, birth_rate_range = c(0.5, 2), beta_range = c(1e-5, 1e-4)),
+               "one of")
+  expect_error(fit_sparse_joint_rates(sim$counts, dt = sim$dt, beta_range = c(1e-4, 1e-5)), "beta_range")
+  expect_error(fit_sparse_joint_rates(sim$counts, dt = sim$dt, beta = 5e-5, beta_range = c(1e-5, 1e-4)), "beta_range")
+})

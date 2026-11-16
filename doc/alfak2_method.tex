@@ -608,8 +608,10 @@ The missegregation rate $\beta$ enters through the kernel $P$: the influx
 into a neighbour, $2P_{pj}b_p$ in (\ref{eq:per-division}), is proportional to
 $\beta b_0$. A karyotype seen less often than this influx alone would produce
 is therefore read as less fit, and the size of that deficit follows the
-assumed rate. Only the product $\beta b_0$ is identified. The rate is fixed,
-by default at $5\times10^{-5}$, the value of the ALFA-K paper.
+assumed rate. In the influx only the product $\beta b_0$ appears; $b_0$ also
+sets the history candidates, the calibration floor and the prior on the
+intercept, so a range of $\beta$ is not the same as a range of $b_0$. The
+rate is fixed, by default at $5\times10^{-5}$, the value of the ALFA-K paper.
 
 Choosing $\beta$ per dataset by marginal likelihood was tried and not adopted
 (validation/sparse\_joint/beta\_choice). The model was fitted at
@@ -624,16 +626,61 @@ kept.
   Section~\ref{sec:validation}, whose true rate is the default, the choice
   raised the error by a median of 23--46\%. It failed the gate set
   beforehand, with 6 and 7 of 24 settings within 3\% (two time points and all time points).
-\item The loss was concentrated where time points were 6 days apart. There
-  half of the chosen rates were four or sixteen times the truth, and errors
-  rose 1.8 to 3.2 times. With 60 days between time points the error was
-  unchanged.
+\item The loss was concentrated where time points were taken every 6 days
+  (18 to 42 days from first to last). There half of the chosen rates were
+  four or sixteen times the truth, and errors rose 1.8 to 3.2 times. With
+  time points every 60 days (180 to 420 days) the error was unchanged at
+  bottlenecks of 200 and 2000 cells and rose 1.3 times at 20000.
 \end{itemize}
 At short intervals the marginal likelihood thus prefers too high a rate. On
 the Salehi data the PDX trajectories, which have shorter intervals than the
 in vitro ones, preferred rates 4 to 16 times the default
 (validation/sparse\_joint/fig4d\_check). Part of that preference may come from
 the same bias rather than from higher chromosomal instability.
+
+A second study looked for a rule that would make the choice safe. On the
+passaged cultures, the preference for a high rate grew as the interval
+shortened, as fewer karyotypes were seen, as the composition turned over
+more between the two time points and as the bottleneck shrank. Over a short
+interval, drift and sampling change the composition more than selection
+can, and without a drift term the model explains the change as influx. A
+new set of the same design with true rates of 4 and 16 times the default
+tested the other side. There the rate of lowest objective was the true one
+for only 34\% of datasets: with time points every 6 days, 75--93\% chose
+at least four times the default, as did the cultures whose truth was the
+default.
+
+Four kinds of rule were tuned on half of the landscapes:
+\begin{itemize}
+\item gates on the interval and on the cells per time point;
+\item thresholds on the gain in objective;
+\item a lognormal prior around the default;
+\item combinations of gates and thresholds.
+\end{itemize}
+No rule passed the criteria fixed beforehand. The rules that kept the
+cultures with the default rate within 3\% did so by staying at the default
+in most datasets, and so gained nothing where the rate was higher. Where any
+rule moved, a move was about as often worse as better. With few cells,
+short intervals or strong drift, two time points do not separate a higher
+missegregation rate from drift and sampling noise.
+
+\texttt{fit\_sparse\_joint\_rates(beta\_range = )} therefore fits the model
+over a range of $\beta$ at a fixed $b_0$, as it does for $b_0$. The
+asymmetry of the birth rate holds here too:
+\begin{itemize}
+\item a rate four times too high raised the median error 1.9 to 3.7 times;
+\item a rate four times too low raised it 1.2 to 1.6 times.
+\end{itemize}
+The point prediction is therefore taken at the lowest rate of the range.
+On the cultures with true rates 4 and 16 times the default, a range of 1 to
+16 times the default had these effects:
+\begin{itemize}
+\item the 95\% intervals covered all neighbours again, against 0.85--0.87
+  at the default alone with time points every 60 days;
+\item the point predictions were those at the default;
+\item the intervals were wider: by interval score 1.7--2.9 times, and 9
+  times where the default was right.
+\end{itemize}
 
 \subsection{Joint Analysis of Multiple Datasets}
 \label{sec:sj-cohort}
@@ -1167,8 +1214,8 @@ by the anchored model \\
 \end{center}
 
 \begin{sloppypar}
-\texttt{fit\_sparse\_joint\_rates()} requires \texttt{birth\_rate\_range} and
-uses three rates by default. \texttt{fit\_sparse\_joint\_cohort()} defaults to
+\texttt{fit\_sparse\_joint\_rates()} requires \texttt{birth\_rate\_range} or
+\texttt{beta\_range} and uses three rates by default. \texttt{fit\_sparse\_joint\_cohort()} defaults to
 \texttt{initial\_state = "free"}, \texttt{sharing = "partial"} and
 \texttt{trend = "select"}. \texttt{alfak\_compat()} adopts the defaults of
 \texttt{alfakR}: \texttt{minobs = 20}, \texttt{nboot = 45},

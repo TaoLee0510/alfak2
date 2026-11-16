@@ -18,7 +18,8 @@ in vitro.
 
 > **Later qualification** (2026-11-16, `../beta_choice`). Choosing β by
 > marginal likelihood picks rates that are too high when time points are
-> close: with 6 days between them, half the picks were 4× or 16× the truth.
+> close: with time points every 6 days (18–42 days from first to last), half
+> the picks were 4× or 16× the truth.
 > The PDX trajectories have shorter intervals than the in vitro ones, so part
 > of their preference for 4–16× the default may be that bias rather than
 > higher chromosomal instability. What stands is narrower:
@@ -148,10 +149,17 @@ At each trajectory's preferred β:
 
 For karyotypes never seen, alfak2's fitness rests on the assumed
 missegregation influx. A comparison between settings with different
-chromosomal instability needs β per dataset. The history candidates already
-do this kind of choice by marginal likelihood, and β candidates could be
-chosen the same way. That would be a change to the model, and it needs a new
-benchmark round.
+chromosomal instability would need β per dataset.
+
+Choosing β by marginal likelihood, as the history is chosen, was tried
+afterwards (`../beta_choice`) and not adopted:
+- at short intervals, with few cells or with strong drift, it picks rates
+  that are too high;
+- no gate, threshold or prior separated those cases from real differences.
+
+What alfak2 offers instead is `fit_sparse_joint_rates(beta_range = )`. It
+shows how far a comparison like Fig. 4d moves over a plausible range of
+rates.
 
 ## Files
 
