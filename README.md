@@ -249,20 +249,19 @@ The balance prior reads the size of the cloud of rare karyotypes as fitness.
 That is right when the missegregation rate is the assumed one. When the true
 rate is higher, or cells are called a copy off, the cloud is larger for
 reasons other than fitness, and on such simulations the balance prior ranked
-neighbouring karyotypes worse than chance. The default, `initial_state =
-"auto"`, therefore checks the cloud first (two time points): a fit at the
-interval with the cloud's level free measures how much larger the cloud is
-than the balance allows. Above a factor of e (log level 1) the fit is
-`"free"`, otherwise `"balance"`. `fit$diagnostics$initial_state_check` holds
-the level and the choice.
-- On new simulated landscapes, the development scenarios all kept the balance
-  prior and were unchanged; short intervals were unchanged; populations as
-  diverse as Salehi passages, with a 2–8 times higher rate or 1–2% of
-  chromosomes miscalled, were switched and their errors fell by a fifth to a
-  quarter ([cloud level](validation/sparse_joint/cloud_level/README.md)).
-- With more than two time points `"auto"` is `"balance"`.
-- Up to alfak2 bf86c85 the default was `"balance"`; set it explicitly to
-  reproduce earlier fits.
+neighbouring karyotypes worse than chance; `initial_state = "free"` did not.
+`initial_state = "auto"` (two time points) tries to tell the two apart: a fit
+at the interval with the cloud's level free measures how much larger the cloud
+is than the balance over the interval allows, and above a factor of e it fits
+`"free"`. It is an option, not the default:
+- With time points one passage apart (the ALFA-K paper's simulations) the
+  cloud is far larger than the balance over one interval even at the true
+  rate. `"auto"` switched there in most fits, and their landscapes were
+  clearly less accurate (correlation with the truth 0.58 against 0.75). It
+  was the default in alfak2 827c4b5 only.
+- Where the rate is uncertain or calls are noisy, and the interval spans many
+  divisions, `"free"` or `"auto"` can be the safer fit
+  ([cloud level](validation/sparse_joint/cloud_level/README.md)).
 
 A fit needs cells at both time points within one step of a well-sampled
 karyotype. `fit$diagnostics$domain_coverage` gives, for each time point, how many

@@ -135,7 +135,23 @@ cl_stage_scenario_datasets <- function(workers, set) {
   index <- cl_parallel(plan, function(item) {
     truth <- readRDS(stt_truth_path(config, item$landscape$landscape_id, 1L))
     t0 <- if (is.null(item$scenario$t0)) config$t0 else item$scenario$t0
-    dataset <- readRDS(stt_make_dataset(config, truth, item$scenario, t0, item$seed))
+    path <- stt_make_dataset(config, truth, item$scenario, t0, item$seed)
+    dataset <- readRDS(path)
+    # Conditions of the paper-sized set: a true rate other than the assumed
+    # one, or calling errors added to the sampled cells.
+    landscape <- item$landscape
+    if (!is.null(landscape$level) && is.null(dataset$level)) {
+      dataset$level <- landscape$level
+      dataset$mechanism <- landscape$mechanism
+      dataset$beta_assumed <- cl_assumed_beta
+      dataset$call_error <- landscape$call_error
+      if (landscape$call_error > 0) {
+        dataset$counts_before_errors <- dataset$counts
+        dataset$counts <- cl_call_errors(dataset$counts, landscape$call_error, item$seed + 7L,
+                                         config$abm$min_cn, config$abm$max_cn)
+      }
+      saveRDS(dataset, path)
+    }
     nodes_path <- cl_nodes_path(set, dataset$dataset_id)
     if (!file.exists(nodes_path)) {
       scoring <- config$scoring
@@ -144,7 +160,8 @@ cl_stage_scenario_datasets <- function(workers, set) {
     }
     data.frame(dataset_id = dataset$dataset_id, landscape_id = dataset$landscape_id,
                wavelength_class = dataset$wavelength_class, scenario = dataset$scenario, interval = dataset$interval,
-               role = item$scenario$role, t(cl_diversity(dataset$counts)), stringsAsFactors = FALSE)
+               role = if (is.null(dataset$level)) item$scenario$role else dataset$level,
+               t(cl_diversity(dataset$counts)), stringsAsFactors = FALSE)
   }, workers)
   index <- do.call(rbind, index)
   utils::write.csv(index, cl_index_path(set), row.names = FALSE)

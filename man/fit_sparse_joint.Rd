@@ -18,7 +18,7 @@ fit_sparse_joint(
   shell_power = 0.85,
   shell_sd = 0.5,
   initial_frequency = c(mean = log(1e-05), sd = 3),
-  initial_state = c("auto", "balance", "free"),
+  initial_state = c("balance", "free", "auto"),
   auto_level = 1,
   history = NULL,
   balance_sd = 1,
@@ -76,29 +76,31 @@ the earliest timepoint it was seen, with the same standard deviation:
 absent other evidence its frequency is taken not to have changed.}
 
 \item{initial_state}{How abundances at the first timepoint are treated.
-\code{"balance"} starts every karyotype that is not major at
+\code{"balance"}, the default, starts every karyotype that is not major at
 mutation-selection balance with the major karyotypes next to it, so that
 its count at the first time point also informs its fitness. \code{"free"}
 estimates one for every karyotype and so uses the first time point only as a
 starting point. Balance takes fitness before the first time point to have
 resembled fitness between the time points. On simulated landscapes it was
 still more accurate than \code{"free"} when the landscape changed at the first
-time point, as under a new treatment. \code{"auto"}, the default, chooses
-between the two: a first fit with the balance prior, its level free
-(\code{balance_level = "free"}) and the history at the interval measures how
-much larger the cloud of non-major karyotypes is than the balance at the
-assumed missegregation rate allows; if the log of that factor exceeds
+time point, as under a new treatment. \code{"auto"} (an option, two time
+points) chooses between the two: a first fit with the balance prior, its
+level free (\code{balance_level = "free"}) and the history at the interval
+measures how much larger the cloud of non-major karyotypes is than the
+balance over the interval allows; if the log of that factor exceeds
 \code{auto_level}, the fit is \code{"free"}, otherwise \code{"balance"}.
 \code{diagnostics$initial_state_check} records the level, its standard
 deviation and the choice, and \code{diagnostics$initial_state} the state
 fitted. A cloud that large comes from a true missegregation rate above
-\code{beta}, from cells called a copy off, or from a population far from
-balance; there the balance prior ranked neighbours worse than chance on
-simulated data, while \code{"free"} was about a fifth less accurate where the
-balance prior's assumptions hold (validation/sparse_joint/cloud_level).
-With more than two time points \code{"auto"} is \code{"balance"}: the choice has
-been checked on two time points only. Up to alfak2 bf86c85 the default
-was \code{"balance"}.}
+\code{beta} or from cells called a copy off, where the balance prior ranked
+neighbours worse than chance on simulated data; but also from a history
+much longer than the interval. With time points one passage apart (the
+ALFA-K paper's simulations, windows of two passages) \code{"auto"} switched to
+\code{"free"} in most fits even at the true missegregation rate, and their
+landscapes were clearly less accurate (correlation with the truth 0.58
+against 0.75). Do not use it at such intervals
+(validation/sparse_joint/cloud_level). With more than two time points
+\code{"auto"} is \code{"balance"}. alfak2 827c4b5 had \code{"auto"} as its default.}
 
 \item{auto_level}{With \code{initial_state = "auto"}, the log factor of the
 cloud over the balance above which the fit is \code{"free"}.}

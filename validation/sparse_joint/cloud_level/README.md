@@ -324,50 +324,32 @@ give an error.
   inputs and one test added for the option.
 - Cost: one extra fit at the interval, a few seconds to a minute.
 
-### Step 4: the default
+### Step 4: the default, and its reversal
 
-The user made `initial_state = "auto"` the default on 2026-11-16. The change
-is in `R/sparse-joint.R`, `src/sparse_joint_model.h`, the help pages, the
-package README, `doc/alfak2_method.tex` and the design record, with:
+The user made `initial_state = "auto"` the default on 2026-11-16 (alfak2
+827c4b5): `"auto"` was `"balance"` with more than two time points, stored fits
+still rebuilt, and the test suite passed.
 
-- `"auto"` is `"balance"` with more than two time points, and when an
-  internal option forces the series template on two time points.
-- A fit stored before this change (without the level in its posterior)
-  still rebuilds; `as_alfakR()` of such a fit is unchanged.
-- The package's whole test suite passes (152 tests, 1061 expectations). Two
-  tests that build the model's inputs by hand fix the new level, and a test
-  that compares the two templates sets `initial_state = "balance"`.
+The ALFA-K paper benchmark of 827c4b5 (the `benchmark` session,
+`results_827c4b5/analysis/initial_state/`) then showed a regression at time
+points one passage apart (windows of two passages, `w2_ends`):
 
-The paper benchmark is to be rerun with the commit that carries the change.
+| Simulations | Switched to `free` | Landscape r, free vs balance (05a8855) | CV against truth |
+| --- | --- | --- | --- |
+| ABM, 400 inputs | 54% (λ 0.4 31%, 0.8 97%, 1.6 86%) | 0.58 vs 0.75, worse in 93% | 0.47 vs 0.66 |
+| Missegregation, true rate 5e-5 (= assumed) | 23/25 | 0.53 vs 0.72, worse in 91% | 0.40 vs 0.62 |
+| Missegregation, 1e-4 to 8e-4 | 84-100% | worse at every rate | worse at every rate |
 
-### Step 2: Fig. 2d on the Salehi passages is mostly sampling noise
+- Windows of four and eight passages switched almost never (3 inputs).
+- Forecasts beat the baseline slightly more often after the switch (14% of
+  fits better, 6% worse at passage 10), not enough to offset the landscapes.
+- The level is measured against the balance over the interval. Over one
+  passage that balance is far below the cloud a population builds up over its
+  whole history, whatever the rate, so the level measured the history, not a
+  misspecified rate. The confirmation sets had intervals of 6 days or more,
+  but no population that young sampled one passage apart, and were scored by
+  RMSE, where `free` was not worse; the paper benchmark scores landscape
+  correlation and cross-validation against the truth.
 
-Read only (`salehi/all_design_diagnosis.R`, `salehi/noise_check.R`,
-`salehi/noise_analysis.R`, `salehi/noise_one_interval.R`; tables in
-`results/salehi/report_all/`).
-
-- When every passage is fitted (324 rows on 99 trajectories that every
-  method has), the observed change from the parent to the daughter passage
-  is ranked better by the change between the parent and the passage before
-  it (Spearman 0.69) than by any forecast (alfakR 0.60, anchored 0.23,
-  pairwise 0.36, state space 0.45). alfakR's forecast size follows that
-  recent change (0.61); anchored alfak2's does not (0.24).
-- Splitting the cells of one passage at random into two halves, the
-  distance between the halves is sampling noise only. It ranks the observed
-  change at 0.62 (parent passage) and 0.76 (daughter passage), 0.73 for
-  their mean. The observed change is a median 1.3 times this noise.
-- On the trajectories with one interval (147 rows) the noise ranks the
-  observed change at 0.77, above every forecast; the observed change is
-  1.46 times the noise. `free` and `level_dt` follow the noise more than the
-  default does (0.38-0.41 against 0.18).
-- With the noise held fixed (partial Spearman), no arm differs from alfakR,
-  in either design. Differences from alfakR, lineage bootstrap:
-
-| Rows | alfak2 | `free` | `level_dt` | pairwise | state space |
-| --- | --- | --- | --- | --- | --- |
-| One interval | −0.07 (−0.25, 0.04) | −0.05 (−0.20, 0.08) | −0.08 (−0.23, 0.03) | | |
-| All time points | −0.13 (−0.46, 0.12) | −0.06 (−0.30, 0.11) | | +0.02 (−0.13, 0.14) | +0.03 (−0.28, 0.14) |
-
-So most of the gap to alfakR on Fig. 2d is how much a forecast's size follows
-the noise of the passages, not how good the landscape is. Fitting to that
-would mean reading noise as fitness.
+The user returned the default to `"balance"` the same day; `"auto"` stays an
+option with this limitation documented. A corrected rule is a separate plan.

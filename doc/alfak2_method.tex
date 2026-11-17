@@ -391,7 +391,7 @@ then has too little time to form and the neighbours of the majors are held far
 below their observed abundance; the candidate histories address this case
 (validation/sparse\_joint/short\_interval).
 
-\paragraph{Choice between the two (default).}
+\paragraph{Choice between the two (option).}
 The balance prior reads the size of the cloud of non-major karyotypes as
 fitness. When the true missegregation rate exceeds $\beta$, when cells are
 called one copy off, or when the population is far from balance, the cloud is
@@ -402,8 +402,8 @@ worse than chance (one-copy direction accuracy 0.17--0.48), whereas
 independent initial abundances reached 0.48--0.71. Where its assumptions hold,
 the balance prior was about one fifth more accurate.
 
-With \texttt{initial\_state = "auto"}, the default for two time points, the
-model therefore first measures the cloud. A fit with $h=T$ in which all
+With \texttt{initial\_state = "auto"} (two time points), the model first
+measures the cloud. A fit with $h=T$ in which all
 non-major states share one log factor $\ell$ over the balance,
 \begin{equation}
   \zeta_j\sim\Normal\Bigl(\ell+\log\!\!\sum_{p\in\mathcal{M},\,p\sim j}\!\!M_{jp}\,
@@ -428,7 +428,15 @@ intervals of 6--42 days 23\% of the datasets switched, with errors unchanged
 (ratio 0.99--1.00); on populations with a 2--8-fold higher missegregation rate
 or 1--2\% miscalled chromosomes all switched, the error fell to 0.73--0.81 of
 the balance prior's at distances 0--2, and one-copy direction accuracy rose
-from 0.37 to 0.66 at distance 1. On the Salehi passages half
+from 0.37 to 0.66 at distance 1. It was made the default in alfak2 827c4b5
+and returned to an option after the ALFA-K paper benchmark: with time points one
+passage apart the cloud is far larger than the balance over one interval even
+at the true missegregation rate, so \texttt{"auto"} switched in 54\% of the ABM
+and 95\% of the missegregation simulations, including those at the assumed
+rate, and the switched landscapes correlated with the truth at 0.58 against
+0.75 (cross-validation against the truth 0.47 against 0.66). The level
+measures a misspecified rate only when the interval is long enough for the
+balance over it to approach the population's own. On the Salehi passages half
 of the trajectories switched. There the change in the ranking of predicted
 against observed change (the paper's Fig.~2d) reflects sampling noise more
 than the landscape: the distance between two random halves of one passage
@@ -1114,14 +1122,15 @@ neighbours; other cells excluded & Major karyotypes ($\ge1\%$ and $\ge3$
 cells) and all their neighbours, observed or not \\
 Abundance of a neighbour & Accumulated since the extrapolated emergence time
 of its parent, a fixed function of the fitted trajectory & Balance prior over
-a history $h$ with dispersion $\sigma_\zeta$ \\
+a history $h$ with dispersion $\sigma_\zeta$ (independent as an option;
+Section~\ref{sec:sj-initial}) \\
 Prediction beyond the data & Kriging of first-stage estimates & Trend
 estimated within the same likelihood \\
 Uncertainty & Bootstrap of counts and Kriging & Laplace approximation with
 calibration \\
 Absolute level & Fixed by $\log(N_b/N_0^{\mathrm{pop}})/\Delta t$ & Relative
 fitness; specified birth rate \\
-Time points & Any number & Two \\
+Time points & Any number & Two or more (Section~\ref{sec:sj-series}) \\
 \bottomrule
 \end{tabular}
 \end{center}
@@ -1134,6 +1143,89 @@ in a single likelihood. On the simulated benchmark (Section~\ref{sec:validation}
 predictor that assumes no fitness differences at every wavelength and
 distance, largely because of a small number of poorly constrained fits,
 whereas the sparse joint model reduced it to 0.47--0.74 of that value.
+
+\subsection{Forecasts on the Salehi Passages}
+\label{sec:salehi-noise}
+
+The ALFA-K paper scores forecasts on the passages of the Salehi data by the
+rank correlation, across forecasts, between the predicted change, the
+Wasserstein distance from the parent passage to the forecast, and the observed
+change, from the parent to the daughter passage, both on the karyotypes of the
+fitted landscape (its Fig.~2d). On this test \texttt{alfakR} ranks better than
+\texttt{alfak2}. On the rows that every compared method has (paper benchmark
+round 05a8855, without the paper's selection by cross-validation), the
+Spearman correlations were:
+
+\begin{center}
+\begin{tabular}{L{0.42\textwidth}L{0.22\textwidth}L{0.22\textwidth}}
+\toprule
+ & Two time points, one interval (147 rows, 44 trajectories) & All time points (324 rows, 99 trajectories) \\
+\midrule
+\texttt{alfakR} & 0.60 & 0.60 \\
+\texttt{alfak2}, balance prior (anchored) & 0.45 & 0.23 \\
+\texttt{alfak2}, independent initial abundances & 0.60 & 0.31 \\
+\texttt{alfak2}, \texttt{series = "pairwise"} & -- & 0.36 \\
+\texttt{alfak2}, \texttt{series = "state\_space"} & -- & 0.45 \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\paragraph{The observed change is mostly sampling noise.} For each forecast
+the cells of the parent passage and of the daughter passage were split at
+random into two halves, 20 times; the Wasserstein distance between two halves
+of one passage contains no selection. The mean of this distance over the parent
+and the daughter ranks the observed change at Spearman 0.77 (one interval) and
+0.73 (all time points), above every forecast; the parent's alone at 0.74 and
+0.62. The observed change is a median 1.46 and 1.3 times this noise.
+
+\paragraph{What \texttt{alfakR}'s forecast follows.} With all time points, the
+change from the passage before the parent to the parent ranks the observed
+change at 0.69, above \texttt{alfakR}'s forecast (0.60). The size of
+\texttt{alfakR}'s forecast follows that recent change (Spearman 0.61; anchored
+\texttt{alfak2} 0.24), and the recent change follows the noise of the parent
+passage (0.70). The size of \texttt{alfakR}'s forecast and that noise are
+correlated directly at only 0.23. The evidence is correlational:
+\texttt{alfakR} forecasts a change about as large as the last one, which is
+largely noise, and is scored against a change that is largely noise. It does
+not show by what mechanism \texttt{alfakR}'s fitness estimates come to follow
+the recent change.
+
+\paragraph{With the noise held fixed.} Partial Spearman correlations of
+predicted and observed change, on ranks, with the mean noise of parent and
+daughter as covariate, differ from those of \texttt{alfakR} by (95\%
+intervals from a bootstrap over the six lineage types):
+
+\begin{center}
+\begin{tabular}{L{0.42\textwidth}L{0.22\textwidth}L{0.22\textwidth}}
+\toprule
+ & One interval & All time points \\
+\midrule
+Balance prior (anchored) & $-0.07$ ($-0.25$, $0.04$) & $-0.13$ ($-0.46$, $0.12$) \\
+Independent initial abundances & $-0.05$ ($-0.20$, $0.08$) & $-0.06$ ($-0.30$, $0.11$) \\
+\texttt{series = "pairwise"} & -- & $+0.02$ ($-0.13$, $0.14$) \\
+\texttt{series = "state\_space"} & -- & $+0.03$ ($-0.28$, $0.14$) \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+No interval excludes zero. The noise of the daughter passage is not known when
+a forecast is made, so holding it fixed diagnoses the test; it is not a way to
+forecast.
+
+\paragraph{Consequence.} On data this diverse the test does not separate a
+better landscape from a worse one. On simulated populations of similar
+diversity (Section~\ref{sec:sj-initial}), the change that selection alone
+predicts from the true landscape over one interval of 15 days ranked the
+observed change at Spearman 0.15, against 0.93 on the development landscapes.
+Where the truth is known, on the ALFA-K paper's simulations with two time
+points, \texttt{alfak2}'s predicted change ranked the observed change at
+0.82--0.87 and \texttt{alfakR}'s at 0.75--0.76, with the true landscape at
+0.89. A forecast whose size follows the recent change would raise the score on
+the Salehi passages by reading noise as selection; \texttt{alfak2} does not
+pursue it. The analyses are in validation/sparse\_joint/cloud\_level
+(\texttt{salehi/noise\_check.R}, \texttt{salehi/noise\_analysis.R},
+\texttt{salehi/noise\_one\_interval.R} and
+\texttt{salehi/all\_design\_diagnosis.R}).
 
 \section{Default Analysis Workflow}
 \label{sec:workflow}
@@ -1189,9 +1281,10 @@ observed karyotypes outside the domain are set aside with their cells.
 every pair of neighbouring domain states.
 \item \textbf{Trend covariates}, (\ref{eq:design}).
 \item \textbf{Prior on initial abundances}: (\ref{eq:free-prior}) for major
-karyotypes and, for all other states, (\ref{eq:balance-prior}) or, when a
-first fit with (\ref{eq:balance-level}) finds the cloud more than about $e$
-times the balance, (\ref{eq:free-prior}) (default \texttt{"auto"}).
+karyotypes and, by default, (\ref{eq:balance-prior}) for all other states
+(with \texttt{initial\_state = "auto"}, (\ref{eq:free-prior}) when a first fit
+with (\ref{eq:balance-level}) finds the cloud more than about $e$ times the
+balance).
 \item \textbf{Joint objective}: (\ref{eq:net}), (\ref{eq:forward}),
 (\ref{eq:poisson}) and (\ref{eq:trend})--(\ref{eq:scale-prior}), compiled as a
 single TMB objective function.
@@ -1252,8 +1345,8 @@ Argument & Default & Definition \\
 \texttt{shell\_power} & 0.85 & Exponent of the distance term \\
 \texttt{shell\_sd} & 0.5 & Prior standard deviation of $\gamma_{\mathrm{dist}}$ \\
 \texttt{initial\_frequency} & $\log10^{-5}$, 3 & $\log f_0$ and $\sigma_0$ in (\ref{eq:free-prior}) \\
-\texttt{initial\_state} & \texttt{"auto"} & (\ref{eq:balance-prior}) or (\ref{eq:free-prior}) for non-major states, by the level of (\ref{eq:balance-level}); \texttt{"balance"} with more than two time points \\
-\texttt{auto\_level} & 1 & Threshold on $\hat\ell$ \\
+\texttt{initial\_state} & \texttt{"balance"} & Prior (\ref{eq:balance-prior}) for non-major states; \texttt{"auto"} chooses by the level of (\ref{eq:balance-level}) \\
+\texttt{auto\_level} & 1 & Threshold on $\hat\ell$ for \texttt{"auto"} \\
 \texttt{history} & $T$ and 30--3000 divisions longer than $T$ & Candidate
 history lengths $h$; the one of highest marginal likelihood is kept \\
 \texttt{balance\_sd} & 1 & $\sigma_\zeta$ \\
