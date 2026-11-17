@@ -845,8 +845,12 @@ not help.
   on rugged ones). Far intervals are too narrow at wavelength 0.8 (coverage
   0.84 at distance 4).
 - The calibration constants come from one family of simulated landscapes.
-- With more than two time points the time points in between add little (above); a
-  model of clone chance and passaging drift is untried.
+- With more than two time points the time points in between add little on the
+  simulated passaged cultures (above). On the Salehi passages they helped: the
+  anchored fit of every passage forecast later passages better than the fit
+  of the first and the last (+0.36 per cell, interval 0.14 to 0.49;
+  `salehi_horizon/`), while alfakR's did not change. A model of clone chance
+  and passaging drift is untried.
 - ALFA-K with minobs 5 has 75 of 96 development fits (the HPC run continues)
   and none on the held-out landscapes. On those 75 its RMSE is 0.169 / 0.225
   at distances 0 / 1, above no information, and both variants rank better
