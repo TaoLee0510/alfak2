@@ -87,3 +87,41 @@ forecast's probability of the cells actually seen.
 
 ![Forecasts against later passages](results/report/figures/horizon.png)
 (figure in `results/report/figures/`, not tracked)
+
+## All time points (2026-11-16)
+
+Requested by the user the same day: the same test for the fits of every
+passage of a trajectory (the paper benchmark's "all" design, trajectories of
+three or more passages): alfak2 anchored (the default), pairwise and
+state_space, alfakR, and alfak2 "free"; beside them the two-time-point fits of
+the same trajectories. No new fits; 3075 tasks (array 21989042,
+`make_tasks.R ... all`, outputs `results/rows_all/`), analysis `analyse_all.R`
+(`results/report_all/`). 677 rows on 99 trajectories are shared by the four
+main arms.
+
+Log score per cell over persistence (lineage intervals):
+
+| Passages ahead | Anchored | Pairwise | State space | alfakR |
+| --- | --- | --- | --- | --- |
+| 1 | +0.78 (0.35, 1.01) | +0.78 (0.31, 1.02) | +0.77 (0.26, 1.01) | +0.25 (−0.15, 0.61) |
+| 2 | +0.74 (−0.24, 1.38) | +0.69 (−0.35, 1.37) | +0.63 (−0.37, 1.28) | −0.66 (−1.35, −0.25) |
+| 3–4 | −0.01 (−1.86, 1.39) | −0.22 (−2.05, 1.22) | −0.55 (−2.08, 0.70) | −2.18 (−2.79, −1.80) |
+| Minus alfakR, all rows | +1.12 (0.55, 1.47) | +1.06 (0.47, 1.44) | +0.96 (0.40, 1.31) | |
+
+- Every alfak2 method beats alfakR at every horizon (intervals above zero),
+  in 69% of the rows; the sample bootstrap agrees.
+- Among alfak2's methods the anchored default scores highest: state space
+  −0.15 (−0.20, −0.05), pairwise −0.06 (−0.10, −0.03), independent initial
+  abundances −0.15 (−0.24, −0.01).
+- This reverses the paper's Fig. 2d with all time points, where alfakR
+  ranked the size of the change at 0.55 and the anchored method at 0.23
+  (`../cloud_level/README.md`, step 2: that ranking follows sampling noise).
+- **Fitting every passage helps alfak2, not alfakR.** On 636 rows of the same
+  trajectories, the anchored fit of every passage scores 0.36 per cell above
+  the two-time-point fit (0.14, 0.49; higher in 90% of rows, at every
+  horizon); alfakR's changes by +0.01 (−0.71, 0.91). The two designs choose
+  the landscape's karyotypes from different time points, so these differences
+  are of each fit's gain over persistence on its own karyotypes.
+
+![All time points](results/report_all/figures/horizon_all.png)
+(figure in `results/report_all/figures/`, not tracked)

@@ -28,10 +28,14 @@ tasks <- utils::read.delim(args[[1]], stringsAsFactors = FALSE)
 task <- tasks[as.integer(args[[2]]), ]
 out_dir <- args[[3]]
 max_depth <- 4L
-out_file <- file.path(out_dir, sprintf("%s__%s__m%s.Rds", task$id, task$method, task$minobs))
+# Design of the fit: "ends" (two time points) unless the task says "all"
+# (every passage of the trajectory). The forecast starts from the last passage
+# in both.
+design <- if (is.null(task$design) || is.na(task$design)) "ends" else task$design
+out_file <- file.path(out_dir, sprintf("%s__%s__%s__m%s.Rds", task$id, design, task$method, task$minobs))
 if (file.exists(out_file)) quit(save = "no")
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
-fit_dir <- file.path(task$root, task$id, "ends", task$method, paste0("minobs_", task$minobs))
+fit_dir <- file.path(task$root, task$id, design, task$method, paste0("minobs_", task$minobs))
 done <- function(status, rows = NULL) {
   saveRDS(list(task = task, status = status, rows = rows), out_file)
   cat(task$id, task$method, task$minobs, status, "\n")
@@ -120,7 +124,8 @@ rows <- lapply(seq_len(nrow(desc)), function(i) {
   t_index <- vapply(fc, function(f) which.min(abs(f$time - desc$days[i])), integer(1))
   f <- Reduce(`+`, Map(function(f, j) f$m[j, ], fc, t_index)) / length(fc)
   f <- f / sum(f)
-  data.frame(id = task$id, method = task$method, minobs = task$minobs, parent = parent, uid = desc$uid[i],
+  data.frame(id = task$id, design = design, method = task$method, minobs = task$minobs, parent = parent,
+             uid = desc$uid[i],
              depth = desc$depth[i], days = desc$days[i],
              forecast_day = fc[[1]]$time[t_index[[1]]],
              treat_parent = meta$on_treatment[match(parent, meta$uid)],

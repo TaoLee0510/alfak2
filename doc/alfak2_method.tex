@@ -1225,7 +1225,104 @@ the Salehi passages by reading noise as selection; \texttt{alfak2} does not
 pursue it. The analyses are in validation/sparse\_joint/cloud\_level
 (\texttt{salehi/noise\_check.R}, \texttt{salehi/noise\_analysis.R},
 \texttt{salehi/noise\_one\_interval.R} and
-\texttt{salehi/all\_design\_diagnosis.R}).
+\texttt{salehi/all\_design\_diagnosis.R}). A test of the forecasts that
+sampling noise does not decide follows (Section~\ref{sec:salehi-horizon}).
+
+\subsection{Forecasts Against Later Passages}
+\label{sec:salehi-horizon}
+
+The Salehi trajectories are sequences of passages. A fit of the first and the
+last passage of a trajectory, $(a,x)$, can be tested on every passage that
+follows $x$; the paper benchmark's trajectories of different lengths from the
+same start give the inputs $(a,b), (a,c), (a,d), \dots$, from each of 72
+starting passages. No fit was repeated: the fits of the paper benchmark (round
+05a8855) were forecast from their last passage with the benchmark's engine
+(\texttt{alfakR::predict\_evo}, agent-based, five replicates, $\beta=5\times
+10^{-5}$, population $10^7$) up to every descendant within four passages, and
+scored against it.
+
+\paragraph{Score.} For a later passage with counts $y_k$ on the karyotypes $k$
+of the fitted landscape ($K$ of them; the set is the same for both methods),
+the score of a forecast with frequencies $q_k$ is the mean log-likelihood per
+cell relative to persistence, the parent's frequencies $p_k$:
+\begin{equation}
+  S=\frac{\sum_k y_k\log\bigl((1-\epsilon)q_k+\epsilon/K\bigr)
+         -\sum_k y_k\log\bigl((1-\epsilon)p_k+\epsilon/K\bigr)}{\sum_k y_k},
+  \qquad \epsilon=0.01.
+  \label{eq:horizon-score}
+\end{equation}
+It is a proper score: the sampling noise of the later passage enters both
+terms alike, so a forecast gains only by putting probability where the cells
+are, and moving further does not pay as it does in the paper's Fig.~2d.
+$S>0$ means that the forecast beats the assumption of no change. Rows are
+(trajectory, minobs, later passage), paired between methods; 95\% intervals
+come from a bootstrap over the six lineage types (and, as a check, over the
+twelve samples).
+
+\paragraph{Two time points.} On 986 rows from 143 trajectories:
+
+\begin{center}
+\begin{tabular}{L{0.16\textwidth}L{0.17\textwidth}L{0.17\textwidth}L{0.2\textwidth}L{0.13\textwidth}}
+\toprule
+Passages ahead & \texttt{alfak2} & \texttt{alfakR} & \texttt{alfak2} $-$ \texttt{alfakR} & Rows \texttt{alfak2} better \\
+\midrule
+1 & $+0.47$ ($0.17$, $0.67$) & $-0.16$ ($-0.76$, $0.22$) & $+0.63$ ($0.35$, $0.99$) & 65\% \\
+2 & $+0.27$ ($-0.44$, $0.79$) & $-1.10$ ($-2.17$, $-0.20$) & $+1.37$ ($0.90$, $2.04$) & 70\% \\
+3--4 & $-0.81$ ($-1.96$, $0.43$) & $-2.14$ ($-3.53$, $-0.73$) & $+1.33$ ($1.10$, $1.63$) & 71\% \\
+All & & & $+1.01$ ($0.67$, $1.40$) & 68\% \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\texttt{alfak2} scored higher at every minobs (5, 10 and 20: $+1.53$, $+1.02$
+and $+0.26$, every interval above zero), whether or not the treatment changed
+between the parent and the later passage, and for inputs of one interval and
+of more. One passage ahead its forecast beat persistence and
+\texttt{alfakR}'s did not; two or more passages ahead neither beat
+persistence, and \texttt{alfakR} fell below it. The same fits with
+independent initial abundances scored no higher than with the balance prior
+($-0.06$ per cell, interval $-0.16$ to $0.09$). Much of the difference is the
+size of \texttt{alfakR}'s forecasts, which move the population further than
+it moves (its fitness differences are larger;
+Section~\ref{sec:salehi-noise}).
+
+\paragraph{All time points.} The fits of every passage of a trajectory (the
+``all'' design, trajectories of three or more passages) were scored in the same
+way, on 677 rows from 99 trajectories that every compared method shares:
+
+\begin{center}
+\begin{tabular}{L{0.14\textwidth}L{0.16\textwidth}L{0.16\textwidth}L{0.16\textwidth}L{0.16\textwidth}}
+\toprule
+Passages ahead & Anchored & Pairwise & State space & \texttt{alfakR} \\
+\midrule
+1 & $+0.78$ ($0.35$, $1.01$) & $+0.78$ ($0.31$, $1.02$) & $+0.77$ ($0.26$, $1.01$) & $+0.25$ ($-0.15$, $0.61$) \\
+2 & $+0.74$ ($-0.24$, $1.38$) & $+0.69$ ($-0.35$, $1.37$) & $+0.63$ ($-0.37$, $1.28$) & $-0.66$ ($-1.35$, $-0.25$) \\
+3--4 & $-0.01$ ($-1.86$, $1.39$) & $-0.22$ ($-2.05$, $1.22$) & $-0.55$ ($-2.08$, $0.70$) & $-2.18$ ($-2.79$, $-1.80$) \\
+\midrule
+Minus \texttt{alfakR} & $+1.12$ ($0.55$, $1.47$) & $+1.06$ ($0.47$, $1.44$) & $+0.96$ ($0.40$, $1.31$) & \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Each method of \texttt{alfak2} scored higher than \texttt{alfakR} at every
+horizon (one passage ahead $+0.51$ to $+0.53$, two $+1.29$ to $+1.41$, three
+or four $+1.63$ to $+2.17$, every interval above zero) and in 69\% of the
+rows. The anchored method, the default, scored highest; the state-space
+method $0.15$ lower (interval $-0.20$ to $-0.05$), the pairwise method $0.06$
+lower ($-0.10$ to $-0.03$), and independent initial abundances $0.15$ lower
+($-0.24$ to $-0.01$). This reverses the ranking of the paper's Fig.~2d with
+all time points (Section~\ref{sec:salehi-noise}), in which \texttt{alfakR}
+ranked the size of the change at 0.55 and the anchored method at 0.23.
+
+Fitting every passage instead of the first and the last raised the anchored
+method's score by $0.36$ per cell (interval $0.14$ to $0.49$; higher in 90\%
+of the rows, at every horizon), and did not change \texttt{alfakR}'s ($+0.01$,
+interval $-0.71$ to $0.91$). The two designs choose the landscape's
+karyotypes from different time points, so these comparisons are of each
+fit's score over persistence on its own karyotypes.
+
+
+The analyses are in validation/sparse\_joint/salehi\_horizon.
 
 \section{Default Analysis Workflow}
 \label{sec:workflow}
