@@ -308,7 +308,14 @@ than two time points `"auto"` is `"balance"`.
   passage the balance is far below the cloud the population built up over
   its whole history, whatever the rate. The development and confirmation sets
   had no interval that short in a population that young. The default
-  returned to `"balance"` on 2026-11-16; a corrected rule needs its own plan.
+  returned to `"balance"` on 2026-11-16.
+- A corrected rule was looked for and not found (`cloud_level/rule/`): the
+  cloud's diversity, its level against the balance over the population's
+  age, and its level against the balance over the interval with a threshold
+  that falls with the interval all confuse a wrong rate or miscalled cells
+  with a cloud that is large for other reasons (an old population on a smooth
+  landscape, young populations sampled days apart). The user stopped the
+  effort after this step on 2026-11-16.
 
 ## Development scoreboard
 
@@ -814,9 +821,11 @@ not help.
 
 ## Open
 
-- `initial_state = "auto"` misreads a long history as a large cloud when the
-  time points are one passage apart; a rule that tells a misspecified rate
-  from that case is open. With more than two time points it is `"balance"`.
+- A misspecified missegregation rate or miscalled cells cannot be told
+  from the counts of two time points (`beta_choice/`, `cloud_level/rule/`);
+  `initial_state = "auto"` misreads a long history as a large cloud when the
+  time points are one passage apart. A rate measured outside the counts is
+  untried.
 
 - The free model misses the information at a deep first time point (the failing
   safety cell); balance reads it, with a history now chosen by marginal
