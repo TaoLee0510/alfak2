@@ -1,6 +1,6 @@
 Package: alfak2
 Title: ALFA-K2: Adaptive Local-to-Global Fitness Landscapes for Aneuploid Karyotypes
-Version: 0.1.0
+Version: 0.2.0
 Authors@R: c(
     person(given = "Richard", family = "Beck",
            email = "richard.beck@moffitt.org", role = "aut"),
