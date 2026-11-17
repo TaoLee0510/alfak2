@@ -46,7 +46,12 @@ cl_methods <- list(
   # Balance prior with a free level, history chosen among the candidates.
   level = list(balance_level = "free"),
   # Balance prior with a free level, history fixed at the interval: one fit.
-  level_dt = list(balance_level = "free", history = "dt")
+  level_dt = list(balance_level = "free", history = "dt"),
+  # Corrected-rule study (rule/): the same with the history at the population's
+  # age (the first time point's day in the simulation), so that the level is
+  # measured against the balance a cloud can reach over the population's
+  # whole history.
+  level_age = list(balance_level = "free", history = "age")
 )
 
 # The diverse set: three ways in which a population comes to hold as many
@@ -138,6 +143,7 @@ cl_fit <- function(dataset, nodes, arguments) {
   counts <- dataset$counts
   storage.mode(counts) <- "integer"
   if (identical(arguments$history, "dt")) arguments$history <- dataset$interval
+  if (identical(arguments$history, "age")) arguments$history <- dataset$t0
   beta <- if (is.null(dataset$beta_assumed)) dataset$beta else dataset$beta_assumed
   warned <- character()
   started <- proc.time()[["elapsed"]]
@@ -273,8 +279,44 @@ cl_score <- function(dataset, nodes, fit) {
 cl_confirm_sets <- list(
   dev2 = list(kind = "dev", seed_base = 101000L, prefix = "c2d"),
   short2 = list(kind = "short", seed_base = 102000L, prefix = "c2s"),
-  diverse2 = list(kind = "diverse", seed_base = 103000L, prefix = "c2v")
+  diverse2 = list(kind = "diverse", seed_base = 103000L, prefix = "c2v"),
+  # Corrected-rule study (rule/README.md), step 0 (2): populations of the
+  # ALFA-K paper's size and age, at intervals of one, three and seven passages.
+  paper3 = list(kind = "paper", seed_base = 104000L, prefix = "c3p")
 )
+
+# Populations of the ALFA-K paper's size (each passage grows from 2e5 to 2e7
+# cells) and age (first time point at day 120), at intervals of 6, 18 and 42
+# days (one, three and seven passages), 1000 cells per time point, as in
+# lattice_residual/setup.R. Wavelengths 0.2-1.6, five landscapes each, under
+# three conditions: the assumed missegregation rate is the true one (`rate1`),
+# the true rate is 8 times the assumed one (`rate8`), or each chromosome of a
+# sampled cell is called one copy off with probability 2% (`call2`).
+cl_paper_config <- function(set, seed_base, prefix) {
+  config <- stt_config(cl_input_dir(set))
+  conditions <- data.frame(level = c("rate1", "rate8", "call2"), mechanism = c("none", "rate", "call"),
+                           beta_multiple = c(1, 8, 1), call_error = c(0, 0, 0.02), stringsAsFactors = FALSE)
+  classes <- data.frame(wavelength_class = c("w0.2", "w0.4", "w0.8", "w1.6"), wavelength = c(0.2, 0.4, 0.8, 1.6),
+                        stringsAsFactors = FALSE)
+  grid <- merge(conditions, classes[rep(seq_len(nrow(classes)), each = 5L), ], by = NULL)
+  grid <- grid[order(grid$level, grid$wavelength), ]
+  index <- seq_len(nrow(grid))
+  config$landscapes <- data.frame(
+    landscape_id = sprintf("%s_%s_%s_L%02d", prefix, grid$level, sub("w", "w", grid$wavelength_class),
+                           stats::ave(index, grid$level, grid$wavelength, FUN = seq_along)),
+    split = set, wavelength_class = grid$wavelength_class, wavelength = grid$wavelength,
+    landscape_seed = seed_base + index, level = grid$level, mechanism = grid$mechanism,
+    beta_multiple = grid$beta_multiple, call_error = grid$call_error, stringsAsFactors = FALSE)
+  config$abm$pop_size <- 2e5
+  config$abm$max_pop <- 2e7
+  config$abm$end_day <- 120
+  config$abm$record_days <- 60
+  intervals <- c(6, 18, 42)
+  config$scenarios <- data.frame(scenario = sprintf("t0120_%02dd", intervals), depth_t0 = 1000, depth_t1 = 1000,
+                                 interval = intervals, t0 = 120, bottleneck = 0, shift = 0, role = "paper",
+                                 stringsAsFactors = FALSE)
+  config
+}
 
 # The development scoreboard's design: wavelengths 0.4-1.6, three landscapes
 # each, one patient, its 14 scenarios from day 1440.
@@ -321,5 +363,6 @@ cl_set_config <- function(set) {
   switch(spec$kind,
     dev = cl_dev_config(set, spec$seed_base, spec$prefix),
     short = cl_short_config(set, spec$seed_base, spec$prefix),
+    paper = cl_paper_config(set, spec$seed_base, spec$prefix),
     diverse = cl_diverse_config(set = set, seed_base = spec$seed_base, prefix = spec$prefix))
 }

@@ -269,9 +269,9 @@ diagnosis; its README the numbers.
   takes 2.4–3.7 times as long. `initial_state = "free"` gives the earlier model; the
 benchmark entries without "balance" in their name use it.
 
-## Choice between balance and free initial abundances (default since 2026-11-16)
+## Choice between balance and free initial abundances (an option)
 
-`initial_state = "auto"`, the default for two time points, first fits the
+`initial_state = "auto"` (two time points) first fits the
 balance prior with the history at the interval and one free log factor for
 the level of all non-major karyotypes (`balance_level = "free"`). If that
 level exceeds 1 (`auto_level`), the cloud is more than about e times what the
@@ -299,6 +299,16 @@ than two time points `"auto"` is `"balance"`.
   is dominated by sampling noise (two random halves of one passage rank the
   observed change at 0.62-0.77), so it neither supports nor refutes the rule.
 - `validation/sparse_joint/cloud_level/` has the study.
+- It was the default in 827c4b5 only. The ALFA-K paper benchmark of that
+  commit showed that with time points one passage apart (windows of two
+  passages) it switched in 54% of the ABM and 95% of the missegregation
+  simulations, at every true rate including the assumed one, and the
+  switched landscapes were worse against the truth (correlation 0.58 against
+  0.75, worse in 93% of fits; cross-validation 0.47 against 0.66). Over one
+  passage the balance is far below the cloud the population built up over
+  its whole history, whatever the rate. The development and confirmation sets
+  had no interval that short in a population that young. The default
+  returned to `"balance"` on 2026-11-16; a corrected rule needs its own plan.
 
 ## Development scoreboard
 
@@ -804,9 +814,9 @@ not help.
 
 ## Open
 
-- `initial_state = "auto"` is checked on two time points only; with more it
-  is `"balance"`. Whether the cloud's level should decide there too is
-  untested.
+- `initial_state = "auto"` misreads a long history as a large cloud when the
+  time points are one passage apart; a rule that tells a misspecified rate
+  from that case is open. With more than two time points it is `"balance"`.
 
 - The free model misses the information at a deep first time point (the failing
   safety cell); balance reads it, with a history now chosen by marginal

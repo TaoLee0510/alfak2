@@ -410,10 +410,12 @@ test_that("a free level of the balance prior and initial_state = \"auto\"", {
   expect_identical(low$diagnostics$initial_state, "free")
   balance <- do.call(fit_sparse_joint, c(auto_args, list(initial_state = "balance")))
   expect_equal(high$summary$relative_fitness, balance$summary$relative_fitness)
-  # "auto" is the default.
+  # "balance" is the default; an "auto" fit says what it chose.
   default <- do.call(fit_sparse_joint, auto_args)
-  expect_false(is.null(default$diagnostics$initial_state_check))
-  expect_output(print(default), "chosen by \"auto\"")
+  expect_identical(default$diagnostics$initial_state, "balance")
+  expect_null(default$diagnostics$initial_state_check)
+  expect_equal(default$summary$relative_fitness, balance$summary$relative_fitness)
+  expect_output(print(high), "chosen by \"auto\"")
   # With more than two time points "auto" is "balance".
   three <- cbind(sim$counts, sim$counts[, 2L])
   colnames(three) <- c("0", "1", "2")
