@@ -51,7 +51,7 @@ read_scores <- function(file) {
   s <- utils::read.csv(path, stringsAsFactors = FALSE)
   s[s$status == "ok", ]
 }
-st <- do.call(rbind, lapply(c("scores.csv", "scores_confirm.csv", "scores_paper3.csv"), function(f) {
+st <- do.call(rbind, lapply(c("scores_rule.csv", "scores_paper3.csv"), function(f) {
   s <- read_scores(f)
   if (is.null(s)) return(NULL)
   columns <- c("set", "dataset_id", "landscape_id", "wavelength_class", "role", "interval", "coverage_t0",
@@ -61,6 +61,10 @@ st <- do.call(rbind, lapply(c("scores.csv", "scores_confirm.csv", "scores_paper3
 }))
 lev <- st[st$method == "level_dt", c("set", "dataset_id", "balance_level")]
 names(lev)[3] <- "level"
+# The level against the balance over the population's age (arm level_age).
+lev_age <- st[st$method == "level_age", c("set", "dataset_id", "balance_level")]
+names(lev_age)[3] <- "level_age"
+lev <- merge(lev, lev_age, by = c("set", "dataset_id"), all.x = TRUE)
 base <- st[st$method == "base", ]
 free <- st[st$method == "free", c("set", "dataset_id", "rmse_d1", "direction_d1", "landscape_r")]
 names(free)[3:5] <- paste0(names(free)[3:5], "_free")
@@ -89,7 +93,7 @@ eff_p <- stats::aggregate(cbind(n = 1, dr, dcv) ~ group + effect, data = transfo
                                                                                       dcv = ifelse(is.na(dcv), 0, dcv)),
                           FUN = function(v) if (all(v == 1)) length(v) else round(stats::median(v), 3))
 cat("\n== Paper benchmark: effect of the switch (median change in landscape r and held-out r) ==\n"); print(eff_p, row.names = FALSE)
-sd_t <- feat_table(sd, features)
+sd_t <- feat_table(sd, c("level_age", features))
 sd_e <- do.call(rbind, lapply(split(sd, sd$group), function(g) data.frame(
   group = g$group[1], inputs = nrow(g), helped = mean(g$effect == "helped"), hurt = mean(g$effect == "hurt"),
   rmse_change = round(stats::median(g$drmse), 3), direction_change = round(stats::median(g$ddir, na.rm = TRUE), 3),
@@ -99,4 +103,29 @@ cat("\n== Study simulations: effect of free against base ==\n"); print(sd_e, row
 utils::write.csv(pf_t, file.path(out_dir, "paper_features.csv"), row.names = FALSE)
 utils::write.csv(sd_t, file.path(out_dir, "study_features.csv"), row.names = FALSE)
 utils::write.csv(sd_e, file.path(out_dir, "study_effects.csv"), row.names = FALSE)
+saveRDS(list(paper = pf, study = sd), file.path(out_dir, "inputs.Rds"))
+
+# How well does each level separate the inputs where switching helped from
+# those where it hurt? Area under the curve (helped against hurt), and the
+# share of each kind above a threshold.
+auc <- function(score, positive) {
+  ok <- is.finite(score) & !is.na(positive)
+  score <- score[ok]; positive <- positive[ok]
+  n1 <- sum(positive); n0 <- sum(!positive)
+  if (!n1 || !n0) return(NA_real_)
+  (sum(rank(score)[positive]) - n1 * (n1 + 1) / 2) / (n1 * n0)
+}
+lab <- sd[sd$effect != "neutral", ]
+lab$helped <- lab$effect == "helped"
+sep <- data.frame(feature = c("level", "level_age", "coverage_t0", "singleton_t0"),
+                  auc = c(auc(lab$level, lab$helped), auc(lab$level_age, lab$helped),
+                          auc(-lab$coverage_t0, lab$helped), auc(lab$singleton_t0, lab$helped)))
+cat("\n== Separation of helped from hurt inputs (study simulations; AUC, 0.5 = none) ==\n"); print(sep, digits = 3)
+thr <- do.call(rbind, lapply(c(0, 0.5, 1, 1.5), function(t) do.call(rbind, lapply(split(sd, sd$group), function(g) data.frame(
+  threshold = t, group = g$group[1], inputs = nrow(g), switched = mean(g$level_age > t, na.rm = TRUE),
+  helped_among_switched = if (any(g$level_age > t, na.rm = TRUE)) mean(g$effect[which(g$level_age > t)] == "helped") else NA,
+  hurt_among_switched = if (any(g$level_age > t, na.rm = TRUE)) mean(g$effect[which(g$level_age > t)] == "hurt") else NA)))))
+cat("\n== Switching when level_age exceeds a threshold ==\n"); print(thr, digits = 2, row.names = FALSE)
+utils::write.csv(sep, file.path(out_dir, "separation.csv"), row.names = FALSE)
+utils::write.csv(thr, file.path(out_dir, "threshold_level_age.csv"), row.names = FALSE)
 saveRDS(list(paper = pf, study = sd), file.path(out_dir, "inputs.Rds"))

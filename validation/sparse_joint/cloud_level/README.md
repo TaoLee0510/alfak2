@@ -351,5 +351,15 @@ points one passage apart (windows of two passages, `w2_ends`):
   RMSE, where `free` was not worse; the paper benchmark scores landscape
   correlation and cross-validation against the truth.
 
-The user returned the default to `"balance"` the same day; `"auto"` stays an
-option with this limitation documented. A corrected rule is a separate plan.
+The user returned the default to `"balance"` the same day (alfak2 348addd);
+`"auto"` stays an option with this limitation documented.
+
+### Step 5: a corrected rule (stopped after its step 0)
+
+`rule/README.md`: no feature of two time points separates a wrong rate or
+miscalled cells from a cloud that is large for other reasons. The best
+threshold, on the level at the interval and falling with the interval, chosen
+on the same data, caught half of the inputs where switching helps and still
+switched 14% of those where it hurts. The user stopped the effort there on
+2026-11-16; the remaining steps (a fixed rule, confirmation on new seeds) were
+not run.
