@@ -1,0 +1,43 @@
+% Shared style of the alfak2 flowcharts (doc/flowcharts/*.tex).
+% Each chart is a standalone document; build one with
+%   cd doc/flowcharts && pdflatex <chart>.tex
+% or all of them with doc/flowcharts/build.sh. doc/alfak2_method.tex includes
+% the PDFs.
+\usepackage{amsmath,amssymb}
+\usepackage[scaled=0.92]{helvet}
+\renewcommand{\familydefault}{\sfdefault}
+\usepackage{xcolor}
+\usetikzlibrary{positioning,shapes.geometric,shapes.misc,arrows.meta,calc,fit,backgrounds}
+
+
+\newcommand{\code}[1]{\texttt{\small #1}}
+
+\definecolor{cIn}{HTML}{DCE6F2}    \definecolor{cInB}{HTML}{4F6D9A}
+\definecolor{cProc}{HTML}{F5F5F5}  \definecolor{cProcB}{HTML}{707070}
+\definecolor{cDec}{HTML}{FFF2CC}   \definecolor{cDecB}{HTML}{B8902B}
+\definecolor{cTwo}{HTML}{D0E4F5}   \definecolor{cTwoB}{HTML}{2E6DA4}
+\definecolor{cAnch}{HTML}{D9EAD3}  \definecolor{cAnchB}{HTML}{3D7A33}
+\definecolor{cPair}{HTML}{FCE5CD}  \definecolor{cPairB}{HTML}{C0661A}
+\definecolor{cState}{HTML}{E6DDF2} \definecolor{cStateB}{HTML}{6A4A9C}
+\definecolor{cCore}{HTML}{EFEFEF}  \definecolor{cCoreB}{HTML}{8A8A8A}
+\definecolor{cOut}{HTML}{D5EDEA}   \definecolor{cOutB}{HTML}{2C7C73}
+\definecolor{cErr}{HTML}{F8D7D7}   \definecolor{cErrB}{HTML}{B03030}
+
+\tikzset{
+  >={Stealth[length=2.4mm,width=1.8mm]},
+  every node/.style={font=\small},
+  box/.style={draw=#1B, fill=#1, rounded corners=2.5pt, line width=0.7pt, align=left,
+              inner xsep=5pt, inner ysep=4pt},
+  box/.default=cProc,
+  w/.style={text width=#1},
+  dec/.style={draw=cDecB, fill=cDec, chamfered rectangle, chamfered rectangle xsep=7pt,
+              line width=0.7pt, align=center, inner xsep=3pt, inner ysep=3pt},
+  err/.style={box=cErr, font=\footnotesize},
+  tag/.style={draw=#1, dashed, rounded corners=6pt, fill=white, font=\scriptsize, inner sep=2.5pt,
+              align=center},
+  arr/.style={->, line width=0.8pt, draw=black!75},
+  darr/.style={->, line width=0.8pt, draw=black!60, dashed},
+  lab/.style={font=\footnotesize\itshape, fill=white, inner sep=1.5pt, text=black!85},
+  frame/.style={draw=#1, rounded corners=6pt, line width=0.9pt, inner sep=7pt},
+  ftitle/.style={font=\footnotesize\bfseries, fill=white, inner sep=2pt, text=#1},
+}

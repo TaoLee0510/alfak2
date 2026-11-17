@@ -1,7 +1,7 @@
 validate_count_matrix <- function(counts) {
   if (is.data.frame(counts)) counts <- as.matrix(counts)
-  if (!is.matrix(counts) || ncol(counts) != 2L) {
-    stop("`counts` must be a matrix or data frame with exactly two columns.", call. = FALSE)
+  if (!is.matrix(counts) || ncol(counts) < 2L) {
+    stop("`counts` must be a matrix or data frame with one column per timepoint, at least two.", call. = FALSE)
   }
   if (is.null(rownames(counts)) || any(!nzchar(rownames(counts)))) {
     stop("`counts` must have non-empty karyotype row names.", call. = FALSE)
@@ -55,7 +55,7 @@ alfak2_write_condition_log <- function(log_dir, prefix, message, diagnostics = l
   stamp <- format(Sys.time(), "%Y%m%d_%H%M%OS3")
   stamp <- gsub("[^0-9A-Za-z_.-]+", "_", stamp)
   path <- file.path(log_dir, paste0("alfak2_", prefix, "_", stamp, "_", Sys.getpid(), ".log"))
-  diagnostic_lines <- utils::capture.output(str(diagnostics, give.attr = FALSE, vec.len = 50, max.level = 12))
+  diagnostic_lines <- utils::capture.output(utils::str(diagnostics, give.attr = FALSE, vec.len = 50, max.level = 12))
   writeLines(
     c(
       paste0("timestamp: ", format(Sys.time(), "%Y-%m-%d %H:%M:%OS3 %Z")),

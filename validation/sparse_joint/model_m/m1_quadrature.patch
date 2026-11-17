@@ -1,0 +1,351 @@
+--- a/R/sparse-joint.R
++++ b/R/sparse-joint.R
+@@ -207,6 +207,9 @@
+   mode <- objective$env$last.par
+   latent <- objective$env$random
+   report <- objective$report(mode)
++  if (identical(as.integer(tmb_data$minor_quadrature), 1L)) {
++    return(sparse_joint_posterior_quadrature(objective, tmb_data, map, random, mode, report, inner_control))
++  }
+   expected <- tmb_data
+   if (identical(tmb_data$model, "sparse_joint_series")) {
+     expected$y <- cbind(exp(unname(mode[names(mode) == "zeta"])), exp(report$log_intensity))
+@@ -219,10 +222,40 @@
+   expected$balance_offset <- as.numeric(report$balance_residual)
+   information <- TMB::MakeADFun(expected, parameters, map = map, random = random, DLL = "alfak2",
+                                 silent = TRUE, inner.control = inner_control)$env$spHess(mode, random = TRUE)
++  expected_counts <- if (is.null(expected$y)) cbind(expected$y0, expected$y1) else expected$y
++  sparse_joint_posterior_solver(information, mode, latent, expected_counts)
++}
++
++# The posterior of a fit whose non-major initial abundances were integrated
++# out by quadrature (src/sparse_joint_quadrature_model.h). Its uncertainty is
++# the joint model's, by the same expected information, at the fitted latent
++# values with each non-major initial abundance at the log of its posterior
++# expected count; the expected counts are the quadrature model's posterior
++# expectations. The latent variables are therefore those of the joint model.
++sparse_joint_posterior_quadrature <- function(objective, tmb_data, map, random, mode, report, inner_control) {
++  joint_data <- tmb_data[setdiff(names(tmb_data), c("minor_quadrature", "quadrature_node", "quadrature_log_weight"))]
++  joint_map <- map[setdiff(names(map), "zeta")]
++  parameters <- objective$env$parList(par = mode)
++  minor <- seq_along(parameters$zeta) > tmb_data$n_major
++  parameters$zeta[minor] <- report$log_expected0[minor]
++  joint <- TMB::MakeADFun(joint_data, parameters, map = joint_map, random = random, DLL = "alfak2",
++                          silent = TRUE, inner.control = inner_control)
++  joint_mode <- joint$env$par
++  expected <- joint_data
++  expected$y0 <- exp(as.numeric(report$log_expected0))
++  expected$y1 <- exp(as.numeric(report$log_intensity1))
++  expected$balance_offset <- as.numeric(joint$report(joint_mode)$balance_residual)
++  information <- TMB::MakeADFun(expected, parameters, map = joint_map, random = random, DLL = "alfak2",
++                                silent = TRUE, inner.control = inner_control)$env$spHess(joint_mode, random = TRUE)
++  sparse_joint_posterior_solver(information, joint_mode, joint$env$random, cbind(expected$y0, expected$y1))
++}
++
++# Solver of the posterior from its precision matrix `information` over the
++# latent variables `latent` of the full parameter vector `mode`.
++sparse_joint_posterior_solver <- function(information, mode, latent, expected_counts) {
+   factor <- Matrix::Cholesky(information, LDL = FALSE)
+   n <- nrow(information)
+   solve <- function(rhs) as.matrix(Matrix::solve(factor, rhs))
+-  expected_counts <- if (is.null(expected$y)) cbind(expected$y0, expected$y1) else expected$y
+   list(
+     mode = unname(mode[latent]), names = names(mode)[latent], solve = solve,
+     # Fitted expected counts, for comparison with the observed ones: one
+@@ -440,12 +473,31 @@
+   )
+   # There are no interaction terms in the design, so their scale is not free.
+   free_scale <- c(TRUE, TRUE, FALSE, TRUE)
++  map <- list(log_scale = factor(ifelse(free_scale, cumsum(free_scale), NA)))
++  if (identical(settings$minor_initial, "quadrature")) {
++    if (template != "pair") {
++      stop("`minor_initial = \"quadrature\"` is available for two timepoints only.", call. = FALSE)
++    }
++    rule <- sparse_joint_quadrature_rule()
++    tmb_data$minor_quadrature <- 1L
++    tmb_data$quadrature_node <- rule$node
++    tmb_data$quadrature_log_weight <- rule$log_weight
++    # The non-major initial abundances are integrated out, not latent.
++    map$zeta <- factor(c(seq_len(domain$n_major), rep(NA, n - domain$n_major)))
++  }
+   list(domain = domain, kernel = kernel, total = total, centre = centre, design = design,
+        tmb_data = tmb_data, parameters = parameters, free_scale = free_scale, template = template,
+-       map = list(log_scale = factor(ifelse(free_scale, cumsum(free_scale), NA))),
+-       random = c("zeta", "g", "coef", names(depth)))
++       map = map, random = c("zeta", "g", "coef", names(depth)))
+ }
+ 
++# Nodes and log weights for integrating a non-major state's initial log
++# abundance against its normal prior: the trapezoid rule on standard normal
++# nodes from -width to width.
++sparse_joint_quadrature_rule <- function(step = 0.2, width = 8) {
++  node <- seq(-width, width, by = step)
++  list(node = node, log_weight = stats::dnorm(node, log = TRUE) + log(step))
++}
++
+ # The posterior of a fitted model, rebuilt from its stored settings and mode
+ # with the scales fixed at their fitted values. `weight`,
+ # `zeta_prior_mean`/`zeta_prior_sd` and `design` replace the defaults, for
+@@ -465,6 +517,7 @@
+   if (!is.null(design)) tmb_data$design <- design
+   parameters <- fit$posterior[names(problem$parameters)]
+   map <- list(log_scale = factor(rep(NA, length(parameters$log_scale))))
++  if (!is.null(problem$map$zeta)) map$zeta <- problem$map$zeta
+   inner_control <- fit$settings$inner_control
+   objective <- TMB::MakeADFun(tmb_data, parameters, map = map, random = problem$random, DLL = "alfak2",
+                               silent = TRUE, inner.control = inner_control)
+@@ -540,6 +593,14 @@
+ #' singular. On simulated data, fits that searching again turned into
+ #' accepted ones predicted fitness as well as before
+ #' (validation/sparse_joint/convergence).
++#'
++#' Experimental: `minor_initial = "quadrature"` integrates each such initial abundance out
++#' exactly, against its prior, by one-dimensional quadrature, and leaves the
++#' Laplace approximation the remaining latent variables; a non-major karyotype
++#' then feeds its neighbours from its balance value. Uncertainty is computed
++#' as for the default, at the fitted values, with each non-major initial
++#' abundance at its posterior expected count. This is experimental
++#' (validation/sparse_joint/model_m).
+ #'
+ #' `relative_sd` is not the model's own posterior standard deviation, which
+ #' is kept as `relative_sd_model`. That one takes the model to be exact, and
+@@ -625,6 +686,11 @@
+ #' @param inner_control TMB inner Newton controls.
+ #' @param times Sampling times, one per column of `counts`, instead of `dt`;
+ #'   only their differences matter. When given, `dt` is not used.
++#' @param minor_initial How the initial abundance of each non-major karyotype
++#'   is integrated out of the marginal likelihood: `"laplace"`, the default,
++#'   together with the other latent variables, or `"quadrature"`, exactly, one
++#'   karyotype at a time. Experimental, and for two timepoints only; see
++#'   Details.
+ #'
+ #' @return An `alfak2_sparse_joint_fit` object. `summary` has one row per
+ #'   domain karyotype, with its counts (`count_t0`, `count_t1`, ..., one
+@@ -659,7 +725,8 @@
+                              calibration = sparse_joint_default_calibration,
+                              control = list(eval.max = 200, iter.max = 100),
+                              inner_control = list(maxit = 200, tol = 1e-10),
+-                             times = NULL) {
++                             times = NULL,
++                             minor_initial = c("laplace", "quadrature")) {
+   data <- if (inherits(counts, "alfak2_data")) {
+     counts
+   } else if (is.null(times)) {
+@@ -680,6 +747,10 @@
+     stop("`initial_frequency` must give a finite mean and a positive standard deviation.", call. = FALSE)
+   }
+   initial_state <- match.arg(initial_state)
++  minor_initial <- match.arg(minor_initial)
++  if (minor_initial == "quadrature" && ncol(data$counts) > 2L) {
++    stop("`minor_initial = \"quadrature\"` is available for two timepoints only.", call. = FALSE)
++  }
+   calibration <- sparse_joint_validate_calibration(calibration)
+   if (is.null(history)) {
+     history <- if (initial_state == "balance") sparse_joint_history_candidates(data$dt, birth_rate) else data$dt
+@@ -733,6 +804,8 @@
+                    shell_sd = shell_sd, initial_frequency = initial_frequency, initial_state = initial_state,
+                    history = history, balance_sd = balance_sd, calibration = calibration,
+                    inner_control = inner_control)
++  # Only when asked for, so that a default fit stays as it was.
++  if (minor_initial == "quadrature") settings$minor_initial <- minor_initial
+   # Internal: fit two timepoints with the template for more, to check that it
+   # gives the same fit.
+   if (identical(getOption("alfak2.sparse_joint_template"), "series")) settings$template <- "series"
+--- a/src/sparse_joint_model.h
++++ b/src/sparse_joint_model.h
+@@ -30,8 +30,15 @@
+ #undef TMB_OBJECTIVE_PTR
+ #define TMB_OBJECTIVE_PTR obj
+ 
++#include "sparse_joint_quadrature_model.h"
++
+ template<class Type>
+ Type sparse_joint_model(objective_function<Type>* obj) {
++  // Non-major initial abundances integrated out by quadrature, when the data
++  // ask for it (sparse_joint_quadrature_model.h).
++  SEXP quadrature = getListElement(obj->data, "minor_quadrature");
++  if (!Rf_isNull(quadrature) && Rf_asInteger(quadrature) == 1) return sparse_joint_model_quadrature(obj);
++
+   DATA_VECTOR(y0);                    // counts at the first timepoint
+   DATA_VECTOR(y1);                    // counts at the second timepoint
+   DATA_SCALAR(dt);
+--- /dev/null
++++ b/src/sparse_joint_quadrature_model.h
+@@ -0,0 +1,177 @@
++#ifndef ALFAK2_SPARSE_JOINT_QUADRATURE_MODEL_H
++#define ALFAK2_SPARSE_JOINT_QUADRATURE_MODEL_H
++
++// The pair model of sparse_joint_model.h with the initial abundance of every
++// non-major state integrated out by quadrature rather than by the Laplace
++// approximation. Used when the data carry `minor_quadrature = 1`.
++//
++// A non-major state with few cells has two explanations of nearly equal
++// weight for a count at the second time point: it was there and not sampled, or
++// its neighbours made it during the interval. Its initial log abundance z then
++// has a posterior far from normal, and the Laplace approximation picks one
++// explanation, or finds none (a near-singular Hessian along z). Here
++//
++//   -log int N(z; m, s) Pois(y0; e^z)^w Pois(y1; lambda(z))^w dz,
++//   lambda(z) = exp(c1 + log(e^(z + a) + e^B)),
++//
++// with m, s the balance value and spread (or the free prior), a = d T the
++// state's own growth, B its log inflow and c1 the depth term, is computed on
++// fixed standard normal nodes u_k with log weights lw_k:
++//
++//   log sum_k exp(lw_k + w log Pois(y0; e^(m + s u_k)) + w log Pois(y1; lambda(m + s u_k))).
++//
++// A non-major state feeds its neighbours from its balance value (from the
++// prior mean without the balance prior), not from z: the inflow is first
++// order in the mutation rate, and a non-major source carries a few per cent
++// of a count at most. The initial log abundances of non-major states remain
++// in the parameter vector so that both models share it, and are mapped away.
++
++template<class Type>
++Type sparse_joint_model_quadrature(objective_function<Type>* obj) {
++  DATA_VECTOR(y0);
++  DATA_VECTOR(y1);
++  DATA_SCALAR(dt);
++  DATA_IVECTOR(edge_from);
++  DATA_IVECTOR(edge_to);
++  DATA_VECTOR(edge_log_prob);
++  DATA_VECTOR(log_self);
++  DATA_MATRIX(design);
++  DATA_IVECTOR(coef_group);
++  DATA_INTEGER(reference);
++  DATA_VECTOR(zeta_prior_mean);
++  DATA_VECTOR(zeta_prior_sd);
++  DATA_SCALAR(intercept_mean);
++  DATA_SCALAR(intercept_sd);
++  DATA_SCALAR(shell_sd);
++  DATA_VECTOR(log_scale_prior_mean);
++  DATA_VECTOR(log_scale_prior_sd);
++  DATA_INTEGER(n_major);
++  DATA_INTEGER(balance);
++  DATA_SCALAR(history);
++  DATA_SCALAR(balance_sd);
++  DATA_VECTOR(balance_offset);
++  DATA_VECTOR(weight);
++  DATA_VECTOR(quadrature_node);        // standard normal nodes
++  DATA_VECTOR(quadrature_log_weight);  // their log weights against N(0, 1)
++
++  PARAMETER_VECTOR(zeta);              // used for the majors only
++  PARAMETER_VECTOR(g);
++  PARAMETER_VECTOR(coef);
++  PARAMETER(theta1);
++  PARAMETER_VECTOR(log_scale);
++
++  int n = y0.size();
++  int K = quadrature_node.size();
++  Type nll = 0;
++
++  // Landscape prior, as in the pair model.
++  vector<Type> scale = exp(log_scale);
++  for (int k = 0; k < log_scale.size(); ++k)
++    nll -= dnorm(log_scale(k), log_scale_prior_mean(k), log_scale_prior_sd(k), true);
++  for (int k = 0; k < coef.size(); ++k) {
++    if (coef_group(k) == 0) nll -= dnorm(coef(k), intercept_mean, intercept_sd, true);
++    else if (coef_group(k) == 4) nll -= dnorm(coef(k), Type(0), shell_sd, true);
++    else nll -= dnorm(coef(k), Type(0), scale(coef_group(k) - 1), true);
++  }
++  vector<Type> trend = design * coef;
++  for (int i = 0; i < n; ++i) nll -= dnorm(g(i), trend(i), scale(3), true);
++
++  vector<Type> net(n);
++  for (int i = 0; i < n; ++i) net(i) = (Type(2) * exp(log_self(i)) - Type(1)) * exp(g(i));
++
++  // Balance values of non-major states fed by a major, as in the pair model.
++  vector<Type> log_start(n);
++  vector<int> fed(n);
++  fed.setZero();
++  if (balance == 1) {
++    for (int e = 0; e < edge_from.size(); ++e) {
++      int p = edge_from(e), j = edge_to(e);
++      if (p >= n_major || j < n_major) continue;
++      Type term = log(Type(2)) + edge_log_prob(e) + g(p) + zeta(p) - net(p) * history +
++        sparse_joint_log_phi1(net(j), net(p), history);
++      log_start(j) = fed(j) ? logspace_add(log_start(j), term) : term;
++      fed(j) = 1;
++    }
++  }
++
++  // Prior of each non-major state's initial log abundance, and what it feeds
++  // its neighbours from.
++  vector<Type> prior_mean(n), prior_sd(n), zeta_source(n);
++  for (int i = 0; i < n; ++i) {
++    if (i < n_major) {
++      prior_mean(i) = zeta_prior_mean(i);
++      prior_sd(i) = zeta_prior_sd(i);
++      zeta_source(i) = zeta(i);
++    } else if (balance == 1 && fed(i)) {
++      prior_mean(i) = log_start(i) + balance_offset(i);
++      prior_sd(i) = balance_sd;
++      zeta_source(i) = log_start(i);
++    } else {
++      prior_mean(i) = zeta_prior_mean(i);
++      prior_sd(i) = zeta_prior_sd(i);
++      zeta_source(i) = zeta_prior_mean(i);
++    }
++  }
++  for (int i = 0; i < n_major; ++i) nll -= dnorm(zeta(i), zeta_prior_mean(i), zeta_prior_sd(i), true);
++
++  // Inflow into each state over the interval.
++  vector<Type> log_inflow(n);
++  vector<int> has_inflow(n);
++  has_inflow.setZero();
++  for (int e = 0; e < edge_from.size(); ++e) {
++    int i = edge_from(e), j = edge_to(e);
++    Type term = log(Type(2)) + edge_log_prob(e) + g(i) + zeta_source(i) +
++      sparse_joint_log_phi1(net(j), net(i), dt);
++    log_inflow(j) = has_inflow(j) ? logspace_add(log_inflow(j), term) : term;
++    has_inflow(j) = 1;
++  }
++  Type c1 = theta1 - net(reference) * dt;
++
++  // Expected log counts: of the majors at their latent values, of the other
++  // states as posterior means E[e^z] and E[lambda(z)] (reported only).
++  vector<Type> log_expected0(n), log_intensity1(n), zeta_mean(n);
++  for (int i = 0; i < n_major; ++i) {
++    Type log_n1 = zeta(i) + net(i) * dt;
++    if (has_inflow(i)) log_n1 = logspace_add(log_n1, log_inflow(i));
++    log_expected0(i) = zeta(i);
++    log_intensity1(i) = c1 + log_n1;
++    zeta_mean(i) = zeta(i);
++    if (weight(i) == Type(0)) continue;
++    nll -= weight(i) * dpois(y0(i), exp(zeta(i)), true);
++    nll -= weight(i) * dpois(y1(i), exp(log_intensity1(i)), true);
++  }
++  vector<Type> z(K), log_l1(K), lk(K);
++  for (int i = n_major; i < n; ++i) {
++    Type a = net(i) * dt;
++    for (int k = 0; k < K; ++k) {
++      z(k) = prior_mean(i) + prior_sd(i) * quadrature_node(k);
++      log_l1(k) = has_inflow(i) ? c1 + logspace_add(z(k) + a, log_inflow(i)) : c1 + z(k) + a;
++      lk(k) = quadrature_log_weight(k);
++      if (weight(i) != Type(0)) {
++        lk(k) += weight(i) * (dpois(y0(i), exp(z(k)), true) + dpois(y1(i), exp(log_l1(k)), true));
++      }
++    }
++    Type log_marginal = lk(0);
++    for (int k = 1; k < K; ++k) log_marginal = logspace_add(log_marginal, lk(k));
++    nll -= log_marginal;
++    Type e0 = lk(0) + z(0), e1 = lk(0) + log_l1(0), mean_z = exp(lk(0) - log_marginal) * z(0);
++    for (int k = 1; k < K; ++k) {
++      e0 = logspace_add(e0, lk(k) + z(k));
++      e1 = logspace_add(e1, lk(k) + log_l1(k));
++      mean_z += exp(lk(k) - log_marginal) * z(k);
++    }
++    log_expected0(i) = e0 - log_marginal;
++    log_intensity1(i) = e1 - log_marginal;
++    zeta_mean(i) = mean_z;
++  }
++
++  REPORT(net);
++  REPORT(trend);
++  REPORT(log_expected0);
++  REPORT(log_intensity1);
++  REPORT(zeta_mean);
++  REPORT(prior_mean);
++  return nll;
++}
++
++#endif

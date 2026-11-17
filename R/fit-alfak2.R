@@ -1,10 +1,24 @@
 #' Fit the complete alfak2 pipeline
 #'
-#' Runs data validation, local graph construction, TMB local posterior fitting,
-#' bounded global graph expansion, and compiled graph Gaussian posterior solving.
+#' By default fits the sparse joint count model, built for sparse counts at
+#' two or more timepoints: see [fit_sparse_joint()], whose result is
+#' returned. Its outputs
+#' can be converted to those of alfakR with [as_alfakR()], or produced
+#' directly with alfakR's arguments by [alfak_compat()].
 #'
-#' @param counts Two-column count matrix or an `alfak2_data` object.
-#' @param dt Time interval if `counts` is not already prepared.
+#' The earlier pipelines remain available: `"two_layer"` runs data
+#' validation, local graph construction, TMB local posterior fitting, bounded
+#' global graph expansion and compiled graph Gaussian posterior solving;
+#' `"joint_count"` fits one count likelihood on the bounded target graph. All
+#' arguments from `transition_kernel` to `forward_max_refinements`, and `...`,
+#' belong to these two.
+#'
+#' @param counts Count matrix with one column per timepoint or an
+#'   `alfak2_data` object. The sparse joint pipeline takes two or more
+#'   timepoints, the other two pipelines exactly two.
+#' @param dt Time interval if `counts` is not already prepared; with more than
+#'   two timepoints, one per pair of consecutive timepoints (or give `times`
+#'   in `sparse_joint_control`).
 #' @param beta Missegregation rate.
 #' @param transition_kernel Transition weighting used by graph edges and local
 #'   transport. `"exact"` uses chromosome-level missegregation probabilities;
@@ -16,6 +30,13 @@
 #' @param lambda_l_grid,lambda_e_grid,sigma_obs_grid Hyperparameter grids passed
 #'   to the compiled graph posterior.
 #' @param graph_edge_weight Edge weighting used by the global graph prior.
+#' @param extrapolation_method Second-layer extrapolation method. The default
+#'   `"graph_gaussian_baseline"` preserves the historical global graph posterior
+#'   path. The legacy alias `"graph_gaussian"` is still accepted.
+#' @param max_prediction_distance Maximum support distance reported as reliable
+#'   for near-field extrapolation methods.
+#' @param extrapolation_control Optional named list of method-specific controls
+#'   passed to `fit_extrapolation_layer()`.
 #' @param anchor_support_tiers Local support tiers used as global graph anchors;
 #'   defaults to `"all"` to preserve the legacy public API behavior.
 #' @param anchor_exclude Optional karyotype labels to exclude from the global
@@ -62,8 +83,33 @@
 #'   uses observed graph nodes, and `"uniform"` weights all finite summary rows
 #'   equally.
 #' @param ... Passed to `fit_local_posterior()`.
+#' @param pipeline `"sparse_joint"`, the default, fits the sparse joint count
+#'   model with [fit_sparse_joint()]; of the other arguments only `counts`,
+#'   `dt`, `beta` and `sparse_joint_control` then apply, and giving any other
+#'   is an error. `"two_layer"` retains separate local and extrapolation fits;
+#'   `"joint_count"` fits a single count likelihood and structured landscape
+#'   prior on the entire bounded target graph. On simulated sparse data the
+#'   sparse joint model predicted fitness at distances 0 to 2 better than both
+#'   (`validation/sparse_joint/README.md`).
+#' @param sparse_joint_control Named list of further arguments for
+#'   [fit_sparse_joint()] when `pipeline = "sparse_joint"`, such as
+#'   `birth_rate`, `min_cn` and `max_cn`.
+#' @param joint_control Named prior controls passed to the joint landscape.
+#'   Experimental `interaction_support = "observed_nullspace"` separates pair
+#'   directions that vanish at observed design rows; this is not a likelihood
+#'   identifiability test. `unidentified_interaction_sd` controls their prior.
+#'   Optional `prior_components` is a list of prior-control lists, with
+#'   `model_prior` supplying component weights before conditional evidence
+#'   updating. It cannot be combined with `model_scales`.
+#' @param target_karyotypes Optional explicit finite query states, as labels or a
+#'   copy-number matrix. They define the global domain together with observed
+#'   nodes, permitting distant queries without complete shell enumeration.
+#' @param forward_tolerance Joint division-model step-halving tolerance on both
+#'   maximum frequency change and log total growth change.
+#' @param forward_max_refinements Maximum joint forward step halvings and refits.
 #'
-#' @return An `alfak2_fit` object.
+#' @return An `alfak2_sparse_joint_fit` object for `pipeline = "sparse_joint"`,
+#'   otherwise an `alfak2_fit` object.
 #' @export
 fit_alfak2 <- function(counts,
                        dt = 1,
@@ -78,6 +124,19 @@ fit_alfak2 <- function(counts,
                        lambda_e_grid = c(0.05, 0.25, 1),
                        sigma_obs_grid = c(0.02, 0.05, 0.1),
                        graph_edge_weight = c("mutation", "unit", "normalized"),
+                       extrapolation_method = c(
+                         "graph_gaussian_baseline",
+                         "edge_effect_empirical_bayes",
+                         "edge_effect_interaction_path_ensemble",
+                         "kronecker_or_graph_trend_filtering",
+                         "local_NNGP_or_GPnn",
+                         "delta_tree_ensemble",
+                         "tabpfn_nearfield_feature_model",
+                         "truncated_nearfield_gmrf",
+                         "local_polynomial_stencil"
+                       ),
+                       max_prediction_distance = 2,
+                       extrapolation_control = list(),
                        anchor_support_tiers = "all",
                        anchor_exclude = character(),
                        anchor_covariance_inflation = c(
@@ -104,7 +163,39 @@ fit_alfak2 <- function(counts,
                        nb = NULL,
                        correct_efflux = FALSE,
                        legacy_weight = c("pi0", "directly_informed", "uniform"),
+                       pipeline = c("sparse_joint", "two_layer", "joint_count"),
+                       joint_control = list(),
+                       sparse_joint_control = list(),
+                       target_karyotypes = NULL,
+                       forward_tolerance = 1e-5,
+                       forward_max_refinements = 3L,
                        ...) {
+  pipeline <- match.arg(pipeline)
+  if (identical(pipeline, "sparse_joint")) {
+    # Arguments of the other pipelines would be ignored here; a call written
+    # for them must say so.
+    supplied <- setdiff(names(match.call())[-1L], c("counts", "dt", "beta", "pipeline", "sparse_joint_control"))
+    if (length(supplied)) {
+      stop(sprintf(paste0("%s %s not apply to the sparse joint pipeline, the default; set `pipeline = \"two_layer\"` ",
+                          "or `\"joint_count\"`, or pass arguments of fit_sparse_joint() in `sparse_joint_control`."),
+                   paste0("`", supplied, "`", collapse = ", "), if (length(supplied) == 1L) "does" else "do"),
+           call. = FALSE)
+    }
+    if (!is.list(sparse_joint_control) || (length(sparse_joint_control) &&
+        (is.null(names(sparse_joint_control)) || any(!nzchar(names(sparse_joint_control)))))) {
+      stop("`sparse_joint_control` must be a named list.", call. = FALSE)
+    }
+    # A model of its own, with its own domain, result and prediction method.
+    return(do.call(fit_sparse_joint, c(list(counts, dt = dt, beta = beta), sparse_joint_control)))
+  }
+  n_time <- ncol(if (inherits(counts, "alfak2_data")) counts$counts else as.matrix(counts))
+  if (n_time != 2L) {
+    stop(sprintf("The %s pipeline fits two timepoints; `counts` has %d. The sparse joint pipeline, the default, fits more.",
+                 pipeline, n_time), call. = FALSE)
+  }
+  if (!is.list(joint_control) || (length(joint_control) &&
+      (is.null(names(joint_control)) || any(!nzchar(names(joint_control))))))
+    stop("`joint_control` must be a named list.", call. = FALSE)
   if (!is.logical(alfakR_scale) || length(alfakR_scale) != 1L || is.na(alfakR_scale)) {
     stop("`alfakR_scale` must be TRUE or FALSE.", call. = FALSE)
   }
@@ -112,6 +203,12 @@ fit_alfak2 <- function(counts,
   input_depth <- modes$input_depth
   effective_depth_mode <- modes$effective_depth_mode
   graph_edge_weight <- match.arg(graph_edge_weight)
+  extrapolation_method <- match_extrapolation_method(extrapolation_method)
+  max_prediction_distance <- validate_prediction_distance(max_prediction_distance)
+  if (!is.list(extrapolation_control) ||
+      (length(extrapolation_control) && (is.null(names(extrapolation_control)) || any(!nzchar(names(extrapolation_control)))))) {
+    stop("`extrapolation_control` must be a named list.", call. = FALSE)
+  }
   transition_kernel <- match.arg(transition_kernel)
   effective_depth_rounding <- match.arg(effective_depth_rounding)
   observation_weight_mode <- match_observation_weight_mode(observation_weight_mode)
@@ -128,23 +225,18 @@ fit_alfak2 <- function(counts,
     effective_depth_rounding = effective_depth_rounding,
     effective_depth_seed = effective_depth_seed
   )
-  local_graph <- build_karyotype_graph(
+  local_graph <- if (identical(pipeline, "two_layer")) build_karyotype_graph(
     data,
     transition_kernel = transition_kernel,
     shell_depth = local_shell_depth,
     min_cn = min_cn,
     max_cn = max_cn,
     max_nodes = max_nodes
-  )
-  local <- fit_local_posterior(
-    data,
-    local_graph,
-    observation_model = obs_controls$observation_model,
-    dm_concentration = obs_controls$dm_concentration,
-    observation_weight_mode = observation_weight_mode,
-    ...
-  )
-  global_graph <- build_karyotype_graph(
+  ) else NULL
+  global_graph <- if (!is.null(target_karyotypes)) {
+    build_explicit_target_graph(data, target_karyotypes, min_cn, max_cn,
+      max_nodes, transition_kernel)
+  } else build_karyotype_graph(
     data,
     transition_kernel = transition_kernel,
     shell_depth = local_shell_depth + global_extra_shell,
@@ -152,20 +244,40 @@ fit_alfak2 <- function(counts,
     max_cn = max_cn,
     max_nodes = max_nodes
   )
-  global <- fit_graph_posterior(
-    local,
-    global_graph,
-    lambda_l_grid = lambda_l_grid,
-    lambda_e_grid = lambda_e_grid,
-    sigma_obs_grid = sigma_obs_grid,
-    graph_edge_weight = graph_edge_weight,
-    anchor_support_tiers = anchor_support_tiers,
-    anchor_exclude = anchor_exclude,
-    anchor_covariance_inflation = anchor_covariance_inflation,
-    anchor_count_reference = anchor_count_reference,
-    anchor_count_power = anchor_count_power,
-    anchor_min_effective_count = anchor_min_effective_count
+  if (identical(pipeline, "joint_count")) {
+    joint <- fit_joint_landscape(data, global_graph, joint_control = joint_control,
+      forward_tolerance = forward_tolerance, forward_max_refinements = forward_max_refinements,
+      observation_model = obs_controls$observation_model,
+      dm_concentration = obs_controls$dm_concentration,
+      observation_weight_mode = observation_weight_mode, ...)
+    local <- joint$local
+    global <- joint$global
+  } else {
+    local <- fit_local_posterior(data, local_graph,
+      observation_model = obs_controls$observation_model,
+      dm_concentration = obs_controls$dm_concentration,
+      observation_weight_mode = observation_weight_mode, ...)
+    global_args <- c(
+    list(
+      local_fit = local,
+      graph = global_graph,
+      method = extrapolation_method,
+      max_prediction_distance = max_prediction_distance,
+      lambda_l_grid = lambda_l_grid,
+      lambda_e_grid = lambda_e_grid,
+      sigma_obs_grid = sigma_obs_grid,
+      graph_edge_weight = graph_edge_weight,
+      anchor_support_tiers = anchor_support_tiers,
+      anchor_exclude = anchor_exclude,
+      anchor_covariance_inflation = anchor_covariance_inflation,
+      anchor_count_reference = anchor_count_reference,
+      anchor_count_power = anchor_count_power,
+      anchor_min_effective_count = anchor_min_effective_count
+    ),
+    extrapolation_control
   )
+  global <- do.call(fit_extrapolation_layer, global_args)
+  }
   input_depth_diag <- data$metadata$input_depth
   if (is.null(input_depth_diag)) input_depth_diag <- list(input_depth = "raw")
   fit <- list(
@@ -175,7 +287,8 @@ fit_alfak2 <- function(counts,
     diagnostics = list(
       local = local$diagnostics,
       global = global$diagnostics,
-      backend = c(local = "TMB", global = "RcppEigen"),
+      backend = c(local = "TMB", global = if (identical(pipeline, "joint_count")) "TMB" else "RcppEigen"),
+      pipeline = pipeline,
       input_depth = input_depth_diag,
       observation_model = obs_controls$observation_model,
       observation_weight_mode = observation_weight_mode,
@@ -183,6 +296,8 @@ fit_alfak2 <- function(counts,
       dm_concentration_grid = obs_controls$dm_concentration,
       transition_kernel = transition_kernel,
       graph_edge_weight = graph_edge_weight,
+      extrapolation_method = if (identical(pipeline, "joint_count")) "joint_count_landscape" else extrapolation_method,
+      max_prediction_distance = max_prediction_distance,
       anchor_support_tiers = anchor_support_tiers,
       anchor_exclude = as.character(anchor_exclude),
       anchor_count_reference = anchor_count_reference,

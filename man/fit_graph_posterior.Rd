@@ -19,7 +19,10 @@ fit_graph_posterior(
   anchor_count_reference = NULL,
   anchor_count_power = 1,
   anchor_min_effective_count = 0,
-  anchor_exclude = character()
+  anchor_exclude = character(),
+  compute_sd = TRUE,
+  anchor_covariance = NULL,
+  compute_covariance = FALSE
 )
 }
 \arguments{
@@ -57,6 +60,16 @@ finite local rows.}
 
 \item{anchor_exclude}{Optional karyotype labels to exclude from the anchor
 set, used for neighbor-holdout validation.}
+
+\item{compute_sd}{Whether to compute diagonal posterior standard deviations.
+Set to \code{FALSE} for mean-only global scoring on large benchmark graphs.}
+
+\item{anchor_covariance}{Optional covariance aligned to the local summary.
+Defaults to \code{local_fit$fitness_covariance} when available. This retains
+correlations but remains a two-layer posterior approximation.}
+
+\item{compute_covariance}{Return the complete fitness covariance, for graphs
+with at most 500 nodes. Also computes standard deviations.}
 }
 \value{
 A list containing node summaries and tuning diagnostics.

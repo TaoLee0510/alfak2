@@ -1,0 +1,272 @@
+diff --color -ruN -x *.o -x *.so -x .DS_Store -x symbols.rds base/R/sparse-joint.R cl2/R/sparse-joint.R
+--- base/R/sparse-joint.R	2026-11-16 08:52:47
++++ cl2/R/sparse-joint.R	2026-11-16 16:37:35
+@@ -537,10 +537,22 @@
+   )
+   # There are no interaction terms in the design, so their scale is not free.
+   free_scale <- c(TRUE, TRUE, FALSE, TRUE)
++  map <- list(log_scale = factor(ifelse(free_scale, cumsum(free_scale), NA)))
++  random <- c("zeta", "g", "coef", names(depth))
++  # Level of the balance prior (two time points): fixed at the balance itself,
++  # or one log factor for all fed states, estimated with the latent variables.
++  level_free <- identical(settings$balance_level, "free") && settings$initial_state == "balance"
++  if (template == "pair") {
++    tmb_data$level_free <- as.integer(level_free)
++    tmb_data$level_sd <- if (is.null(settings$balance_level_sd)) 1 else settings$balance_level_sd
++    parameters$balance_level <- 0
++    if (level_free) random <- c(random, "balance_level") else map$balance_level <- factor(NA)
++  } else if (level_free) {
++    stop("`balance_level = \"free\"` is implemented for two time points only.", call. = FALSE)
++  }
+   list(domain = domain, kernel = kernel, total = total, centre = centre, design = design, used = used,
+        tmb_data = tmb_data, parameters = parameters, free_scale = free_scale, template = template,
+-       map = list(log_scale = factor(ifelse(free_scale, cumsum(free_scale), NA))),
+-       random = c("zeta", "g", "coef", names(depth)))
++       map = map, random = random)
+ }
+ 
+ # The posterior of a fitted model, rebuilt from its stored settings and mode
+@@ -726,7 +738,29 @@
+ #'   starting point. Balance takes fitness before the first time point to have
+ #'   resembled fitness between the time points. On simulated landscapes it was
+ #'   still more accurate than `"free"` when the landscape changed at the first
+-#'   time point, as under a new treatment.
++#'   time point, as under a new treatment. `"auto"` (two time points only)
++#'   chooses between the two: a first fit with the balance prior, its level
++#'   free (`balance_level = "free"`) and the history at the interval measures
++#'   how much larger the cloud of non-major karyotypes is than the balance at
++#'   the assumed missegregation rate allows; if the log of that factor exceeds
++#'   `auto_level`, the fit is `"free"`, otherwise `"balance"`.
++#'   `diagnostics$initial_state_check` records the level, its standard
++#'   deviation and the choice. A cloud that large comes from a true
++#'   missegregation rate above `beta`, from cells called a copy off, or from
++#'   a population far from balance; there the balance prior can rank
++#'   neighbours worse than chance, while `"free"` is about a fifth less
++#'   accurate where the balance prior's assumptions hold
++#'   (validation/sparse_joint/cloud_level).
++#' @param auto_level With `initial_state = "auto"`, the log factor of the
++#'   cloud over the balance above which the fit is `"free"`.
++#' @param balance_level With the balance prior and two time points, whether
++#'   the balance sets the level of the non-major karyotypes' initial
++#'   abundances (`"fixed"`, the default) or only their differences
++#'   (`"free"`: one log factor for all, estimated). Used by
++#'   `initial_state = "auto"`; on its own `"free"` gives up what the cloud's
++#'   size says about the neighbours' fitness and was about a fifth less
++#'   accurate on the development landscapes.
++#' @param balance_level_sd Prior standard deviation of that log factor.
+ #' @param history Time, in units of `dt`, over which the balance built up
+ #'   before the first time point. By default it is chosen among the interval
+ #'   between the first and the last time point and 30, 100, 300, 1000 and 3000
+@@ -810,9 +844,12 @@
+                              shell_power = 0.85,
+                              shell_sd = 0.5,
+                              initial_frequency = c(mean = log(1e-5), sd = 3),
+-                             initial_state = c("balance", "free"),
++                             initial_state = c("balance", "free", "auto"),
++                             auto_level = 1,
+                              history = NULL,
+                              balance_sd = 1,
++                             balance_level = c("fixed", "free"),
++                             balance_level_sd = 3,
+                              calibration = sparse_joint_default_calibration,
+                              control = list(eval.max = 200, iter.max = 100),
+                              inner_control = list(maxit = 200, tol = 1e-10),
+@@ -840,6 +877,33 @@
+     stop("`initial_frequency` must give a finite mean and a positive standard deviation.", call. = FALSE)
+   }
+   initial_state <- match.arg(initial_state)
++  balance_level <- match.arg(balance_level)
++  validate_scalar(balance_level_sd, "balance_level_sd", lower = .Machine$double.eps)
++  if (initial_state == "auto") {
++    validate_scalar(auto_level, "auto_level")
++    if (ncol(data$counts) != 2L) {
++      stop("`initial_state = \"auto\"` is implemented for two time points only.", call. = FALSE)
++    }
++    arguments <- mget(names(formals(sys.function())), envir = environment())
++    arguments$counts <- data
++    # The level of the cloud, from a fit at the interval with a free level.
++    check <- arguments
++    check$initial_state <- "balance"
++    check$balance_level <- "free"
++    check$history <- data$dt
++    started <- proc.time()[["elapsed"]]
++    first <- withCallingHandlers(do.call(fit_sparse_joint, check),
++                                 alfak2_convergence_warning = function(w) invokeRestart("muffleWarning"))
++    level <- if (is.null(first$diagnostics$balance_level)) NA_real_ else first$diagnostics$balance_level
++    chosen <- if (is.finite(level) && level > auto_level) "free" else "balance"
++    arguments$initial_state <- chosen
++    fit <- do.call(fit_sparse_joint, arguments)
++    fit$diagnostics$initial_state_check <- data.frame(
++      level = level, level_sd = first$diagnostics$balance_level_sd, threshold = auto_level, chosen = chosen,
++      check_convergence = first$diagnostics$convergence, stringsAsFactors = FALSE)
++    fit$diagnostics$seconds <- proc.time()[["elapsed"]] - started
++    return(fit)
++  }
+   intermediate <- match.arg(intermediate)
+   series <- match.arg(series)
+   calibration <- sparse_joint_validate_calibration(calibration)
+@@ -949,6 +1013,11 @@
+     fit <- fits[[sparse_joint_choose_candidate(objective, convergence)]]
+     fit$diagnostics$history_profile <- data.frame(history = history, objective = objective,
+                                                   convergence = convergence)
++    if (balance_level == "free" && initial_state == "balance") {
++      fit$diagnostics$history_profile$balance_level <- vapply(fits, function(f) {
++        if (is.null(f$diagnostics$balance_level)) NA_real_ else f$diagnostics$balance_level
++      }, numeric(1))
++    }
+     if (is.finite(dispersion)) fit$diagnostics$intermediate_dispersion <- dispersion
+     fit$diagnostics$seconds <- proc.time()[["elapsed"]] - started
+     sparse_joint_convergence_warning(fit$diagnostics$optimisation)
+@@ -962,6 +1031,11 @@
+                    shell_sd = shell_sd, initial_frequency = initial_frequency, initial_state = initial_state,
+                    history = history, balance_sd = balance_sd, calibration = calibration,
+                    inner_control = inner_control)
++  # Only when asked for, so that other fits stay as they were.
++  if (balance_level == "free" && initial_state == "balance") {
++    settings$balance_level <- balance_level
++    settings$balance_level_sd <- balance_level_sd
++  }
+   # Only with more than two time points, so that two-time-point fits stay as they were.
+   if (ncol(data$counts) > 2L && series == "anchored") {
+     settings$intermediate <- intermediate
+@@ -1035,6 +1109,7 @@
+                                                 observed = rowSums(problem$used) > 0)
+   summary$relative_sd_model <- relative$sd
+   observed_level <- sparse_joint_observed_level(summary)
++  level_index <- which(solver$names == "balance_level")
+   fit <- structure(list(
+     data = data,
+     summary = summary,
+@@ -1042,6 +1117,7 @@
+     # What rebuilding the posterior needs: see sparse_joint_rebuild().
+     settings = settings,
+     posterior = c(sparse_joint_fill_latent(parameters, map, solver$mode, solver$names, random),
++                  if (!is.null(parameters$balance_level) && !"balance_level" %in% random) list(balance_level = 0),
+                   list(log_scale = log_scale)),
+     trend = list(coefficients = coef_hat[, 1L], covariance = coef_covariance, centre = centre,
+                  major = domain$major, shell_power = shell_power, scales = scale,
+@@ -1056,6 +1132,9 @@
+       domain_coverage = coverage,
+       birth_rate = birth_rate, fitted_birth_rate = exp(coef_hat[1L, 1L]),
+       initial_state = initial_state, history = history,
++      # Log factor of the fed abundances over the balance, and its posterior sd.
++      balance_level = if (length(level_index)) solver$mode[[level_index]] else NULL,
++      balance_level_sd = if (length(level_index)) sqrt(solver$variance(level_index)) else NULL,
+       min_cn = as.integer(min_cn), max_cn = as.integer(max_cn),
+       seconds = proc.time()[["elapsed"]] - started
+     )
+diff --color -ruN -x *.o -x *.so -x .DS_Store -x symbols.rds base/src/sparse_joint_model.h cl2/src/sparse_joint_model.h
+--- base/src/sparse_joint_model.h	2026-11-16 08:52:47
++++ cl2/src/sparse_joint_model.h	2026-11-16 16:36:15
+@@ -55,12 +55,15 @@
+   DATA_SCALAR(balance_sd);            // log-scale spread around it
+   DATA_VECTOR(balance_offset);        // zero, except to evaluate the expected information
+   DATA_VECTOR(weight);                // 1: a state's counts enter the likelihood; 0: held out
++  DATA_INTEGER(level_free);           // 1: the level of the balance is estimated (balance_level)
++  DATA_SCALAR(level_sd);              // prior spread of its log
+ 
+   PARAMETER_VECTOR(zeta);             // log expected count at the first timepoint
+   PARAMETER_VECTOR(g);                // log birth rate
+   PARAMETER_VECTOR(coef);             // trend coefficients
+   PARAMETER(theta1);                  // log depth ratio, centred on the reference state
+   PARAMETER_VECTOR(log_scale);
++  PARAMETER(balance_level);           // log factor between the fed abundances and the balance
+ 
+   int n = y0.size();
+   Type nll = 0;
+@@ -96,6 +99,13 @@
+   vector<Type> balance_residual(n);
+   balance_residual.setZero();
+   if (balance == 1) {
++    // The level of the balance: with `level_free`, all fed states share one
++    // log factor over what the majors would have fed them, so that only the
++    // differences between them inform fitness. The size of the whole cloud
++    // also depends on the missegregation rate and on how long and how
++    // steadily the population has grown, which the counts do not tell apart
++    // from fitness.
++    if (level_free == 1) nll -= dnorm(balance_level, Type(0), level_sd, true);
+     vector<Type> log_start(n);
+     vector<int> fed(n);
+     fed.setZero();
+@@ -109,7 +119,7 @@
+     }
+     for (int i = 0; i < n; ++i) {
+       if (fed(i)) {
+-        balance_residual(i) = zeta(i) - log_start(i);
++        balance_residual(i) = zeta(i) - log_start(i) - balance_level;
+         nll -= dnorm(balance_residual(i) - balance_offset(i), Type(0), balance_sd, true);
+       } else {
+         nll -= dnorm(zeta(i), zeta_prior_mean(i), zeta_prior_sd(i), true);
+diff --color -ruN -x *.o -x *.so -x .DS_Store -x symbols.rds base/tests/testthat/test-sparse-joint.R cl2/tests/testthat/test-sparse-joint.R
+--- base/tests/testthat/test-sparse-joint.R	2026-11-16 16:44:39
++++ cl2/tests/testthat/test-sparse-joint.R	2026-11-16 16:44:40
+@@ -61,11 +61,12 @@
+     zeta_prior_mean = rep(0, n), zeta_prior_sd = rep(3, n), intercept_mean = 0, intercept_sd = 1,
+     shell_sd = 0.5, log_scale_prior_mean = rep(log(0.05), 4), log_scale_prior_sd = rep(1.5, 4),
+     n_major = domain$n_major, balance = 0L, history = sim$dt, balance_sd = 1, balance_offset = rep(0, n),
+-    weight = rep(1, n)
++    weight = rep(1, n), level_free = 0L, level_sd = 1
+   )
+   parameters <- list(zeta = zeta, g = g, coef = rep(0, ncol(design$design)), theta1 = theta1,
+-                     log_scale = rep(log(0.05), 4))
+-  objective <- TMB::MakeADFun(tmb_data, parameters, DLL = "alfak2", silent = TRUE)
++                     log_scale = rep(log(0.05), 4), balance_level = 0)
++  objective <- TMB::MakeADFun(tmb_data, parameters, map = list(balance_level = factor(NA)), DLL = "alfak2",
++                              silent = TRUE)
+   report <- objective$report()
+   net <- (2 * exp(kernel$log_self) - 1) * exp(g)
+   expect_equal(as.numeric(report$net), net, tolerance = 1e-12)
+@@ -150,7 +151,8 @@
+   design <- sparse_joint_design(domain$karyotypes, rep(2, 4), domain$major, 0.85)
+   set.seed(6)
+   parameters <- list(zeta = stats::rnorm(n, -1, 2), g = stats::rnorm(n, 0, 0.1),
+-                     coef = rep(0, ncol(design$design)), theta1 = 0.3, log_scale = rep(log(0.05), 4))
++                     coef = rep(0, ncol(design$design)), theta1 = 0.3, log_scale = rep(log(0.05), 4),
++                     balance_level = 0)
+   prior_mean <- stats::rnorm(n)
+   history <- 45
+   balance_sd <- 0.7
+@@ -162,8 +164,8 @@
+       zeta_prior_mean = prior_mean, zeta_prior_sd = rep(3, n), intercept_mean = 0, intercept_sd = 1,
+       shell_sd = 0.5, log_scale_prior_mean = rep(log(0.05), 4), log_scale_prior_sd = rep(1.5, 4),
+       n_major = domain$n_major, balance = balance, history = history, balance_sd = balance_sd,
+-      balance_offset = rep(0, n), weight = rep(1, n)
+-    ), parameters, DLL = "alfak2", silent = TRUE)$fn()
++      balance_offset = rep(0, n), weight = rep(1, n), level_free = 0L, level_sd = 1
++    ), parameters, map = list(balance_level = factor(NA)), DLL = "alfak2", silent = TRUE)$fn()
+   }
+   net <- (2 * exp(kernel$log_self) - 1) * exp(parameters$g)
+   minor <- seq_len(n) > domain$n_major
+@@ -379,4 +381,32 @@
+   expect_true(is.na(one$shared))
+   expect_equal(check_sparse_joint_counts(prepare_alfak2_data(counts[, c("a", "b")]))$cells, c(5, 7))
+   expect_error(check_sparse_joint_counts(counts - 2), "non-negative")
++})
++
++test_that("a free level of the balance prior and initial_state = \"auto\"", {
++  sim <- simulate_sparse_joint_counts()
++  args <- list(sim$counts, dt = sim$dt, beta = sim$beta, birth_rate = 1, major_frequency = 0.05, max_cn = 4,
++               history = sim$dt)
++  fixed <- do.call(fit_sparse_joint, args)
++  same <- do.call(fit_sparse_joint, c(args, list(balance_level = "fixed")))
++  expect_identical(fixed$diagnostics$objective, same$diagnostics$objective)
++  expect_null(fixed$diagnostics$balance_level)
++  free_level <- do.call(fit_sparse_joint, c(args, list(balance_level = "free")))
++  expect_true(is.finite(free_level$diagnostics$balance_level))
++  expect_gt(free_level$diagnostics$balance_level_sd, 0)
++  # The posterior can be rebuilt from the stored settings, as for any fit.
++  expect_silent(sparse_joint_rebuild(free_level, posterior = FALSE))
++  # "auto": the level decides; with the threshold far above or below it, the
++  # fit is the balance or the free one.
++  auto_args <- args[names(args) != "history"]
++  high <- do.call(fit_sparse_joint, c(auto_args, list(initial_state = "auto", auto_level = 50)))
++  low <- do.call(fit_sparse_joint, c(auto_args, list(initial_state = "auto", auto_level = -50)))
++  expect_identical(high$diagnostics$initial_state_check$chosen, "balance")
++  expect_identical(low$diagnostics$initial_state_check$chosen, "free")
++  expect_identical(low$diagnostics$initial_state, "free")
++  default <- do.call(fit_sparse_joint, auto_args)
++  expect_equal(high$summary$relative_fitness, default$summary$relative_fitness)
++  three <- cbind(sim$counts, sim$counts[, 2L])
++  expect_error(fit_sparse_joint(three, times = c(0, sim$dt, 2 * sim$dt), initial_state = "auto", max_cn = 4),
++               "two time points only")
+ })

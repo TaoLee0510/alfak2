@@ -1,0 +1,429 @@
+test_that("the domain is the major karyotypes and all their one-step neighbours", {
+  counts <- labelled_counts("2.2.2" = c(40, 30), "2.3.2" = c(4, 8), "3.2.2" = c(9, 0),
+                            "2.2.3" = c(0, 1), "4.4.2" = c(1, 0))
+  domain <- sparse_joint_domain(counts, major_frequency = 0.1, major_count = 3, max_states = Inf,
+                                min_cn = 1L, max_cn = 4L)
+  expect_equal(domain$n_major, 3L)
+  expect_equal(domain$labels[1:3], c("2.2.2", "2.3.2", "3.2.2"))
+  expected <- union(c("2.2.2", "2.3.2", "3.2.2"),
+                    format_karyotypes(one_step_neighbours(parse_karyotypes(c("2.2.2", "2.3.2", "3.2.2")), 1L, 4L)))
+  expect_setequal(domain$labels, expected)
+  expect_true(all(domain$karyotypes >= 1L & domain$karyotypes <= 4L))
+  # a neighbour seen in one cell is in the domain with its count
+  expect_equal(domain$y1[domain$labels == "2.2.3"], 1)
+  # an observed karyotype far from every major is left out, with its cell
+  expect_false("4.4.2" %in% domain$labels)
+  expect_equal(domain$dropped, "4.4.2")
+  expect_equal(domain$dropped_cells, 1)
+  expect_equal(sum(domain$y0) + sum(domain$y1), sum(counts) - 1)
+  distance <- sparse_joint_major_distance(domain$karyotypes, domain$major)
+  expect_equal(distance[1:3], c(0, 0, 0))
+  expect_true(all(distance[-(1:3)] == 1))
+})
+
+test_that("majors need both a share of a time point and a number of cells", {
+  counts <- labelled_counts("2.2.2" = c(30, 20), "2.3.2" = c(0, 3), "3.2.2" = c(1, 0), "2.2.1" = c(0, 1))
+  # shares at either time point: 0.97, 0.125, 0.032, 0.042
+  expect_equal(sparse_joint_major(counts, 0.01, major_count = 3), c("2.2.2", "2.3.2"))
+  expect_equal(sparse_joint_major(counts, 0.01, major_count = 4), "2.2.2")
+  expect_equal(sparse_joint_major(counts, 0.2, major_count = 3), "2.2.2")
+  # a single cell holds 3% of the cells at a time point here but does not make a major, so its
+  # neighbours are not brought into the domain
+  domain <- sparse_joint_domain(counts, 0.01, 3, Inf, 1L, 4L)
+  expect_equal(domain$n_major, 2L)
+  expect_false("4.2.2" %in% domain$labels)
+  expect_true("3.2.2" %in% domain$labels)
+  # with no karyotype reaching the count, the most abundant one anchors
+  thin <- labelled_counts("2.2.2" = c(2, 0), "2.3.2" = c(0, 1), "3.2.2" = c(1, 0))
+  expect_equal(sparse_joint_major(thin, 0.01, 3), "2.2.2")
+  # a budget raises the share until the domain fits
+  one <- sparse_joint_domain(counts, 0.01, 3, 8, 1L, 4L)
+  expect_gt(length(domain$labels), 8)
+  expect_equal(one$n_major, 1L)
+  expect_lte(length(one$labels), 8)
+})
+
+test_that("compiled forward model equals the R closed form", {
+  sim <- simulate_sparse_joint_counts()
+  domain <- sparse_joint_domain(sim$counts, 0.05, 3, Inf, 1L, 4L)
+  n <- length(domain$labels)
+  kernel <- sparse_division_kernel(domain$karyotypes, sim$beta)
+  design <- sparse_joint_design(domain$karyotypes, rep(2, 4), domain$major, 0.85)
+  set.seed(5)
+  zeta <- stats::rnorm(n, -1, 2)
+  g <- stats::rnorm(n, 0, 0.1)
+  theta1 <- 0.3
+  tmb_data <- list(
+    model = "sparse_joint", y0 = domain$y0, y1 = domain$y1, dt = sim$dt,
+    edge_from = kernel$from - 1L, edge_to = kernel$to - 1L, edge_log_prob = kernel$log_prob,
+    log_self = kernel$log_self, design = design$design, coef_group = design$group,
+    reference = 0L,
+    zeta_prior_mean = rep(0, n), zeta_prior_sd = rep(3, n), intercept_mean = 0, intercept_sd = 1,
+    shell_sd = 0.5, log_scale_prior_mean = rep(log(0.05), 4), log_scale_prior_sd = rep(1.5, 4),
+    n_major = domain$n_major, balance = 0L, history = sim$dt, balance_sd = 1, balance_offset = rep(0, n),
+    weight = rep(1, n), level_free = 0L, level_sd = 1
+  )
+  parameters <- list(zeta = zeta, g = g, coef = rep(0, ncol(design$design)), theta1 = theta1,
+                     log_scale = rep(log(0.05), 4), balance_level = 0)
+  objective <- TMB::MakeADFun(tmb_data, parameters, map = list(balance_level = factor(NA)), DLL = "alfak2",
+                              silent = TRUE)
+  report <- objective$report()
+  net <- (2 * exp(kernel$log_self) - 1) * exp(g)
+  expect_equal(as.numeric(report$net), net, tolerance = 1e-12)
+  expected <- closed_form_forward_r(zeta, g, kernel, sim$dt, order = 1L) - net[1L] * sim$dt + theta1
+  expect_equal(as.numeric(report$log_intensity1), expected, tolerance = 1e-8)
+  expect_true(is.finite(objective$fn()))
+  expect_true(all(is.finite(objective$gr())))
+})
+
+test_that("fit recovers the order of clones and the deficit of their neighbours", {
+  sim <- simulate_sparse_joint_counts()
+  fit <- fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, birth_rate = 1, major_frequency = 0.05, max_cn = 4)
+  expect_s3_class(fit, "alfak2_sparse_joint_fit")
+  expect_true(fit$diagnostics$finite_uncertainty)
+  expect_equal(fit$diagnostics$n_major, 3L)
+  expect_equal(fit$diagnostics$dropped_karyotypes, 0L)
+  summary <- fit$summary
+  expect_true(all(is.finite(summary$fitness_mean)) && all(summary$fitness_sd > 0))
+  expect_true(all(summary$conf_low < summary$fitness_mean & summary$fitness_mean < summary$conf_high))
+  fitness <- stats::setNames(summary$fitness_mean, summary$karyotype)
+  # rising clone above the dominant clone above the declining clone
+  expect_gt(fitness[["2.3.2.2"]], fitness[["2.2.2.2"]])
+  expect_gt(fitness[["2.2.2.2"]], fitness[["2.2.1.2"]])
+  truth <- stats::setNames(sim$net, sim$labels)[summary$karyotype]
+  expect_equal(unname(fitness[["2.3.2.2"]] - fitness[["2.2.2.2"]]),
+               unname(truth[["2.3.2.2"]] - truth[["2.2.2.2"]]), tolerance = 0.5)
+  # neighbours are less fit than the clones they surround
+  expect_lt(mean(fitness[!summary$major]), min(fitness[summary$major]))
+  shell <- fit$trend$coefficients[length(fit$trend$coefficients)]
+  expect_lt(shell, 0)
+  expect_gt(stats::cor(fitness, truth, method = "spearman"), 0.5)
+  # the supplied baseline is respected
+  expect_equal(fit$diagnostics$fitted_birth_rate, 1, tolerance = 0.2)
+})
+
+test_that("prediction returns the posterior inside the domain and the trend outside it", {
+  sim <- simulate_sparse_joint_counts()
+  fit <- fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, birth_rate = 1, major_frequency = 0.05, max_cn = 4)
+  inside <- fit$summary$karyotype[c(1L, 10L)]
+  two_steps <- c("2.2.3.3", "3.3.3.2")
+  prediction <- predict(fit, c(inside, two_steps))
+  expect_equal(prediction$in_domain, c(TRUE, TRUE, FALSE, FALSE))
+  expect_equal(prediction$fitness_mean[1:2], fit$summary$fitness_mean[c(1L, 10L)])
+  expect_equal(prediction$fitness_sd[1:2], fit$summary$fitness_sd[c(1L, 10L)])
+  expect_equal(prediction$shell[3:4], c(2, 2))
+  expect_true(all(is.finite(prediction$fitness_mean)) && all(prediction$fitness_sd > 0))
+  # two steps away is predicted below the average one-step neighbour
+  expect_lt(max(prediction$fitness_mean[3:4]), mean(fit$summary$fitness_mean[!fit$summary$major]))
+  # labels and matrices are interchangeable
+  expect_equal(predict(fit, parse_karyotypes(two_steps))$fitness_mean, prediction$fitness_mean[3:4])
+})
+
+test_that("an observed karyotype outside the domain is placed at the level of observed neighbours", {
+  sim <- simulate_sparse_joint_counts()
+  counts <- rbind(sim$counts, "4.4.4.4" = c(1L, 0L), "4.4.4.3" = c(0L, 1L))
+  fit <- fit_sparse_joint(counts, dt = sim$dt, beta = sim$beta, birth_rate = 1, major_frequency = 0.05, max_cn = 4)
+  expect_equal(fit$dropped, c("4.4.4.4", "4.4.4.3"))
+  expect_equal(fit$diagnostics$dropped_cells, 2)
+  prediction <- predict(fit, c("4.4.4.4", "4.4.3.3"))
+  expect_equal(prediction$in_domain, c(FALSE, FALSE))
+  observed_minor <- !fit$summary$major & (fit$summary$count_t0 + fit$summary$count_t1) > 0
+  self <- 2 * sparse_joint_self_probability(parse_karyotypes("4.4.4.4"), sim$beta) - 1
+  expect_equal(prediction$fitness_mean[1L],
+               self * exp(mean(fit$summary$log_birth_mean[observed_minor])), tolerance = 1e-10)
+  # an unobserved karyotype equally far away is predicted lower
+  expect_lt(prediction$fitness_mean[2L], prediction$fitness_mean[1L])
+})
+
+test_that("invalid inputs are rejected", {
+  sim <- simulate_sparse_joint_counts()
+  expect_error(fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, max_cn = 2), "copy-number bounds")
+  expect_error(fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, birth_rate = 0), "birth_rate")
+  expect_error(fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, initial_frequency = c(0, -1)),
+               "initial_frequency")
+})
+
+test_that("the balance prior is the closed-form influx from the majors", {
+  sim <- simulate_sparse_joint_counts()
+  domain <- sparse_joint_domain(sim$counts, 0.05, 3, Inf, 1L, 4L)
+  n <- length(domain$labels)
+  kernel <- sparse_division_kernel(domain$karyotypes, sim$beta)
+  design <- sparse_joint_design(domain$karyotypes, rep(2, 4), domain$major, 0.85)
+  set.seed(6)
+  parameters <- list(zeta = stats::rnorm(n, -1, 2), g = stats::rnorm(n, 0, 0.1),
+                     coef = rep(0, ncol(design$design)), theta1 = 0.3, log_scale = rep(log(0.05), 4),
+                     balance_level = 0)
+  prior_mean <- stats::rnorm(n)
+  history <- 45
+  balance_sd <- 0.7
+  objective <- function(balance) {
+    TMB::MakeADFun(list(
+      model = "sparse_joint", y0 = domain$y0, y1 = domain$y1, dt = sim$dt,
+      edge_from = kernel$from - 1L, edge_to = kernel$to - 1L, edge_log_prob = kernel$log_prob,
+      log_self = kernel$log_self, design = design$design, coef_group = design$group, reference = 0L,
+      zeta_prior_mean = prior_mean, zeta_prior_sd = rep(3, n), intercept_mean = 0, intercept_sd = 1,
+      shell_sd = 0.5, log_scale_prior_mean = rep(log(0.05), 4), log_scale_prior_sd = rep(1.5, 4),
+      n_major = domain$n_major, balance = balance, history = history, balance_sd = balance_sd,
+      balance_offset = rep(0, n), weight = rep(1, n), level_free = 0L, level_sd = 1
+    ), parameters, map = list(balance_level = factor(NA)), DLL = "alfak2", silent = TRUE)$fn()
+  }
+  net <- (2 * exp(kernel$log_self) - 1) * exp(parameters$g)
+  minor <- seq_len(n) > domain$n_major
+  log_start <- vapply(which(minor), function(j) {
+    edges <- which(kernel$to == j & kernel$from <= domain$n_major)
+    parent <- kernel$from[edges]
+    term <- log(2) + kernel$log_prob[edges] + parameters$g[parent] + parameters$zeta[parent] -
+      net[parent] * history + log_phi1(net[j], net[parent], history)
+    max(term) + log(sum(exp(term - max(term))))
+  }, numeric(1))
+  expected <- sum(stats::dnorm(parameters$zeta[minor], prior_mean[minor], 3, log = TRUE)) -
+    sum(stats::dnorm(parameters$zeta[minor], log_start, balance_sd, log = TRUE))
+  expect_equal(objective(1L) - objective(0L), expected, tolerance = 1e-8)
+})
+
+test_that("with balance, the first time point tells neighbours apart", {
+  sim <- simulate_balanced_counts()
+  fit <- function(initial_state) {
+    # The simulated population is exactly at balance, so little spread
+    # around it is allowed and counts are read as fitness.
+    fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, birth_rate = 1, major_frequency = 0.05,
+                     max_cn = 4, initial_state = initial_state, history = sim$history, balance_sd = 0.3)
+  }
+  free <- fit("free")
+  balance <- fit("balance")
+  expect_equal(balance$diagnostics$initial_state, "balance")
+  expect_true(balance$diagnostics$finite_uncertainty)
+  rank_agreement <- function(fit) {
+    minor <- fit$summary[!fit$summary$major, ]
+    truth <- stats::setNames(sim$net, sim$labels)[minor$karyotype]
+    stats::cor(minor$fitness_mean, truth, method = "spearman")
+  }
+  expect_gt(rank_agreement(balance), 0.6)
+  expect_gt(rank_agreement(balance), rank_agreement(free) + 0.2)
+  expect_error(fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, initial_state = "balance", history = 0),
+               "history")
+})
+
+test_that("reported uncertainty of relative fitness adds model error to the model's own", {
+  sim <- simulate_sparse_joint_counts()
+  fit <- fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, birth_rate = 2, major_frequency = 0.05, max_cn = 4)
+  summary <- fit$summary
+  # relative to the count-weighted mean of the majors
+  weight <- ifelse(summary$major, summary$count_t0 + summary$count_t1, 0)
+  expect_equal(summary$relative_fitness, summary$fitness_mean - sum(weight * summary$fitness_mean) / sum(weight))
+  # without the uncertainty of the baseline, which all karyotypes share
+  expect_true(all(summary$relative_sd_model[summary$major] < summary$fitness_sd[summary$major]))
+  calibration <- sparse_joint_default_calibration
+  # Karyotypes seen at neither time point have a deficit of their own.
+  observed <- summary$count_t0 + summary$count_t1 > 0
+  expect_true(any(observed & !summary$major) && any(!observed))
+  deficit <- ifelse(observed, calibration[["deficit"]], calibration[["deficit_unobserved"]])
+  expect_equal(summary$relative_sd,
+               sqrt(summary$relative_sd_model^2 + (deficit * summary$relative_fitness)^2 +
+                      (calibration[["floor"]] * 2 * (1 + summary$shell))^2))
+  prediction <- predict(fit, c(summary$karyotype[5L], "2.2.3.3", "3.3.3.2"))
+  expect_equal(prediction$relative_sd[1L], summary$relative_sd[5L])
+  expect_true(all(prediction$relative_sd > prediction$relative_sd_model))
+  expect_equal(prediction$relative_sd[2:3],
+               sqrt(prediction$relative_sd_model[2:3]^2 +
+                      (calibration[["deficit_unobserved"]] * prediction$relative_fitness[2:3])^2 +
+                      (calibration[["floor"]] * 2 * 3)^2))
+  # Two constants, as up to alfak2 33a045c: one deficit for every karyotype;
+  # the fit itself is unchanged.
+  two <- fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, birth_rate = 2, major_frequency = 0.05, max_cn = 4,
+                          calibration = c(floor = 0.009, deficit = 0.6))
+  expect_equal(two$summary$relative_sd,
+               sqrt(summary$relative_sd_model^2 + (0.6 * summary$relative_fitness)^2 +
+                      (0.009 * 2 * (1 + summary$shell))^2))
+  expect_identical(two$summary$relative_fitness, summary$relative_fitness)
+  expect_identical(two$summary$relative_sd_model, summary$relative_sd_model)
+  expect_identical(two$summary$relative_sd[observed], summary$relative_sd[observed])
+  expect_true(all(two$summary$relative_sd[!observed] <= summary$relative_sd[!observed]))
+  expect_equal(predict(two, "2.2.3.3")$relative_sd,
+               sqrt(prediction$relative_sd_model[2L]^2 + (0.6 * prediction$relative_fitness[2L])^2 + (0.009 * 2 * 3)^2))
+  raw <- fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, birth_rate = 2, major_frequency = 0.05, max_cn = 4,
+                          calibration = NULL)
+  expect_equal(raw$summary$relative_sd, raw$summary$relative_sd_model)
+  expect_equal(raw$summary$relative_sd_model, summary$relative_sd_model)
+  expect_equal(predict(raw, "2.2.3.3")$relative_sd, prediction$relative_sd_model[2L])
+  expect_error(fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, calibration = c(floor = 1)), "calibration")
+  expect_error(fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta,
+                                calibration = c(floor = 1, deficit = 1, other = 1)), "calibration")
+})
+
+test_that("uncertainty is finite and no wider than the prior where the counts fit poorly", {
+  # A clone that was abundant and vanishes: no growth rate reproduces both
+  # counts well, and the observed Hessian is then not positive definite.
+  counts <- labelled_counts("2.2.2.2" = c(300, 5), "2.3.2.2" = c(200, 480), "2.2.1.2" = c(0, 15),
+                            "3.2.2.2" = c(40, 0), "2.2.2.3" = c(3, 0))
+  fit <- fit_sparse_joint(counts, dt = 300, beta = 5e-5, birth_rate = 1, major_frequency = 0.05, max_cn = 4)
+  expect_true(fit$diagnostics$finite_uncertainty)
+  expect_true(all(fit$summary$log_birth_sd > 0))
+  # the baseline has prior sd 0.05; no posterior sd of a major can exceed the scales by much
+  expect_lt(max(fit$summary$log_birth_sd[fit$summary$major]), 0.2)
+  expect_true(all(sqrt(diag(fit$trend$covariance)) <= 0.5 + 1e-8))
+})
+
+test_that("fit_alfak2 reaches the sparse joint model as a pipeline", {
+  sim <- simulate_sparse_joint_counts()
+  direct <- fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, major_frequency = 0.05, max_cn = 4)
+  through <- fit_alfak2(sim$counts, dt = sim$dt, beta = sim$beta, pipeline = "sparse_joint",
+                        sparse_joint_control = list(major_frequency = 0.05, max_cn = 4))
+  expect_s3_class(through, "alfak2_sparse_joint_fit")
+  expect_equal(through$summary, direct$summary)
+  expect_equal(summarize_alfak2(through), direct$summary)
+  expect_error(fit_alfak2(sim$counts, dt = sim$dt, pipeline = "sparse_joint", sparse_joint_control = list(4)),
+               "sparse_joint_control")
+  # It is the default, and arguments of the other pipelines are refused there.
+  by_default <- fit_alfak2(sim$counts, dt = sim$dt, beta = sim$beta,
+                           sparse_joint_control = list(major_frequency = 0.05, max_cn = 4))
+  expect_equal(by_default$summary, direct$summary)
+  expect_error(fit_alfak2(sim$counts, dt = sim$dt, beta = sim$beta, local_shell_depth = 1),
+               "local_shell_depth.*pipeline")
+})
+
+test_that("mutation-selection balance is the default initial state", {
+  sim <- simulate_sparse_joint_counts()
+  fit <- fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, major_frequency = 0.05, max_cn = 4)
+  expect_equal(fit$diagnostics$initial_state, "balance")
+  expect_equal(fit$settings$initial_state, "balance")
+})
+
+test_that("by default the history is chosen among the interval and longer division counts", {
+  expect_equal(sparse_joint_history_candidates(6, 1), c(6, 30, 100, 300, 1000, 3000))
+  expect_equal(sparse_joint_history_candidates(360, 1), c(360, 1000, 3000))
+  expect_equal(sparse_joint_history_candidates(360, 0.5), c(360, 600, 2000, 6000))
+  expect_equal(sparse_joint_history_candidates(7000, 1), 7000)
+  sim <- simulate_balanced_counts()
+  fit <- function(...) fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, major_frequency = 0.05,
+                                        max_cn = 4, balance_sd = 0.3, ...)
+  chosen <- fit()
+  profile <- chosen$diagnostics$history_profile
+  expect_equal(profile$history, sparse_joint_history_candidates(sim$dt, 1))
+  best <- sparse_joint_choose_candidate(profile$objective, profile$convergence)
+  expect_equal(chosen$settings$history, profile$history[[best]])
+  expect_equal(chosen$diagnostics$objective, profile$objective[[best]])
+  expect_equal(chosen$summary, fit(history = chosen$settings$history)$summary)
+  # The behaviour of alfak2 8327282 and earlier: the interval itself.
+  interval <- fit(history = sim$dt)
+  expect_null(interval$diagnostics$history_profile)
+  expect_equal(interval$settings$history, sim$dt)
+  expect_equal(fit(history = c(sim$dt, 500))$diagnostics$history_profile$history, c(sim$dt, 500))
+  expect_error(fit(history = c(sim$dt, 0)), "history")
+  # Without the balance prior there is nothing to choose.
+  expect_null(fit(initial_state = "free")$diagnostics$history_profile)
+  # The alfakR outputs are built from the chosen fit.
+  expect_true(is.finite(as_alfakR(chosen, minobs = 20, nboot = 4)$xval$R2R))
+})
+
+test_that("a timepoint with no cell next to a major karyotype stops with a typed error", {
+  # The second time point holds one clone; the first only single cells two or
+  # three steps from it, none of which can anchor the domain.
+  counts <- labelled_counts("2.2.2" = c(0, 20), "3.3.2" = c(1, 0), "1.1.2" = c(1, 0), "2.4.2" = c(1, 0),
+                            "4.2.3" = c(1, 0))
+  err <- tryCatch(fit_sparse_joint(counts, dt = 10, beta = 0.001), alfak2_domain_coverage_error = function(e) e)
+  expect_s3_class(err, "alfak2_domain_coverage_error")
+  expect_s3_class(err, "error")
+  expect_match(conditionMessage(err), "^A timepoint has no cell inside the model domain\\. ")
+  expect_match(conditionMessage(err), "Timepoint t0: none of its 4 cells lies within one step of a major karyotype; ",
+               fixed = TRUE)
+  expect_match(conditionMessage(err), "the only major comes from t1, the time points share no karyotype", fixed = TRUE)
+  expect_match(conditionMessage(err), "median distance to the nearest major is 2.", fixed = TRUE)
+  coverage <- err$coverage
+  expect_equal(coverage$timepoint, c("t0", "t1"))
+  expect_equal(coverage$cells, c(4, 20))
+  expect_equal(coverage$cells_in_domain, c(0, 20))
+  expect_equal(coverage$fraction, c(0, 1))
+  expect_equal(coverage$karyotypes, c(4, 1))
+  expect_equal(coverage$major_candidates, c(0, 1))
+  expect_equal(coverage$majors, c(0, 1))
+  expect_equal(coverage$shared, c(0, 0))
+  expect_equal(coverage$median_distance_outside, c(2, NA))
+  # The same with one history, and without the balance prior.
+  expect_error(fit_sparse_joint(counts, dt = 10, beta = 0.001, history = 10), class = "alfak2_domain_coverage_error")
+  expect_error(fit_sparse_joint(counts, dt = 10, beta = 0.001, initial_state = "free"),
+               class = "alfak2_domain_coverage_error")
+})
+
+test_that("a fit reports how many cells of each timepoint lie inside the domain", {
+  sim <- simulate_sparse_joint_counts()
+  # One distant karyotype is left out of the domain with its cells.
+  counts <- rbind(sim$counts, "4.4.4.4" = c(3, 0))
+  fit <- fit_sparse_joint(counts, dt = sim$dt, beta = sim$beta, major_frequency = 0.05, max_cn = 4,
+                          initial_state = "free")
+  coverage <- fit$diagnostics$domain_coverage
+  expect_equal(coverage$timepoint, c("t0", "t1"))
+  expect_equal(coverage$cells, unname(colSums(counts)))
+  expect_equal(coverage$cells_in_domain, c(sum(fit$summary$count_t0), sum(fit$summary$count_t1)))
+  expect_equal(coverage$fraction, coverage$cells_in_domain / coverage$cells)
+  expect_equal(sum(coverage$cells - coverage$cells_in_domain), fit$diagnostics$dropped_cells)
+  expect_equal(coverage$cells - coverage$cells_in_domain, c(3, 0))
+  expect_equal(coverage$majors, c(3, 3))
+  expect_equal(coverage$median_distance_outside[[1L]],
+               min(rowSums(abs(sweep(fit$trend$major, 2L, c(4, 4, 4, 4), "-")))))
+  expect_true(is.na(coverage$median_distance_outside[[2L]]))
+  expect_output(print(fit), "cells in the domain: t0 ")
+})
+
+test_that("counts are checked per time point before fitting", {
+  counts <- cbind(a = c(3, 1, 1, 0), b = c(0, 0, 2, 5), c = c(1, 1, 1, 0))
+  rownames(counts) <- c("2.2.2", "2.3.2", "4.4.2", "0.2.2")
+  check <- check_sparse_joint_counts(counts)
+  expect_equal(check$sample, c("a", "b", "c"))
+  expect_equal(check$cells, c(5, 7, 3))
+  expect_equal(check$karyotypes, c(3, 2, 3))
+  expect_equal(check$repeated_fraction, c(3 / 5, 5 / 7, 0))
+  # a: cells at distances 0, 0, 0, 1, 3; c: single cells at 1, 1, 3
+  expect_equal(check$nearest_distance, c(0, 0, 1))
+  expect_equal(check$nullisomy_fraction, c(0, 5 / 7, 0))
+  expect_equal(check$shared, c(3, 1, 3))
+  one <- check_sparse_joint_counts(counts[, "c", drop = FALSE])
+  expect_true(is.na(one$shared))
+  expect_equal(check_sparse_joint_counts(prepare_alfak2_data(counts[, c("a", "b")]))$cells, c(5, 7))
+  expect_error(check_sparse_joint_counts(counts - 2), "non-negative")
+})
+
+test_that("a free level of the balance prior and initial_state = \"auto\"", {
+  sim <- simulate_sparse_joint_counts()
+  args <- list(sim$counts, dt = sim$dt, beta = sim$beta, birth_rate = 1, major_frequency = 0.05, max_cn = 4,
+               history = sim$dt)
+  fixed <- do.call(fit_sparse_joint, args)
+  same <- do.call(fit_sparse_joint, c(args, list(balance_level = "fixed")))
+  expect_identical(fixed$diagnostics$objective, same$diagnostics$objective)
+  expect_null(fixed$diagnostics$balance_level)
+  free_level <- do.call(fit_sparse_joint, c(args, list(balance_level = "free")))
+  expect_true(is.finite(free_level$diagnostics$balance_level))
+  expect_gt(free_level$diagnostics$balance_level_sd, 0)
+  # The posterior can be rebuilt from the stored settings, as for any fit, and
+  # a fit stored before the level existed (no `balance_level` in its
+  # posterior) still rebuilds.
+  expect_silent(sparse_joint_rebuild(free_level, posterior = FALSE))
+  expect_null(fixed$posterior$balance_level)
+  expect_equal(sparse_joint_rebuild(fixed, posterior = FALSE)$g, fixed$posterior$g, tolerance = 1e-6)
+  # "auto": the level decides; with the threshold far above or below it, the
+  # fit is the balance or the free one.
+  auto_args <- args[names(args) != "history"]
+  high <- do.call(fit_sparse_joint, c(auto_args, list(initial_state = "auto", auto_level = 50)))
+  low <- do.call(fit_sparse_joint, c(auto_args, list(initial_state = "auto", auto_level = -50)))
+  expect_identical(high$diagnostics$initial_state_check$chosen, "balance")
+  expect_identical(low$diagnostics$initial_state_check$chosen, "free")
+  expect_identical(low$diagnostics$initial_state, "free")
+  balance <- do.call(fit_sparse_joint, c(auto_args, list(initial_state = "balance")))
+  expect_equal(high$summary$relative_fitness, balance$summary$relative_fitness)
+  # "balance" is the default; an "auto" fit says what it chose.
+  default <- do.call(fit_sparse_joint, auto_args)
+  expect_identical(default$diagnostics$initial_state, "balance")
+  expect_null(default$diagnostics$initial_state_check)
+  expect_equal(default$summary$relative_fitness, balance$summary$relative_fitness)
+  expect_output(print(high), "chosen by \"auto\"")
+  # With more than two time points "auto" is "balance".
+  three <- cbind(sim$counts, sim$counts[, 2L])
+  colnames(three) <- c("0", "1", "2")
+  auto3 <- fit_sparse_joint(three, times = c(0, sim$dt, 2 * sim$dt), initial_state = "auto", birth_rate = 1,
+                            major_frequency = 0.05, max_cn = 4, intermediate_weight = 1, history = sim$dt)
+  balance3 <- fit_sparse_joint(three, times = c(0, sim$dt, 2 * sim$dt), initial_state = "balance", birth_rate = 1,
+                               major_frequency = 0.05, max_cn = 4, intermediate_weight = 1, history = sim$dt)
+  expect_identical(auto3$diagnostics$initial_state, "balance")
+  expect_null(auto3$diagnostics$initial_state_check)
+  expect_equal(auto3$summary$relative_fitness, balance3$summary$relative_fitness)
+})

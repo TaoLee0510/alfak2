@@ -1,14 +1,15 @@
-new_alfak2_data <- function(counts, dt, beta, metadata = list()) {
-  structure(
-    list(
-      counts = counts,
-      labels = rownames(counts),
-      dt = dt,
-      beta = beta,
-      metadata = metadata
-    ),
-    class = "alfak2_data"
+# `times` (sampling times since the first) is stored for more than two
+# timepoints only, so that two-timepoint objects are as they always were.
+new_alfak2_data <- function(counts, dt, beta, metadata = list(), times = NULL) {
+  out <- list(
+    counts = counts,
+    labels = rownames(counts),
+    dt = dt,
+    beta = beta,
+    metadata = metadata
   )
+  if (!is.null(times)) out$times <- times
+  structure(out, class = "alfak2_data")
 }
 
 new_alfak2_graph <- function(x) {
@@ -18,6 +19,11 @@ new_alfak2_graph <- function(x) {
 
 new_alfak2_local_fit <- function(x) {
   class(x) <- "alfak2_local_fit"
+  x
+}
+
+new_alfak2_global_fit <- function(x) {
+  class(x) <- c("alfak2_global_fit", setdiff(class(x), "alfak2_global_fit"))
   x
 }
 
@@ -31,6 +37,7 @@ print.alfak2_data <- function(x, ...) {
   cat("<alfak2_data>\n")
   cat("  karyotypes:", nrow(x$counts), "\n")
   cat("  timepoints:", paste(colnames(x$counts), collapse = ", "), "\n")
+  if (!is.null(x$times)) cat("  times:", paste(format(x$times), collapse = ", "), "\n")
   cat("  dt:", x$dt, " beta:", x$beta, "\n")
   invisible(x)
 }

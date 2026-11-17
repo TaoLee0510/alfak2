@@ -132,7 +132,7 @@ grf_sample_counts <- function(population, size, overdispersion = 0) {
 #' @param overdispersion Dirichlet-multinomial concentration; `0` means
 #'   multinomial.
 #' @param initial_population Number of cells in the simulated population before
-#'   the first sample. Defaults to `5 * max(n0, n1)`.
+#'   the first time point. Defaults to `5 * max(n0, n1)`.
 #' @param initial_shell_depth Initial population support around the founder in
 #'   one-missegregation steps.
 #' @param time_step Internal ABM time step.
@@ -208,12 +208,15 @@ simulate_sparse_counts <- function(landscape,
       labels <- names(population)
       karyotypes <- coerce_grf_karyotypes(labels, landscape$n_chr)
       fitness <- predict_landscape_fitness(landscape, karyotypes)
+      if (any(!is.finite(fitness)) || any(fitness < 0)) {
+        stop("The division simulator requires finite non-negative birth rates; negative landscape fitness cannot be clipped into a different truth.", call. = FALSE)
+      }
       next_env <- grf_population_env(population)
 
       for (i in seq_along(labels)) {
         count <- as.integer(round(population[i]))
         if (count <= 0L) next
-        division_rate <- max(0, fitness[i])
+        division_rate <- fitness[i]
         divisions <- min(count, stats::rpois(1L, count * division_rate * step))
         if (divisions <= 0L) next
 

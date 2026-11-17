@@ -1,0 +1,193 @@
+test_that("neighbours follow alfakR's order and rules", {
+  # Chromosome by chromosome, one copy fewer then one more; no nullisomy.
+  expect_equal(alfakR_neighbours("2.1"), c("1.1", "3.1", "2.2"))
+  expect_equal(alfakR_neighbours(c("2.2", "2.3")), c("1.2", "3.2", "2.1", "1.3", "3.3", "2.4"))
+  expect_equal(alfakR_neighbours(character()), character())
+})
+
+test_that("a rebuilt posterior reproduces the fit", {
+  sim <- simulate_sparse_joint_counts()
+  fit <- fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, max_cn = 4)
+  mode <- sparse_joint_rebuild(fit, posterior = FALSE)
+  expect_equal(mode$g, fit$posterior$g, tolerance = 1e-6)
+  expect_equal(mode$zeta, fit$posterior$zeta, tolerance = 1e-6)
+  solver <- sparse_joint_rebuild(fit)$solver
+  expect_equal(sqrt(solver$variance(which(solver$names == "g"))), fit$summary$log_birth_sd, tolerance = 1e-6)
+  set.seed(4)
+  draws <- solver$draw(3000)
+  g <- which(solver$names == "g")[1:3]
+  expect_equal(apply(draws[g, ], 1L, stats::sd), fit$summary$log_birth_sd[1:3], tolerance = 0.06)
+})
+
+test_that("as_alfakR returns alfakR's objects for the model's posterior", {
+  sim <- simulate_sparse_joint_counts()
+  fit <- fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, max_cn = 4)
+  set.seed(3)
+  out <- as_alfakR(fit, minobs = 20, nboot = 7)
+  expect_s3_class(out, "alfak2_alfakR_output")
+  fq <- rownames(fit$data$counts)[rowSums(fit$data$counts) >= 20]
+  nn <- alfakR_neighbours(fq)
+
+  boot <- out$bootstrap_res
+  expect_named(boot, c("initial_fitness", "final_fitness", "initial_frequencies", "final_frequencies", "nn_fitness"))
+  expect_equal(dim(boot$final_fitness), c(7L, length(fq)))
+  expect_equal(colnames(boot$final_fitness), fq)
+  expect_null(rownames(boot$final_fitness))
+  expect_equal(colnames(boot$nn_fitness), nn)
+  expect_equal(boot$initial_fitness, boot$final_fitness)
+  expect_equal(unname(rowSums(boot$final_frequencies)), rep(1, 7))
+  expect_named(attr(boot, "bootstrap_retry_log"), c("target_replicate", "attempt", "error_message", "warning_message"))
+  expect_equal(attr(boot, "bootstrap_retry_summary")$successful_replicates, 7L)
+
+  land <- out$landscape
+  expect_named(land, c("k", "mean", "median", "sd", "fq", "nn"))
+  expect_equal(land$k, unique(c(fq, nn, alfakR_neighbours(nn))))
+  expect_equal(land$fq, land$k %in% fq)
+  expect_equal(land$nn, land$k %in% nn)
+  post <- out$landscape_posterior_samples
+  expect_equal(dim(post), c(nrow(land), 7L))
+  expect_null(dimnames(post))
+  # The landscape summarises the draws, as in alfakR, and is the model's
+  # prediction on alfakR's scale.
+  expect_equal(land$mean, rowMeans(post))
+  expect_equal(land$median, apply(post, 1L, stats::median))
+  expect_equal(land$sd, apply(post, 1L, stats::sd))
+  prediction <- predict(fit, land$k)
+  expect_equal(land$mean, prediction$relative_fitness + log(1e7 / 1e5) / sim$dt, tolerance = 1e-12)
+  expect_equal(land$sd, prediction$relative_sd, tolerance = 1e-12)
+  expect_equal(unname(t(boot$final_fitness)), post[match(fq, land$k), , drop = FALSE])
+  expect_equal(unname(t(boot$nn_fitness)), post[match(nn, land$k), , drop = FALSE])
+
+  xval <- out$xval
+  expect_named(xval, c("R2R", "predictions", "observations", "xval_data", "tmp"))
+  expect_length(xval$R2R, 1L)
+  expect_equal(colnames(xval$tmp), c("test_f", "est_f"))
+  expect_gt(nrow(xval$tmp), 1L)
+  expect_named(xval$xval_data, c("k", "observation", "prediction"))
+  expect_equal(xval$xval_data$k, rownames(xval$tmp))
+  expect_equal(unname(xval$observations), land$mean[match(rownames(xval$tmp), land$k)])
+  expect_true(all(rownames(xval$tmp) %in% fit$summary$karyotype))
+  centred <- function(v) v - mean(v)
+  expect_equal(xval$R2R, 1 - sum((centred(xval$predictions) - centred(xval$observations))^2) /
+                 sum(centred(xval$observations)^2))
+})
+
+test_that("as_alfakR keeps the model's level or reports birth rates on request", {
+  sim <- simulate_sparse_joint_counts()
+  fit <- fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, max_cn = 4)
+  own <- as_alfakR(fit, minobs = 20, nboot = 3, n0 = NULL, nb = NULL, xval = FALSE)
+  prediction <- predict(fit, own$landscape$k)
+  expect_equal(own$landscape$mean, prediction$relative_fitness + fit$trend$reference$fitness, tolerance = 1e-12)
+  expect_true(is.na(own$xval$R2R))
+  expect_equal(nrow(own$xval$tmp), 0L)
+  births <- as_alfakR(fit, minobs = 20, nboot = 3, correct_efflux = TRUE, xval = FALSE)
+  self <- 2 * sparse_joint_self_probability(parse_karyotypes(births$landscape$k), sim$beta) - 1
+  expect_equal(births$landscape$mean, (prediction$relative_fitness + log(100) / sim$dt) / self, tolerance = 1e-12)
+  single <- as_alfakR(fit, minobs = 20, nboot = 1, xval = FALSE)
+  expect_true(all(is.na(single$landscape$sd)))
+  expect_error(as_alfakR(fit, first_time = NA), "first_time")
+})
+
+test_that("as_alfakR reports frequencies at time 0 as alfakR does", {
+  sim <- simulate_sparse_joint_counts()
+  fit <- fit_sparse_joint(sim$counts, dt = sim$dt, beta = sim$beta, max_cn = 4)
+  set.seed(6)
+  at_first <- as_alfakR(fit, minobs = 20, nboot = 4, correct_efflux = TRUE, xval = FALSE)$bootstrap_res
+  set.seed(6)
+  shifted <- as_alfakR(fit, minobs = 20, nboot = 4, correct_efflux = TRUE, xval = FALSE, first_time = 40)$bootstrap_res
+  expect_equal(shifted$final_fitness, at_first$final_fitness)
+  # alfakR's projection to the first time point, x0 * exp(f * t), gives back the
+  # frequencies at the first time point.
+  projected <- shifted$final_frequencies * exp(shifted$final_fitness * 40)
+  expect_equal(projected / rowSums(projected), at_first$final_frequencies, tolerance = 1e-10)
+  expect_equal(shifted$initial_frequencies, shifted$final_frequencies)
+  expect_false(isTRUE(all.equal(shifted$final_frequencies, at_first$final_frequencies)))
+  # With the default, the frequencies are the model's at the first time point
+  # (a single draw is the posterior mode; karyotypes outside the domain keep
+  # their observed count).
+  one <- as_alfakR(fit, minobs = 20, nboot = 1, xval = FALSE)$bootstrap_res$final_frequencies
+  fq <- colnames(one)
+  inside <- match(fq, fit$summary$karyotype)
+  level <- log(pmax(fit$data$counts[fq, 1L], .Machine$double.xmin))
+  level[!is.na(inside)] <- fit$posterior$zeta[inside[!is.na(inside)]]
+  expect_equal(as.numeric(one), unname(exp(level - max(level)) / sum(exp(level - max(level)))), tolerance = 1e-12)
+  expect_error(as_alfakR(fit, minobs = 1e6), "no frequent karyotypes")
+  expect_error(as_alfakR(fit, n0 = 1e5, nb = NULL), "both")
+})
+
+test_that("alfak_compat() takes alfakR's input and writes its files", {
+  sim <- simulate_sparse_joint_counts()
+  x <- sim$counts
+  colnames(x) <- c("0", "1")
+  dir <- tempfile("alfak2_alfak_")
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  set.seed(5)
+  expect_invisible(r2r <- alfak_compat(list(x = x, dt = sim$dt), dir, minobs = 20, nboot = 5, pm = sim$beta,
+                                landscape_data_output = TRUE, max_cn = 4))
+  expect_setequal(list.files(dir), c("bootstrap_res.Rds", "landscape.Rds", "landscape_posterior_samples.Rds",
+                                     "xval.Rds", "landscape_data.Rds", "alfak2_fit.Rds"))
+  expect_identical(r2r, readRDS(file.path(dir, "xval.Rds"))$R2R)
+  landscape <- readRDS(file.path(dir, "landscape.Rds"))
+  models <- readRDS(file.path(dir, "landscape_data.Rds"))
+  expect_named(models, c("mean", "median"))
+  expect_equal(predict(models$mean, parse_karyotypes(landscape$k[1:4]))[, 1L], landscape$mean[1:4], tolerance = 1e-12)
+
+  # The time between the time points comes from the column names or passage times.
+  again <- tempfile("alfak2_alfak_")
+  on.exit(unlink(again, recursive = TRUE), add = TRUE)
+  bare <- x
+  colnames(bare) <- NULL
+  set.seed(5)
+  alfak_compat(list(x = bare), again, passage_times = c(10, 10 + sim$dt), minobs = 20, nboot = 5, pm = sim$beta,
+        max_cn = 4)
+  expect_equal(readRDS(file.path(again, "landscape.Rds")), landscape)
+  # The first time point, at time 10, moves the reported frequencies to time 0.
+  boot0 <- readRDS(file.path(dir, "bootstrap_res.Rds"))
+  boot10 <- readRDS(file.path(again, "bootstrap_res.Rds"))
+  projected <- boot10$final_frequencies * exp(boot10$final_fitness * 10)
+  expect_equal(projected / rowSums(projected), boot0$final_frequencies, tolerance = 1e-10)
+
+  expect_error(alfak_compat(list(x = x[, 1L, drop = FALSE], dt = 1), dir), "two or more time points")
+  expect_error(alfak_compat(list(x = bare), dir, passage_times = c(0, 10, 20)), "one finite time per time point")
+  expect_error(alfak_compat(list(x = x, dt = sim$dt), dir, nn_prior = "none"), "nn_prior")
+  expect_error(alfak_compat(list(x = x + 0.5, dt = sim$dt), dir), "non-integer")
+})
+
+test_that("as_alfakR() and alfak_compat() take fits of more than two time points", {
+  sim <- simulate_series_counts()
+  fit <- fit_sparse_joint(sim$counts, times = sim$times, beta = sim$beta, max_cn = 4)
+  set.seed(8)
+  out <- as_alfakR(fit, minobs = 20, nboot = 5)
+  fq <- rownames(fit$data$counts)[rowSums(fit$data$counts) >= 20]
+  nn <- alfakR_neighbours(fq)
+  expect_equal(colnames(out$bootstrap_res$final_fitness), fq)
+  expect_equal(out$landscape$k, unique(c(fq, nn, alfakR_neighbours(nn))))
+  expect_equal(unname(rowSums(out$bootstrap_res$final_frequencies)), rep(1, 5))
+  # alfakR's level: population growth over the first interval between time points.
+  prediction <- predict(fit, out$landscape$k)
+  expect_equal(out$landscape$mean, prediction$relative_fitness + log(1e7 / 1e5) / diff(sim$times)[[1L]],
+               tolerance = 1e-12)
+  expect_gt(nrow(out$xval$tmp), 1L)
+  expect_true(is.finite(out$xval$R2R))
+
+  # alfak_compat(): times from the column names, or passage times.
+  x <- sim$counts
+  colnames(x) <- as.character(sim$times / 20)
+  dir <- tempfile("alfak2_alfak_")
+  on.exit(unlink(dir, recursive = TRUE), add = TRUE)
+  set.seed(8)
+  alfak_compat(list(x = x, dt = 20), dir, minobs = 20, nboot = 5, pm = sim$beta, max_cn = 4)
+  expect_setequal(list.files(dir), c("bootstrap_res.Rds", "landscape.Rds", "landscape_posterior_samples.Rds",
+                                     "xval.Rds", "alfak2_fit.Rds"))
+  expect_equal(readRDS(file.path(dir, "landscape.Rds")), out$landscape)
+  expect_equal(readRDS(file.path(dir, "bootstrap_res.Rds")), out$bootstrap_res)
+  again <- tempfile("alfak2_alfak_")
+  on.exit(unlink(again, recursive = TRUE), add = TRUE)
+  set.seed(8)
+  bare <- sim$counts
+  colnames(bare) <- NULL
+  alfak_compat(list(x = bare), again, passage_times = sim$times + 5, minobs = 20, nboot = 5, pm = sim$beta,
+               max_cn = 4)
+  expect_equal(readRDS(file.path(again, "landscape.Rds")), out$landscape)
+  expect_error(alfak_compat(list(x = x[, c(2, 1, 3, 4)], dt = 20), dir), "after the one before")
+})
